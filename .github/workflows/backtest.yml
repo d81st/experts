@@ -3,7 +3,7 @@ name: Backtest MQL5
 on:
   push:
     paths:
-      - 'tester/**'
+      - 'tester/*.json'
       - '.github/workflows/backtest.yml'
   workflow_dispatch:
 
