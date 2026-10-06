@@ -1,0 +1,148 @@
+name: Backtest MQL5
+
+on:
+  push:
+    paths:
+      - 'tester/**'
+      - '.github/workflows/backtest.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  backtest:
+    runs-on: windows-latest
+    timeout-minutes: 240
+    env:
+      MT5_ROOT: C:\Program Files\MetaTrader 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install MetaTrader 5
+        shell: pwsh
+        run: |
+          $setup = "$env:RUNNER_TEMP\mt5setup.exe"
+          Invoke-WebRequest -Uri "https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe" -OutFile $setup
+          $p = Start-Process -FilePath $setup -ArgumentList "/auto" -PassThru
+          if (-not $p.WaitForExit(15 * 60 * 1000)) { Write-Host "Installer still running after 15 min, killing it" }
+          Get-Process mt5setup, terminal64 -ErrorAction SilentlyContinue | Stop-Process -Force
+          if (-not (Test-Path "$env:MT5_ROOT\terminal64.exe")) { throw "terminal64.exe not found" }
+
+      - name: Compile experts into terminal folder
+        shell: pwsh
+        run: |
+          $dst = "$env:MT5_ROOT\MQL5\Experts\experts"
+          New-Item -ItemType Directory -Force $dst | Out-Null
+          Copy-Item "$env:GITHUB_WORKSPACE\*.mq5" $dst
+          Copy-Item "$env:GITHUB_WORKSPACE\Include" $dst -Recurse -Force
+          foreach ($f in Get-ChildItem $dst -Filter *.mq5) {
+            $log = "$env:RUNNER_TEMP\$($f.BaseName).compile.log"
+            Start-Process -FilePath "$env:MT5_ROOT\metaeditor64.exe" -ArgumentList "/compile:`"$($f.FullName)`"", "/log:`"$log`"", "/inc:`"$env:MT5_ROOT\MQL5`"" -Wait
+            $text = Get-Content $log -Encoding Unicode -Raw
+            Write-Host "$($f.Name): $(($text -split "`n" | Select-String 'Result:') -join ' ')"
+          }
+          Get-ChildItem $dst -Filter *.ex5 | Format-Table Name, Length
+
+      - name: First login (terminal update and symbol sync)
+        shell: pwsh
+        env:
+          MT5_LOGIN: ${{ secrets.MT5_LOGIN }}
+          MT5_PASSWORD: ${{ secrets.MT5_PASSWORD }}
+          MT5_SERVER: ${{ secrets.MT5_SERVER }}
+        run: |
+          if (-not $env:MT5_LOGIN -or -not $env:MT5_PASSWORD -or -not $env:MT5_SERVER) { throw "MT5_LOGIN / MT5_PASSWORD / MT5_SERVER secrets are not set" }
+          $ini = "$env:RUNNER_TEMP\login.ini"
+          @("[Common]", "Login=$env:MT5_LOGIN", "Password=$env:MT5_PASSWORD", "Server=$env:MT5_SERVER",
+            "ProxyEnable=0", "NewsEnable=0") | Out-File $ini -Encoding Unicode
+          $t = Start-Process -FilePath "$env:MT5_ROOT\terminal64.exe" -ArgumentList "/portable", "/config:`"$ini`"" -PassThru
+          Start-Sleep -Seconds 150
+          Get-Process terminal64 -ErrorAction SilentlyContinue | Stop-Process -Force
+          Remove-Item $ini -Force
+          Start-Sleep -Seconds 5
+          Write-Host "--- terminal journal ---"
+          Get-ChildItem "$env:MT5_ROOT\logs" -Filter *.log -ErrorAction SilentlyContinue |
+            ForEach-Object { Get-Content $_.FullName -Encoding Unicode | Select-Object -Last 60 }
+
+      - name: Run Strategy Tester
+        shell: pwsh
+        env:
+          MT5_LOGIN: ${{ secrets.MT5_LOGIN }}
+          MT5_PASSWORD: ${{ secrets.MT5_PASSWORD }}
+          MT5_SERVER: ${{ secrets.MT5_SERVER }}
+        run: |
+          $cfg = Get-Content "$env:GITHUB_WORKSPACE\tester\liq-grab.json" -Raw | ConvertFrom-Json
+          $reports = "$env:MT5_ROOT\reports"
+          New-Item -ItemType Directory -Force $reports | Out-Null
+          $done = $false
+          foreach ($sym in $cfg.symbols) {
+            $name = "$($cfg.expert)_$($sym)_$($cfg.period)"
+            $ini = "$env:RUNNER_TEMP\tester.ini"
+            @("[Common]", "Login=$env:MT5_LOGIN", "Password=$env:MT5_PASSWORD", "Server=$env:MT5_SERVER",
+              "ProxyEnable=0", "NewsEnable=0",
+              "[Tester]",
+              "Expert=experts\$($cfg.expert).ex5",
+              "Symbol=$sym",
+              "Period=$($cfg.period)",
+              "Model=$($cfg.model)",
+              "ExecutionMode=$($cfg.delay)",
+              "Optimization=0",
+              "FromDate=$($cfg.from)",
+              "ToDate=$($cfg.to)",
+              "ForwardMode=0",
+              "Deposit=$($cfg.deposit)",
+              "Currency=$($cfg.currency)",
+              "Leverage=1:$($cfg.leverage)",
+              "Visual=0",
+              "Report=reports\$name",
+              "ReplaceReport=1",
+              "ShutdownTerminal=1") | Out-File $ini -Encoding Unicode
+            Write-Host "=== Testing $($cfg.expert) on $sym $($cfg.period) $($cfg.from)-$($cfg.to), model $($cfg.model) ==="
+            $t = Start-Process -FilePath "$env:MT5_ROOT\terminal64.exe" -ArgumentList "/portable", "/config:`"$ini`"" -PassThru
+            if (-not $t.WaitForExit(200 * 60 * 1000)) {
+              Write-Host "Tester did not finish in time, killing terminal"
+              Get-Process terminal64, metatester64 -ErrorAction SilentlyContinue | Stop-Process -Force
+            }
+            Remove-Item $ini -Force
+            $rep = Get-ChildItem $reports -Filter "$name*.htm*" -ErrorAction SilentlyContinue
+            if ($rep) { Write-Host "Report created: $($rep.Name -join ', ')"; $done = $true; break }
+            Write-Host "No report for $sym, trying next symbol"
+          }
+          Write-Host "--- tester journal (tail) ---"
+          Get-ChildItem "$env:MT5_ROOT\Tester\logs" -Filter *.log -ErrorAction SilentlyContinue |
+            ForEach-Object { Get-Content $_.FullName -Encoding Unicode | Select-Object -Last 80 }
+          if (-not $done) { throw "Strategy Tester produced no report" }
+
+      - name: Collect results
+        if: always()
+        shell: pwsh
+        run: |
+          $out = "$env:RUNNER_TEMP\results\run-$env:GITHUB_RUN_ID"
+          New-Item -ItemType Directory -Force "$out\logs" | Out-Null
+          Copy-Item "$env:GITHUB_WORKSPACE\tester\liq-grab.json" $out
+          Copy-Item "$env:MT5_ROOT\reports\*" $out -ErrorAction SilentlyContinue
+          Copy-Item "$env:MT5_ROOT\logs\*.log" "$out\logs" -ErrorAction SilentlyContinue
+          Get-ChildItem "$env:MT5_ROOT\Tester" -Recurse -Filter *.log -ErrorAction SilentlyContinue |
+            ForEach-Object { Copy-Item $_.FullName ("$out\logs\tester_" + $_.Directory.Parent.Name + "_" + $_.Name) }
+          Get-ChildItem $out -Recurse | Format-Table FullName, Length
+
+      - name: Publish results to tester-results branch
+        if: always()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $repo = "$env:RUNNER_TEMP\results-repo"
+          $url = "https://x-access-token:$env:GH_TOKEN@github.com/$env:GITHUB_REPOSITORY.git"
+          git clone --depth 1 --branch tester-results $url $repo 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            git init $repo
+            git -C $repo checkout -b tester-results
+            git -C $repo remote add origin $url
+          }
+          Copy-Item "$env:RUNNER_TEMP\results\*" $repo -Recurse -Force
+          git -C $repo config user.name "github-actions"
+          git -C $repo config user.email "github-actions@users.noreply.github.com"
+          git -C $repo add -A
+          git -C $repo commit -m "Backtest results for run $env:GITHUB_RUN_ID ($env:GITHUB_SHA)"
+          git -C $repo push origin tester-results
