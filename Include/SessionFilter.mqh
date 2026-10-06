@@ -177,10 +177,10 @@ enum ENUM_DST_MODE
 //|   londonStartSec, londonEndSec, UTC, диапазон [0, 86399]. Случай |
 //|   nyStartSec, nyEndSec          start == end трактуется как      |
 //|                                  пустая сессия.                  |
-//|   gmtOffsetSeconds            — ручное смещение сервер→UTC в    |
+//|   gmtOffsetSeconds            — ручное смещение сервер→UTC в     |
 //|                                  секундах, [-43200, 50400].      |
-//|   dstMode                     — режим обработки часового пояса. |
-//|   closeOnSessionExit          — флаг закрытия позиций при       |
+//|   dstMode                     — режим обработки часового пояса.  |
+//|   closeOnSessionExit          — флаг закрытия позиций при        |
 //|                                  Session_Exit_Event.             |
 //|   useBrokerSessionsAsFallback — опциональный broker-fallback для |
 //|                                  London/NewYork границ.          |
@@ -210,15 +210,15 @@ struct SelectedSessionsConfig
 //|                                                                  |
 //|   effectiveGmtOffsetSec     — текущее эффективное смещение       |
 //|                                сервер→UTC в секундах. DST_AUTO   |
-//|                                пересчитывает на каждом тике;    |
+//|                                пересчитывает на каждом тике;     |
 //|                                DST_MANUAL фиксирует в Init.      |
-//|   wasInsideOnPreviousTick   — edge-trigger состояние для        |
+//|   wasInsideOnPreviousTick   — edge-trigger состояние для         |
 //|                                Session_Exit_Event.               |
-//|   lastEvaluatedUtcSec       — последний оценённый utcNowSec,    |
+//|   lastEvaluatedUtcSec       — последний оценённый utcNowSec,     |
 //|                                для диагностики.                  |
-//|   lastEffectiveGmtOffsetSec — предыдущее значение offset, для   |
+//|   lastEffectiveGmtOffsetSec — предыдущее значение offset, для    |
 //|                                DST_AUTO change-detect.           |
-//|   timeGmtFallbackLogged     — антиспам-флаг для предупреждения  |
+//|   timeGmtFallbackLogged     — антиспам-флаг для предупреждения   |
 //|                                «TimeGMT=0 → DST_MANUAL».         |
 //+------------------------------------------------------------------+
 struct SelectedSessionsState
@@ -705,7 +705,7 @@ void SelectedSessions_ResetState(SelectedSessionsState &state)
 //|    - `DST_AUTO`: rounded `TimeTradeServer() − TimeGMT()` через   |
 //|      `SelectedSessions_RoundOffsetToQuarterHour`.                |
 //|      Если `TimeGMT() == 0` — fallback на `cfg.gmtOffsetSeconds`  |
-//|      без логирования; первое `SelectedSessionsIsInside`         |
+//|      без логирования; первое `SelectedSessionsIsInside`          |
 //|       отвечает за warning Print + установку                      |
 //|      `state.timeGmtFallbackLogged`.                              |
 //|    - `DST_MANUAL`: `state.effectiveGmtOffsetSec :=               |
@@ -845,7 +845,7 @@ bool SelectedSessionsInit(SelectedSessionsConfig &cfg,
 //|                                                                  |
 //| 2. Пересчёт `state.effectiveGmtOffsetSec` по `cfg.dstMode`:      |
 //|    - `DST_AUTO`:                                                 |
-//|        a) если `TimeGMT() == 0` (невалидное системное время) —  |
+//|        a) если `TimeGMT() == 0` (невалидное системное время) —   |
 //|           `state.effectiveGmtOffsetSec := cfg.gmtOffsetSeconds`; |
 //|           при `state.timeGmtFallbackLogged = false` — один       |
 //|           warning `Print` и `state.timeGmtFallbackLogged :=      |

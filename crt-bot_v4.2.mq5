@@ -1,5 +1,7 @@
 ﻿//+------------------------------------------------------------------+
-//|                       CRT_TradeBot.mq5                           |
+//|                                                 crt-bot_v4.2.mq5 |
+//|  CRT Trade Bot v4.2: TrueRB, InsideWick, ghostTrueRB,            |
+//|  ghostInsideWick | 3 режима входа | EMA/ADX фильтр               |
 //+------------------------------------------------------------------+
 #property strict
 #property description "CRT Trade Bot v4.2 | TrueRB, InsideWick, ghostTrueRB, ghostInsideWick | 3 режима входа | EMA/ADX фильтр"
@@ -98,8 +100,8 @@ input int  SessionWindowMinutes = 1;
 
 input group "── Selected Sessions Filter ──"
 // Опциональный фильтр выбора торговых сессий (Asian/London/NewYork) в
-// UTC-координатах. При UseSelectedSessions=false — полная rollback safety:
-// legacy путь Session Filter работает без изменений.
+// UTC-координатах. При UseSelectedSessions=false работает только
+// legacy Session Filter.
 input bool          UseSelectedSessions         = true; // Включить выбор сессий
 input bool          UseAsianSession             = false; // Торговать в Asian
 input bool          UseLondonSession            = true; // Торговать в London
@@ -192,7 +194,7 @@ TrendConfig  g_trend_cfg;
 TrendHandles g_trend_h;
 
 //+------------------------------------------------------------------+
-//| ДЕТЕКЦИЯ НОВОГО БАРА                                            |
+//| ДЕТЕКЦИЯ НОВОГО БАРА                                             |
 //+------------------------------------------------------------------+
 
 // note: TrendIsAllowed возвращает чистое bool и не логирует отказы —
@@ -218,7 +220,7 @@ bool IsNewBar()
 }
 
 //+------------------------------------------------------------------+
-//| УПРАВЛЕНИЕ ЛИМИТНЫМИ ОРДЕРАМИ                                   |
+//| УПРАВЛЕНИЕ ЛИМИТНЫМИ ОРДЕРАМИ                                    |
 //+------------------------------------------------------------------+
 
 void CancelLimitOrder()
@@ -309,7 +311,7 @@ void OpenCRTTrade(ENUM_ORDER_TYPE orderType, double entry, double sl, double tp,
       PrintFormat("⚠️ SL→min: %.5f | TP→RR=%.2f: %.5f", sl, rr_old, tp);
    }
 
-   // margin-based сайзинг (champion crt-bot)
+   // margin-based сайзинг
    const double lot = BrokerCalcLot(g_broker, RiskPercent, /*slPoints*/ 0.0, LOT_BY_MARGIN);
 
    const string dir = (orderType == ORDER_TYPE_BUY) ? "BUY" : "SELL";
@@ -457,7 +459,7 @@ void ManageTrailing()
 }
 
 //+------------------------------------------------------------------+
-//| ТРЕЙЛИНГ — синхронный блок SL/TP                                |
+//| ТРЕЙЛИНГ — синхронный блок SL/TP                                 |
 //+------------------------------------------------------------------+
 
 // Удалить осиротевшие записи (тикет закрыт или не принадлежит боту).
@@ -478,8 +480,8 @@ void GcSyncState()
 }
 
 //+------------------------------------------------------------------+
-//| Найти/создать состояние SyncTrail по тикету. Возвращает индекс  |
-//| в g_sync_states[]. Поля initialSL/openPrice/dir фиксируются     |
+//| Найти/создать состояние SyncTrail по тикету. Возвращает индекс   |
+//| в g_sync_states[]. Поля initialSL/openPrice/dir фиксируются      |
 //| только при создании (block invariants).                          |
 //+------------------------------------------------------------------+
 int FindOrCreateState(const ulong  ticket,
@@ -620,7 +622,7 @@ void ManageSyncTrailing()
 }
 
 //+------------------------------------------------------------------+
-//| РАСЧЁТ ТОЧКИ ВХОДА                                              |
+//| РАСЧЁТ ТОЧКИ ВХОДА                                               |
 //+------------------------------------------------------------------+
 
 double CalcEntryPrice(const MqlRates &imb, const MqlRates &doji,
@@ -644,7 +646,7 @@ double CalcEntryPrice(const MqlRates &imb, const MqlRates &doji,
 }
 
 //+------------------------------------------------------------------+
-//| РАСЧЁТ SL И TP                                                  |
+//| РАСЧЁТ SL И TP                                                   |
 //+------------------------------------------------------------------+
 
 void CalcCRTLevels(const MqlRates &imb, const MqlRates &doji,
@@ -705,7 +707,7 @@ void CalcCRTLevels(const MqlRates &imb, const MqlRates &doji,
 }
 
 //+------------------------------------------------------------------+
-//| УСТАНОВКА СИГНАЛА И ВЫБОР РЕЖИМА ВХОДА                          |
+//| УСТАНОВКА СИГНАЛА И ВЫБОР РЕЖИМА ВХОДА                           |
 //+------------------------------------------------------------------+
 
 void ProcessCRTSignal(const MqlRates &imb, const MqlRates &doji,
@@ -766,7 +768,7 @@ void ProcessCRTSignal(const MqlRates &imb, const MqlRates &doji,
 }
 
 //+------------------------------------------------------------------+
-//| ТИКОВАЯ ПРОВЕРКА ВХОДА ПО АКТИВНОМУ СИГНАЛУ                    |
+//| ТИКОВАЯ ПРОВЕРКА ВХОДА ПО АКТИВНОМУ СИГНАЛУ                      |
 //+------------------------------------------------------------------+
 
 void CheckPendingEntry()
@@ -881,7 +883,7 @@ void CheckPendingEntry()
 }
 
 //+------------------------------------------------------------------+
-//| ОСНОВНАЯ ПРОВЕРКА CRT (баровая)                                 |
+//| ОСНОВНАЯ ПРОВЕРКА CRT (баровая)                                  |
 //+------------------------------------------------------------------+
 
 void CheckCRTEntry()

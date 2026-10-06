@@ -1,4 +1,9 @@
-﻿#property strict
+﻿//+------------------------------------------------------------------+
+//|                                                liq-grab_v2.1.mq5 |
+//|  Liquidity Grab v2.1: вход после снятия ликвидности              |
+//|  по тренду | сессионный фильтр | трейлинг                        |
+//+------------------------------------------------------------------+
+#property strict
 #include <Trade\Trade.mqh>
 #include "Include/TradeAdapter.mqh"
 #include "Include/BrokerAdapter.mqh"
@@ -32,10 +37,8 @@ input int MinStreak = 3;
 input int SignalCandleShift = 0;
 
 input group "── Трейлинг ──"
-// Унифицированный TrailingDispatcher (OFF / BREAKEVEN / SYNC). Старый step-based
-// трейлинг v2.1 удалён намеренно (не входит в champion). Default = BREAKEVEN
-// (чтобы пользователи v2.1 с UseTrailing=true получили хоть какую-то форму
-// трейлинга). SYNC сейчас задокументированный no-op до экспорта SyncTrailManage.
+// Унифицированный TrailingDispatcher (OFF / BREAKEVEN / SYNC). Default = BREAKEVEN.
+// SYNC сейчас задокументированный no-op до экспорта SyncTrailManage.
 input ENUM_TRAILING_MODE_EX TrailingMode          = TRAILING_BREAKEVEN_EX; // Режим трейлинга
 input double                TrailingStartFactor   = 0.5;   // Множитель активации (profitPts >= factor * slDistPts)
 input double                BreakevenOffsetPoints = 175;   // Оффсет для BREAKEVEN (пункты)
@@ -51,8 +54,8 @@ input int  SessionWindowMinutes = 5;     // Окно блокировки вок
 
 input group "── Selected Sessions Filter ──"
 // Опциональный фильтр выбора торговых сессий (Asian/London/NewYork) в
-// UTC-координатах. При UseSelectedSessions=false — полная rollback safety:
-// legacy путь Session Filter работает без изменений.
+// UTC-координатах. При UseSelectedSessions=false работает только
+// legacy Session Filter.
 input bool          UseSelectedSessions         = true; // Включить выбор сессий
 input bool          UseAsianSession             = false; // Торговать в Asian
 input bool          UseLondonSession            = true; // Торговать в London
@@ -80,8 +83,8 @@ input bool          CloseOnSessionExit          = true; // Закрывать п
 input bool          UseBrokerSessionsAsFallback = false; // Брокерские сессии как fallback
 
 input group "Trend Filter (opt-in)"
-// liq-grab исторически без тренд-фильтра. Подключён как opt-in
-// (UseTrendFilter=false по умолчанию → TrendIsAllowed всегда true, нулевая регрессия).
+// Тренд-фильтр opt-in: при UseTrendFilter=false (по умолчанию)
+// TrendIsAllowed всегда возвращает true.
 input bool            UseTrendFilter  = false;        // Включить тренд-фильтр
 input ENUM_TIMEFRAMES TrendTimeframe  = PERIOD_M15;   // HTF для EMA/ADX
 input int             TrendFastEMA    = 50;           // Период быстрой EMA
@@ -93,17 +96,16 @@ input double          ADXMin          = 20.0;         // Минимум ADX дл
 //==========================================================================
 // GLOBALS
 //==========================================================================
-// SessionFilter использует TimeCurrent() (исходный локальный код брал
-// TimeTradeServer). В live разница в пределах секунды; в Strategy Tester
-// модуль детерминирован. Диагностический Print в OnInit сохраняет
-// TimeTradeServer() для совместимости с прежним лог-форматом.
+// SessionFilter использует TimeCurrent(). В live разница с TimeTradeServer()
+// в пределах секунды; в Strategy Tester модуль детерминирован.
+// Диагностический Print в OnInit выводит TimeTradeServer().
 SessionConfig g_session_cfg;
 SessionState  g_session_state;
 
 // Selected sessions filter. state хранит
 // effectiveGmtOffsetSec, edge-trigger wasInsideOnPreviousTick и DST-кэш;
 // cfg заполняется из input-параметров в OnInit. При UseSelectedSessions=false
-// модуль не вызывается из OnTick — полная rollback safety.
+// модуль не вызывается из OnTick.
 SelectedSessionsConfig g_selected_cfg;
 SelectedSessionsState  g_selected_state;
 
@@ -114,7 +116,7 @@ BrokerContext g_broker;
 TrendConfig  g_trend_cfg;
 TrendHandles g_trend_h;
 
-// TradeAdapter + TrailingConfig для нового диспетчера. Заменяет удалённую ManageStopLoss().
+// TradeAdapter + TrailingConfig для TrailingDispatcher.
 ITradeAdapter *g_trade_adapter = NULL;
 TrailingConfig g_trail_cfg;
 
@@ -168,7 +170,7 @@ int OnInit()
    BrokerInit(g_broker);
    trade.SetTypeFilling(g_broker.fillType);
 
-   // TradeAdapter + TrailingConfig для нового диспетчера.
+   // TradeAdapter + TrailingConfig для TrailingDispatcher.
    g_trade_adapter = new RealTradeAdapter(GetPointer(trade));
    if(g_trade_adapter == NULL)
      {
@@ -278,7 +280,7 @@ int OnInit()
                   EnumToString(TrendTimeframe), TrendFastEMA, TrendSlowEMA,
                   UseADXFilter ? "ON" : "OFF", ADXPeriod, ADXMin);
    else
-      Print("📈 TrendFilter: OFF (opt-in disabled — нулевая регрессия)");
+      Print("📈 TrendFilter: OFF");
 
    PrintFormat("✅ LiqGrab | Magic: %d | TF: %s | FillType: %s",
                MagicNumber, EnumToString(TradingTimeframe), EnumToString(g_broker.fillType));
@@ -315,7 +317,7 @@ void OpenTrade(ENUM_ORDER_TYPE orderType, double slPoints, double rrRatio)
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    double price = (orderType == ORDER_TYPE_BUY) ? ask : bid;
 
-   // Подъём SL до мин. дистанции тянет за собой tpPoints через RR — поведение v2.1 сохранено.
+   // Подъём SL до мин. дистанции тянет за собой tpPoints через RR.
    // TradeExecutorSend повторно вызовет BrokerEnforceMinSLDist (идемпотентно).
    const double sl_dist_pre  = slPoints * g_broker.adjustedPoint;
    double       sl_tentative = (orderType == ORDER_TYPE_BUY) ? (price - sl_dist_pre)
@@ -434,7 +436,7 @@ void CheckEntrySignals()
    last_entry_bar = rates[0].time;
 
    // TrendFilter применяется ДО открытия сделки. При UseTrendFilter=false
-   // TrendIsAllowed → true (нулевая регрессия).
+   // TrendIsAllowed → true.
    const int dirFromOrderType = (order_type == ORDER_TYPE_BUY) ? 1 : -1;
    if(!TrendIsAllowed(g_trend_cfg, g_trend_h, dirFromOrderType))
    {
@@ -479,7 +481,7 @@ void CheckExitConditions() { /* заглушка */ }
 //| Вызывается из OnTick prelude ровно один раз на                   |
 //| Session_Exit_Event при `CloseOnSessionExit = true`. liq-grab не  |
 //| держит явного EA-pending state (ни g_pending, ни g_pattern_*) —  |
-//| только делегат к PositionGuard + диагностический Print            |
+//| только делегат к PositionGuard + диагностический Print           |
 //| (anti-spam: вызывающий код гарантирует ровно один                |
 //| вызов через edge-trigger `wasInsideOnPreviousTick`).             |
 //|                                                                  |

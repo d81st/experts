@@ -1,13 +1,11 @@
 //+------------------------------------------------------------------+
-//|                                                PositionGuard.mqh  |
+//|                                                PositionGuard.mqh |
 //|                                                                  |
 //|  Безопасные операции над позициями и pending-ордерами текущего   |
 //|  символа и магического номера.                                   |
 //|                                                                  |
-//|  Champion: crt-bot — `PendingOrderStillExists(ulong ticket)` с   |
-//|  явным тикетом. Модуль не читает глобалов EA — ticket передаётся |
-//|  параметром. Engulfing после миграции передаёт свой              |
-//|  g_pending_ticket явно при каждом вызове.                        |
+//|  Модуль не читает глобалов EA — ticket pending-ордера            |
+//|  передаётся параметром явно при каждом вызове.                   |
 //+------------------------------------------------------------------+
 #ifndef POSITIONGUARD_MQH
 #define POSITIONGUARD_MQH
@@ -68,7 +66,7 @@ int PositionGuardCloseAll(CTrade     &tr,
 //    Не вызывает `trade.*`, не модифицирует глобальные переменные
 //    вызывающего EA и не изменяет торговое состояние терминала.
 //    Тикет всегда передаётся явно — модуль не читает глобальных
-//    ticket-флагов EA (champion: crt-bot, §10.7).
+//    ticket-флагов EA.
 bool PositionGuardPendingExists(const ulong ticket);
 
 //--- Отмена всех pending-ордеров нашего символа и magic.
@@ -187,7 +185,7 @@ bool PositionGuardPendingExists(const ulong ticket)
 //| Обход OrdersTotal() от total-1 к 0 (tr.OrderDelete сдвигает      |
 //| индексы; обратный порядок безопасен). OrderGetTicket(i) выбирает |
 //| ордер для последующих OrderGetString/OrderGetInteger без         |
-//| отдельного OrderSelect.                                           |
+//| отдельного OrderSelect.                                          |
 //|                                                                  |
 //| Cross-magic guard: tr.OrderDelete только при двойном             |
 //| совпадении _Symbol + magic. Early-exit при magic<=0. Отказ       |

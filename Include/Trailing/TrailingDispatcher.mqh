@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
-//|                                          TrailingDispatcher.mqh  |
+//|                                           TrailingDispatcher.mqh |
 //|                                                                  |
-//|  Trailing mode dispatcher — единая точка вызова трейлинга:        |
+//|  Trailing mode dispatcher — единая точка вызова трейлинга:       |
 //|  switch по `ENUM_TRAILING_MODE_EX` между OFF / BREAKEVEN / SYNC. |
 //|                                                                  |
 //|  Объявляет ENUM_TRAILING_MODE_EX, TrailingConfig и прототип      |
@@ -22,7 +22,7 @@
 #include "BreakevenTrail.mqh"
 
 //+------------------------------------------------------------------+
-//| ENUM_TRAILING_MODE_EX — расширенный режим трейлинга.              |
+//| ENUM_TRAILING_MODE_EX — расширенный режим трейлинга.             |
 //|                                                                  |
 //| `_EX`-суффикс намеренно отличается от ENUM_TRAILING_MODE в       |
 //| SyncTrail.mqh для избежания конфликта при одновременном include. |
@@ -43,7 +43,7 @@ enum ENUM_TRAILING_MODE_EX
 //+------------------------------------------------------------------+
 //| TrailingConfig — параметры трейлинга. Заполняется в OnInit EA из |
 //| input-переменных, далее передаётся неизменно. Диспетчер cfg не   |
-//| модифицирует.                                                     |
+//| модифицирует.                                                    |
 //|                                                                  |
 //|   mode            — выбранный режим                              |
 //|   startFactor     — порог активации: profitPts >= startFactor *  |
@@ -61,10 +61,10 @@ struct TrailingConfig
   };
 
 //+------------------------------------------------------------------+
-//| TrailingManage — диспетчер режимов трейлинга.                     |
+//| TrailingManage — диспетчер режимов трейлинга.                    |
 //|                                                                  |
-//|   adapter — ITradeAdapter (production RealTradeAdapter, тесты —  |
-//|             mock). При NULL диспетчер выполняет no-op.           |
+//|   adapter — ITradeAdapter (RealTradeAdapter). При NULL           |
+//|             диспетчер выполняет no-op.                           |
 //|   broker  — заполненный BrokerContext (adjustedPoint /           |
 //|             minBrokerDistance используются в подмодулях).        |
 //|   magic   — POSITION_MAGIC фильтр. При magic <= 0 — no-op.       |

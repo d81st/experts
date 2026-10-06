@@ -19,8 +19,6 @@
 //|  не объявляются. Глобальное состояние на уровне модуля           |
 //|  отсутствует — все хэндлы держит вызывающая сторона в            |
 //|  TrendHandles.                                                   |
-//|                                                                  |
-//|  Тела функций реализуются в задачах 8.2 и 8.3 этой же спеки.     |
 //+------------------------------------------------------------------+
 #ifndef TRENDFILTER_MQH
 #define TRENDFILTER_MQH
@@ -78,7 +76,7 @@ struct TrendHandles
   };
 
 //+------------------------------------------------------------------+
-//| Публичный интерфейс TrendFilter (Module 3).                      |
+//| Публичный интерфейс TrendFilter.                                 |
 //+------------------------------------------------------------------+
 
 //+------------------------------------------------------------------+
@@ -87,7 +85,7 @@ struct TrendHandles
 //|  Возвращает true, если все требуемые по cfg хэндлы успешно       |
 //|  созданы и доступны для CopyBuffer.                              |
 //|  Возвращает false при нарушении границ параметров                |
-//|  (fastEMA/slowEMA/adxPeriod/adxMin/timeframe), при                |
+//|  (fastEMA/slowEMA/adxPeriod/adxMin/timeframe), при               |
 //|  fastEMA >= slowEMA или при отказе iMA/iADX; в этом случае все   |
 //|  частично созданные валидные хэндлы освобождаются через          |
 //|  IndicatorRelease, а соответствующие поля h устанавливаются в    |
@@ -95,8 +93,6 @@ struct TrendHandles
 //|                                                                  |
 //|  Поля h, не требуемые по cfg (useTrend=false / useADX=false),    |
 //|  устанавливаются в INVALID_HANDLE.                               |
-//|                                                                  |
-//|  Тело реализуется в задаче 8.2.                                  |
 //+------------------------------------------------------------------+
 bool   TrendInit(const TrendConfig &cfg, TrendHandles &h);
 
@@ -108,8 +104,6 @@ bool   TrendInit(const TrendConfig &cfg, TrendHandles &h);
 //|  INVALID_HANDLE до возврата. Повторный                           |
 //|  вызов с уже очищенным h безопасен: IndicatorRelease не          |
 //|  вызывается, _LastError не модифицируется.                       |
-//|                                                                  |
-//|  Тело реализуется в задаче 8.2.                                  |
 //+------------------------------------------------------------------+
 void   TrendDeinit(TrendHandles &h);
 
@@ -131,8 +125,6 @@ void   TrendDeinit(TrendHandles &h);
 //|  cfg и h НЕ модифицируются. При сбое                             |
 //|  CopyBuffer для любого требуемого индикатора возвращает false    |
 //|  без модификации cfg и h.                                        |
-//|                                                                  |
-//|  Тело реализуется в задаче 8.3.                                  |
 //+------------------------------------------------------------------+
 bool   TrendIsAllowed(const TrendConfig &cfg, const TrendHandles &h, const int dir);
 
@@ -161,19 +153,14 @@ bool   TrendIsAllowed(const TrendConfig &cfg, const TrendHandles &h, const int d
 //|  CopyBuffer (< 1) возвращает 0.0 как sentinel-значение —         |
 //|  TrendIsAllowed обязан отдельно проверять статус CopyBuffer и    |
 //|  возвращать false при сбое.                                      |
-//|                                                                  |
-//|  Тело реализуется в задаче 8.2.                                  |
 //+------------------------------------------------------------------+
 double TrendFilter_GetBufferValue(const int handle, const int buffer, const int shift);
 
 //+------------------------------------------------------------------+
 //| Implementations                                                  |
 //|                                                                  |
-//|  Тела TrendInit / TrendDeinit и приватного хелпера               |
-//|  TrendFilter_GetBufferValue. Реализация задачи 8.2 спеки         |
-//|  ea-modular-architecture.                                        |
-//|                                                                  |
-//|  TrendIsAllowed реализуется отдельно в задаче 8.3.               |
+//|  Тела TrendInit / TrendDeinit, TrendIsAllowed и приватного       |
+//|  хелпера TrendFilter_GetBufferValue.                             |
 //+------------------------------------------------------------------+
 
 //+------------------------------------------------------------------+
@@ -299,16 +286,16 @@ void TrendDeinit(TrendHandles &h)
 //+------------------------------------------------------------------+
 //| TrendIsAllowed — разрешает ли фильтр вход в направлении dir.     |
 //|                                                                  |
-//|  Контракт (см. блочный комментарий к прототипу выше):             |
+//|  Контракт (см. блочный комментарий к прототипу выше):            |
 //|   - dir вне {+1,-1} → false без модификаций cfg/h.               |
 //|   - useTrend=false и useADX=false → true.                        |
 //|   - useTrend=true: fast/slow EMA читаются с shift=1; для BUY     |
 //|     требуется fastEMA[1] > slowEMA[1], для SELL — обратно.       |
 //|   - useADX=true: ADX/+DI/-DI читаются с shift=1; ADX[1] должен   |
-//|     быть >= cfg.adxMin, и +DI[1] > -DI[1] (BUY) или -DI[1] >    |
+//|     быть >= cfg.adxMin, и +DI[1] > -DI[1] (BUY) или -DI[1] >     |
 //|     +DI[1] (SELL). Работает независимо от useTrend.              |
 //|                                                                  |
-//|  Сбой CopyBuffer (< 1) по любому требуемому индикатору сразу    |
+//|  Сбой CopyBuffer (< 1) по любому требуемому индикатору сразу     |
 //|  возвращает false без модификаций cfg/h. Здесь                   |
 //|  используется CopyBuffer напрямую, а не                          |
 //|  TrendFilter_GetBufferValue: его sentinel 0.0 неотличим от       |
@@ -362,8 +349,6 @@ bool TrendIsAllowed(const TrendConfig &cfg, const TrendHandles &h, const int dir
          return false;
 
       // iADX buffer layout: 0 = ADX, 1 = +DI, 2 = -DI
-      // (подтверждено reference-имплементацией в engulfing-bot_v2.1.mq5 /
-      //  crt-bot_v4.2.mq5).
       double adxBuf    [1];
       double plusDiBuf [1];
       double minusDiBuf[1];

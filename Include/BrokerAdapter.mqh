@@ -1,20 +1,18 @@
 //+------------------------------------------------------------------+
-//|                                              BrokerAdapter.mqh   |
+//|                                                BrokerAdapter.mqh |
 //|                                                                  |
 //|  Модуль брокерских особенностей: fill type, adjustedPoint,       |
 //|  размер лота, минимальная брокерская дистанция, нормализация.    |
-//|                                                                  |
 //+------------------------------------------------------------------+
 //
-// Champion summary:
-//   - Lot sizing: ОБЕ стратегии сохраняются через ENUM_LOT_STRATEGY.
-//     LOT_BY_TICK_VALUE (эталон liq-grab/engulfing) — точнее по риску;
-//     LOT_BY_MARGIN (эталон crt-bot) — лот не зависит от SL.
-//   - Min-SL-distance: champion = engulfing-формула, рефайн — TP не
-//     модифицируется модулем (ответственность caller'а).
-//   - crt-bot caller-side TP recalc (champion §10.4): при подтяжке SL
-//     к min_dist TP пересчитывается с сохранением implicit-RR старого TP.
-//     v4.2 оставлял TP неизменным — сознательный апгрейд качества.
+// Кратко:
+//   - Lot sizing: две стратегии через ENUM_LOT_STRATEGY.
+//     LOT_BY_TICK_VALUE (liq-grab, engulfing) — точнее по риску;
+//     LOT_BY_MARGIN (crt-bot) — лот не зависит от SL.
+//   - Min-SL-distance: TP модулем не модифицируется
+//     (ответственность caller'а).
+//   - crt-bot caller-side TP recalc: при подтяжке SL к min_dist TP
+//     пересчитывается с сохранением implicit-RR старого TP.
 //
 
 #ifndef BROKERADAPTER_MQH
@@ -51,17 +49,16 @@ struct BrokerContext
 //+------------------------------------------------------------------+
 //| ENUM_LOT_STRATEGY — стратегия расчёта объёма в `BrokerCalcLot`.  |
 //|                                                                  |
-//| Обе стратегии сохраняются по результату champion-анализа         |
-//| (см. шапку этого файла, раздел «Lot sizing»).                    |
+//| См. шапку этого файла, раздел «Lot sizing».                      |
 //|                                                                  |
 //|   LOT_BY_TICK_VALUE — «SL-аккуратный» сайзинг: лот обратно       |
 //|                       пропорционален SL-дистанции, реальный      |
 //|                       риск-в-деньгах ≈ riskPercent от баланса    |
 //|                       вне зависимости от SL.                     |
-//|                       Эталон: liq-grab / engulfing.              |
+//|                       Используется в liq-grab / engulfing.       |
 //|   LOT_BY_MARGIN     — margin-сайзинг: лот не зависит от SL,      |
 //|                       рассчитывается из `OrderCalcMargin`.       |
-//|                       Эталон: crt-bot.                           |
+//|                       Используется в crt-bot.                    |
 //+------------------------------------------------------------------+
 enum ENUM_LOT_STRATEGY
   {
@@ -73,7 +70,7 @@ enum ENUM_LOT_STRATEGY
 //| Публичный интерфейс (прототипы).                                 |
 //|                                                                  |
 //| Все функции — детерминированные относительно входов и состояния  |
-//| `_Symbol` / `AccountInfo*`. Модуль НЕ объявляет `input`-          |
+//| `_Symbol` / `AccountInfo*`. Модуль НЕ объявляет `input`-         |
 //| переменных и НЕ держит глобального состояния. Конфигурация и     |
 //| состояние передаются через `BrokerContext`.                      |
 //+------------------------------------------------------------------+
@@ -119,7 +116,7 @@ double BrokerCalcLot(const BrokerContext     &ctx,
                      const double             slPoints,
                      const ENUM_LOT_STRATEGY  strategy);
 
-//--- Принуждение минимальной SL-дистанции (champion из §10.4).
+//--- Принуждение минимальной SL-дистанции.
 //    Если |entry - sl| < ctx.minBrokerDistance — модифицирует
 //    `sl` так, что |entry - sl| == ctx.minBrokerDistance, сохраняя
 //    направление SL относительно `entry` для типа `orderType`
@@ -128,15 +125,14 @@ double BrokerCalcLot(const BrokerContext     &ctx,
 //    без изменений.
 //    TP не модифицируется: пересчёт TP — ответственность caller'а
 //    по EA-специфичной формуле (RR или абсолют от паттерна),
-//    см. шапку этого файла, раздел «Champion-driven рефайнинг для
-//    crt-bot».
+//    см. BrokerEnforceMinSLDist ниже.
 void BrokerEnforceMinSLDist(const BrokerContext   &ctx,
                             const ENUM_ORDER_TYPE  orderType,
                             const double           entry,
                             double                &sl);
 
 //+------------------------------------------------------------------+
-//| Реализации.                                                       |
+//| Реализации.                                                      |
 //+------------------------------------------------------------------+
 
 //+------------------------------------------------------------------+
@@ -199,13 +195,13 @@ void BrokerInit(BrokerContext &ctx)
 //+------------------------------------------------------------------+
 //| BrokerCalcLot                                                    |
 //|                                                                  |
-//| LOT_BY_TICK_VALUE (champion: liq-grab/engulfing):                |
+//| LOT_BY_TICK_VALUE (liq-grab, engulfing):                         |
 //|   moneyPerLot = (slPoints * adjustedPoint / tickSize) * tickValue|
 //|   lot = riskMoney / moneyPerLot                                  |
 //|   Защита: slPoints<=0 / tickValue==0 / tickSize==0               |
 //|   → volMin без вызова OrderCalcMargin.                           |
 //|                                                                  |
-//| LOT_BY_MARGIN (champion: crt-bot):                               |
+//| LOT_BY_MARGIN (crt-bot):                                         |
 //|   marginPerLot через OrderCalcMargin(ORDER_TYPE_BUY,_Symbol,1.0, |
 //|                                       SYMBOL_ASK, marginPerLot)  |
 //|   lot = riskMoney / marginPerLot (slPoints игнорируется).        |
@@ -244,7 +240,7 @@ double BrokerCalcLot(const BrokerContext     &ctx,
    else if(strategy == LOT_BY_MARGIN)
      {
       double marginPerLot = 0.0;
-      //--- Эталон crt-bot: цена для расчёта маржи — SYMBOL_ASK,
+      //--- Цена для расчёта маржи — SYMBOL_ASK,
       //    направление — ORDER_TYPE_BUY, объём — 1.0.
       const double price = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
       if(!OrderCalcMargin(ORDER_TYPE_BUY, _Symbol, 1.0, price, marginPerLot) ||
@@ -266,7 +262,6 @@ double BrokerCalcLot(const BrokerContext     &ctx,
 //+------------------------------------------------------------------+
 //| BrokerEnforceMinSLDist                                           |
 //|                                                                  |
-//| champion = engulfing, рефайн = пересчёт TP вынесен caller'у.     |
 //|   |entry - sl| >= minBrokerDistance → no-op                      |
 //|   иначе sl = entry ∓ minBrokerDistance (BUY/BUY_LIMIT            |
 //|             sl < entry; SELL/SELL_LIMIT sl > entry)              |
@@ -275,8 +270,8 @@ double BrokerCalcLot(const BrokerContext     &ctx,
 //| Пересчёт TP по EA-специфичной формуле — на стороне caller'а:     |
 //|   engulfing → CalcTPByRR (RR сохраняется)                        |
 //|   liq-grab  → tp = entry ± slPoints * rrRatio                    |
-//|   crt-bot   → tp = entry + sign(tp_old - entry) * minDist * RR_old|
-//|              (champion-driven апгрейд; v4.2 оставлял TP как есть) |
+//|   crt-bot   → tp = entry + sign(tp_old - entry)                  |
+//|                        * minDist * RR_old                        |
 //+------------------------------------------------------------------+
 void BrokerEnforceMinSLDist(const BrokerContext   &ctx,
                             const ENUM_ORDER_TYPE  orderType,

@@ -1,8 +1,7 @@
 //+------------------------------------------------------------------+
-//|                                              BreakevenTrail.mqh  |
+//|                                               BreakevenTrail.mqh |
 //|                                                                  |
 //|  Однократный перевод SL в безубыток с настраиваемым смещением.   |
-//|  Champion: ManageBreakevenTrailing() из crt-bot_v4.2.            |
 //|                                                                  |
 //|  Изоляция: уникальный include-guard, никаких input-объявлений,   |
 //|  никакого состояния модуля между вызовами.                       |
@@ -23,7 +22,7 @@
 //|   adapter      — ITradeAdapter (используется только для          |
 //|                  PositionModify(ticket, sl, tp)).                |
 //|   broker       — заполненный BrokerContext (нужны adjustedPoint  |
-//|                  и minBrokerDistance).                            |
+//|                  и minBrokerDistance).                           |
 //|   magic        — magic фильтр. При magic <= 0 —                  |
 //|                  ранний выход без побочных эффектов.             |
 //|   startFactor  — порог активации, доля от изначальной SL-        |
@@ -32,11 +31,11 @@
 //|   offsetPoints — смещение целевого SL от openPrice в пунктах:    |
 //|                  BUY  → targetSL = open + offset * adjustedPoint |
 //|                  SELL → targetSL = open - offset * adjustedPoint |
-//|                  Должен быть >= 0.                                |
+//|                  Должен быть >= 0.                               |
 //|                                                                  |
-//| Контракт (см. requirements.md §7):                               |
+//| Контракт:                                                        |
 //|   - currentPrice (BID для BUY / ASK для SELL).                   |
-//|   - нет подходящих позиций → возврат без побочных               |
+//|   - нет подходящих позиций → возврат без побочных                |
 //|     эффектов.                                                    |
 //|   - невалидные параметры → Print + return.                       |
 //|   - profitPoints < startFactor * slDistPoints → пропуск.         |
@@ -61,7 +60,7 @@ void BreakevenTrailManage(ITradeAdapter      *adapter,
                           const double         offsetPoints);
 
 //+------------------------------------------------------------------+
-//| BreakevenTrailManage — реализация (порт из crt-bot_v4.2).        |
+//| BreakevenTrailManage — реализация.                               |
 //+------------------------------------------------------------------+
 void BreakevenTrailManage(ITradeAdapter      *adapter,
                           const BrokerContext &broker,

@@ -24,9 +24,6 @@
 //|  глобальное состояние на уровне модуля отсутствует — детектор    |
 //|  является чистой функцией от пяти входов в один выходной         |
 //|  signal.                                                         |
-//|                                                                  |
-//|  Тела функций реализуются в задачах 1.2 (приватные хелперы) и    |
-//|  1.3 (CrtDetectorDetect) этой же спеки.                          |
 //+------------------------------------------------------------------+
 #ifndef CRTDETECTOR_MQH
 #define CRTDETECTOR_MQH
@@ -47,9 +44,8 @@
 //|  DojiToImbSizeRatio   — макс. доля тела Doji относительно тела   |
 //|                          IMB.                                    |
 //|  DojiToImbRangeRatio  — макс. доля диапазона Doji относительно   |
-//|                          диапазона IMB. Новое поле               |
-//|                          относительно pre-migration Crt_Bot;     |
-//|                          дефолт у потребителей 1.00.             |
+//|                          диапазона IMB. Дефолт у потребителей    |
+//|                          1.00.                                   |
 //|  OpenTolerance        — допуск равенства doji.open ≈ imb.close,  |
 //|                          выраженный как доля от |imb body|.      |
 //|  BareImbWickTolerance — допуск «нет тени IMB со стороны Doji»,   |
@@ -148,7 +144,7 @@ struct CrtSignal
   };
 
 //+------------------------------------------------------------------+
-//| Публичный интерфейс CrtDetector (Module 1).                      |
+//| Публичный интерфейс CrtDetector.                                 |
 //+------------------------------------------------------------------+
 
 //+------------------------------------------------------------------+
@@ -173,8 +169,7 @@ struct CrtSignal
 //|             {detected=false, patternName="", imbDir=0,           |
 //|              isFVG=false}.                                       |
 //|                                                                  |
-//|  Контракт реализации (полный порядок шагов фиксируется в         |
-//|  задаче 1.3 этой спеки):                                         |
+//|  Контракт реализации:                                            |
 //|                                                                  |
 //|   1. Безусловная инициализация signal.                           |
 //|   2. Валидация диапазонов config через                           |
@@ -236,12 +231,9 @@ struct CrtSignal
 //|                    "ghostInsideWick"}.                           |
 //|   - FVG ⇒ направление определено: isFVG = true                   |
 //|     возможен только после установки imbDir != 0 в шаге 3.        |
-//|   - Поведенческая эквивалентность с Crt_Push_V7:                 |
-//|     порядок проверок, формулы фильтров и операторы               |
-//|     сравнения (`<` vs `<=`) буквально копируют                   |
-//|     CheckPatternOnTF из crt-push_v7.2.mq5.                       |
-//|                                                                  |
-//|  Тело реализуется в задаче 1.3.                                  |
+//|   - Порядок проверок, формулы фильтров и операторы               |
+//|     сравнения (`<` vs `<=`) фиксированы — менять их нельзя,      |
+//|     иначе изменится набор сигналов.                              |
 //+------------------------------------------------------------------+
 void CrtDetectorDetect(const MqlRates          &prev,
                        const MqlRates          &imb,
@@ -267,8 +259,7 @@ void CrtDetectorDetect(const MqlRates          &prev,
 //|  DojiToImbSizeRatio, DojiToImbRangeRatio, OpenTolerance,         |
 //|  BareImbWickTolerance ∈ [0.0, 1.0].                              |
 //|                                                                  |
-//|  Не модифицирует cfg (const &). Тело                             |
-//|  реализуется в задаче 1.2.                                       |
+//|  Не модифицирует cfg (const &).                                  |
 //+------------------------------------------------------------------+
 bool CrtDetector_IsConfigInRange(const CrtDetectorConfig &cfg);
 
@@ -276,9 +267,7 @@ bool CrtDetector_IsConfigInRange(const CrtDetectorConfig &cfg);
 //| CrtDetector_IsBodyInsideBody — проверяет, что тело Doji          |
 //| находится внутри тела IMB с допуском openTolerance.              |
 //|                                                                  |
-//|  Формула (буквальная копия IsDojiBodyInsideImbBody из            |
-//|  crt-push_v7.2.mq5 — обеспечивает поведенческую                  |
-//|  эквивалентность):                                               |
+//|  Формула:                                                        |
 //|                                                                  |
 //|    imbBody     = |imb.close - imb.open|                          |
 //|    imbBodyHi   = max(imb.open, imb.close) + openTolerance*imbBody|
@@ -291,8 +280,7 @@ bool CrtDetector_IsConfigInRange(const CrtDetectorConfig &cfg);
 //|  пары паттернов ("TrueRB"/"InsideWick" в breakout,               |
 //|  "ghostTrueRB"/"ghostInsideWick" в ghost).                       |
 //|                                                                  |
-//|  Не модифицирует imb/doji (const &). Тело                        |
-//|  реализуется в задаче 1.2.                                       |
+//|  Не модифицирует imb/doji (const &).                             |
 //+------------------------------------------------------------------+
 bool CrtDetector_IsBodyInsideBody(const MqlRates &imb,
                                   const MqlRates &doji,
@@ -312,8 +300,7 @@ bool CrtDetector_IsBodyInsideBody(const MqlRates &imb,
 //|  false, поэтому signal.isFVG = true возможен только при          |
 //|  imbDir ∈ {-1, +1}.                                              |
 //|                                                                  |
-//|  Не модифицирует prev/doji (const &). Тело                       |
-//|  реализуется в задаче 1.2.                                       |
+//|  Не модифицирует prev/doji (const &).                            |
 //+------------------------------------------------------------------+
 bool CrtDetector_HasFVG(const MqlRates &prev,
                         const MqlRates &doji,
@@ -330,11 +317,9 @@ bool CrtDetector_HasFVG(const MqlRates &prev,
 //|                                                                  |
 //|  Используется в шаге 7 CrtDetectorDetect для выбора ветки        |
 //|  breakout и в инварианте                                         |
-//|  («ghost ⇔ NOT breakout»). Сравнения строгие (`>` / `<`) —       |
-//|  как в HasExtremumBreakout из crt-push_v7.2.mq5.                 |
+//|  («ghost ⇔ NOT breakout»). Сравнения строгие (`>` / `<`).        |
 //|                                                                  |
-//|  Не модифицирует imb/doji (const &). Тело                        |
-//|  реализуется в задаче 1.2.                                       |
+//|  Не модифицирует imb/doji (const &).                             |
 //+------------------------------------------------------------------+
 bool CrtDetector_HasBreakout(const MqlRates &imb,
                              const MqlRates &doji,
@@ -348,12 +333,9 @@ bool CrtDetector_HasBreakout(const MqlRates &imb,
 //|    return (doji.high <= imb.high) AND (doji.low >= imb.low)      |
 //|                                                                  |
 //|  Используется в шаге 8 CrtDetectorDetect как условие активации   |
-//|  ветки ghost. Сравнения нестрогие                                |
-//|  (`<=` / `>=`) — копия IsFullyInsideImbRange из                  |
-//|  crt-push_v7.2.mq5.                                              |
+//|  ветки ghost. Сравнения нестрогие (`<=` / `>=`).                 |
 //|                                                                  |
-//|  Не модифицирует imb/doji (const &). Тело                        |
-//|  реализуется в задаче 1.2.                                       |
+//|  Не модифицирует imb/doji (const &).                             |
 //+------------------------------------------------------------------+
 bool CrtDetector_IsFullyInsideImbRange(const MqlRates &imb,
                                        const MqlRates &doji);
@@ -396,10 +378,6 @@ bool CrtDetector_IsBareImb(const MqlRates &imb,
 //+------------------------------------------------------------------+
 //| Implementations                                                  |
 //|                                                                  |
-//|  Тела приватных хелперов CrtDetector_* реализуются в задаче 1.2; |
-//|  тело публичной функции CrtDetectorDetect — в задаче 1.3 этой    |
-//|  же спеки (crt-push-modularization).                             |
-//|                                                                  |
 //|  Реализация выполняется в том же .mqh-файле, в соответствии со   |
 //|  стилем существующих модулей Include/* (см.                      |
 //|  TrendFilter.mqh как канонический пример).                       |
@@ -428,11 +406,8 @@ bool CrtDetector_IsConfigInRange(const CrtDetectorConfig &cfg)
 //+------------------------------------------------------------------+
 //| CrtDetector_IsBodyInsideBody — приватный хелпер.                 |
 //|                                                                  |
-//|  Буквальная копия IsDojiBodyInsideImbBody из crt-push_v7.2.mq5,  |
-//|  с единственным отличием: допуск передаётся параметром           |
-//|  openTolerance вместо чтения глобального input.                  |
-//|  Семантика, операторы сравнения и порядок вычислений сохранены   |
-//|  побитово.                                                       |
+//|  Допуск передаётся параметром openTolerance, а не читается       |
+//|  из глобального input.                                           |
 //+------------------------------------------------------------------+
 bool CrtDetector_IsBodyInsideBody(const MqlRates &imb,
                                   const MqlRates &doji,
@@ -450,8 +425,7 @@ bool CrtDetector_IsBodyInsideBody(const MqlRates &imb,
 //+------------------------------------------------------------------+
 //| CrtDetector_HasFVG — приватный хелпер.                           |
 //|                                                                  |
-//|  Буквальная копия HasFVG из crt-push_v7.2.mq5.                   |
-//|  Сравнения строгие (`<` / `>`) — как в оракуле.                  |
+//|  Сравнения строгие (`<` / `>`).                                  |
 //|  При imbDir == 0 возвращает false, что обеспечивает инвариант    |
 //|  «FVG ⇒ направление определено».                                 |
 //+------------------------------------------------------------------+
@@ -467,9 +441,7 @@ bool CrtDetector_HasFVG(const MqlRates &prev,
 //+------------------------------------------------------------------+
 //| CrtDetector_HasBreakout — приватный хелпер.                      |
 //|                                                                  |
-//|  Буквальная копия HasExtremumBreakout из crt-push_v7.2.mq5.      |
-//|  Сравнения строгие (`>` / `<`) —                                 |
-//|  как в оракуле.                                                  |
+//|  Сравнения строгие (`>` / `<`).                                  |
 //+------------------------------------------------------------------+
 bool CrtDetector_HasBreakout(const MqlRates &imb,
                              const MqlRates &doji,
@@ -483,9 +455,7 @@ bool CrtDetector_HasBreakout(const MqlRates &imb,
 //+------------------------------------------------------------------+
 //| CrtDetector_IsFullyInsideImbRange — приватный хелпер.            |
 //|                                                                  |
-//|  Буквальная копия IsFullyInsideImbRange из crt-push_v7.2.mq5.    |
-//|  Сравнения нестрогие (`<=` / `>=`) — как в                       |
-//|  оракуле.                                                        |
+//|  Сравнения нестрогие (`<=` / `>=`).                              |
 //+------------------------------------------------------------------+
 bool CrtDetector_IsFullyInsideImbRange(const MqlRates &imb,
                                        const MqlRates &doji)
@@ -496,9 +466,8 @@ bool CrtDetector_IsFullyInsideImbRange(const MqlRates &imb,
 //+------------------------------------------------------------------+
 //| CrtDetector_IsBareImb — приватный хелпер.                        |
 //|                                                                  |
-//|  Реализация задачи 2.1 спеки bare-imbalance-pattern. Проверяет   |
-//|  bare-условие «нет тени IMB со стороны Doji» как чистую функцию  |
-//|  от (imb, imbDir, wickTolerance).                                |
+//|  Проверяет bare-условие «нет тени IMB со стороны Doji» как       |
+//|  чистую функцию от (imb, imbDir, wickTolerance).                 |
 //|                                                                  |
 //|  При imbDir == 0 — ранний выход с false: без                     |
 //|  определённого направления IMB bare-сторона не определена.       |
@@ -532,12 +501,9 @@ bool CrtDetector_IsBareImb(const MqlRates &imb,
 //+------------------------------------------------------------------+
 //| CrtDetectorDetect — публичная функция модуля.                    |
 //|                                                                  |
-//|  Реализация задачи 1.3 спеки crt-push-modularization. Полный     |
-//|  контракт шагов зафиксирован в шапке файла; здесь — буквальная   |
-//|  трансляция в код. Логика и порядок проверок побитово            |
-//|  эквивалентны CheckPatternOnTF из crt-push_v7.2.mq5              |
-//|   с сохранением точных операторов сравнения (`>=` / `<` /        |
-//|  `<=` / `>`).                                                    |
+//|  Полный контракт шагов зафиксирован в шапке файла; здесь —       |
+//|  трансляция в код с точными операторами сравнения                |
+//|  (`>=` / `<` / `<=` / `>`).                                      |
 //+------------------------------------------------------------------+
 void CrtDetectorDetect(const MqlRates          &prev,
                        const MqlRates          &imb,

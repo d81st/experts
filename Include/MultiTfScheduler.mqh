@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//|                                              MultiTfScheduler.mqh|
+//|                                             MultiTfScheduler.mqh |
 //|                                                                  |
 //|  MultiTF Scheduler — управление фиксированным набором десяти     |
 //|  таймфреймов: упорядоченный итератор по активным ТФ, конверсия   |
@@ -34,12 +34,6 @@
 //|  MultiTfSchedulerState.                                          |
 //|                                                                  |
 //|  Стиль файла мирорит TrendFilter.mqh и CrtDetector.mqh.          |
-//|                                                                  |
-//|  Тела функций реализуются в задачах 3.2 (управление активным     |
-//|  набором ТФ и форматирование имён) и 3.3 (антидубль по бару +    |
-//|  GlobalVariable) этой же спеки. Этот заголовок объявляет только  |
-//|  data-структуры, константы и прототипы — никакие тела пока не    |
-//|  реализованы.                                                    |
 //+------------------------------------------------------------------+
 #ifndef MULTITFSCHEDULER_MQH
 #define MULTITFSCHEDULER_MQH
@@ -49,7 +43,7 @@
 //|                                                                  |
 //|  MULTITF_SCHEDULER_MAX_TF — фиксированное количество             |
 //|  поддерживаемых таймфреймов. Менять нельзя: размерность          |
-//|  привязана к набору input-флагов в Crt_Push_V7/V8 и к            |
+//|  привязана к набору input-флагов в crt-push и к                  |
 //|  внутренним массивам MultiTfSchedulerState.                      |
 //+------------------------------------------------------------------+
 #define MULTITF_SCHEDULER_MAX_TF 10
@@ -58,11 +52,10 @@
 //| MultiTfScheduler_AllTF — module-private массив ТФ в строго       |
 //| фиксированном порядке.                                           |
 //|                                                                  |
-//|  Порядок соответствует порядку input-флагов use<TF> в            |
-//|  Crt_Push_V7 и Crt_Push_V8: M1, M5, M15, M30, H1, H4, H8, D1,    |
-//|  W1, MN1. Менять порядок нельзя — это сломает                    |
-//|  поведенческую эквивалентность с Crt_Push_V7 и                   |
-//|  схему ключа GlobalVariable для антидубля,                       |
+//|  Порядок соответствует порядку input-флагов Use_<TF> в           |
+//|  crt-push: M1, M5, M15, M30, H1, H4, H8, D1, W1, MN1.            |
+//|  Менять порядок нельзя — это сломает схему ключа                 |
+//|  GlobalVariable для антидубля,                                   |
 //|  потому что MultiTfScheduler_GVarName использует индекс tfIdx    |
 //|  как ключ в этот массив.                                         |
 //|                                                                  |
@@ -87,7 +80,7 @@ ENUM_TIMEFRAMES MultiTfScheduler_AllTF[MULTITF_SCHEDULER_MAX_TF] =
 //|                                                                  |
 //|  Передаётся в MultiTfSchedulerInit через const & — модуль НЕ     |
 //|  модифицирует поля config. Имена полей повторяют                 |
-//|  имена input-флагов в Crt_Push_V7/V8 (`Use_M1`, `Use_H1`, ...),  |
+//|  имена input-флагов в crt-push (`Use_M1`, `Use_H1`, ...),        |
 //|  но без префикса `Use_`: модуль не зависит от EA-специфичных     |
 //|  имён, а оркестратор отвечает за маппинг `Use_X → useX` при      |
 //|  построении config.                                              |
@@ -109,7 +102,7 @@ struct MultiTfSchedulerConfig
 //+------------------------------------------------------------------+
 //| MultiTfSchedulerState — мутабельное состояние планировщика.      |
 //|                                                                  |
-//|  activeCount       — число активных ТФ ∈ [0, MAX_TF].             |
+//|  activeCount       — число активных ТФ ∈ [0, MAX_TF].            |
 //|                       0 ⇔ MultiTfSchedulerInit отказал (все      |
 //|                       флаги config были false).                  |
 //|                                                                  |
@@ -149,7 +142,7 @@ struct MultiTfSchedulerState
   };
 
 //+------------------------------------------------------------------+
-//| Публичный интерфейс MultiTfScheduler (Module 2).                 |
+//| Публичный интерфейс MultiTfScheduler.                            |
 //+------------------------------------------------------------------+
 
 //+------------------------------------------------------------------+
@@ -158,8 +151,7 @@ struct MultiTfSchedulerState
 //|  Сигнатура: принимает иммутабельную конфигурацию                 |
 //|  через const & и мутабельное состояние через &.                  |
 //|                                                                  |
-//|  Контракт реализации (полный порядок шагов фиксируется в задаче  |
-//|  3.2 этой спеки):                                                |
+//|  Контракт реализации:                                            |
 //|                                                                  |
 //|   1. Прочитать десять флагов из config.                          |
 //|   2. Если все флаги false — вернуть false и оставить             |
@@ -179,8 +171,6 @@ struct MultiTfSchedulerState
 //|  непустым активным набором; false при пустом активном наборе.    |
 //|  Оркестратор обязан различать эти два случая и                   |
 //|  возвращать INIT_FAILED при false.                               |
-//|                                                                  |
-//|  Тело реализуется в задаче 3.2.                                  |
 //+------------------------------------------------------------------+
 bool MultiTfSchedulerInit(const MultiTfSchedulerConfig &config,
                           MultiTfSchedulerState        &state);
@@ -197,8 +187,6 @@ bool MultiTfSchedulerInit(const MultiTfSchedulerConfig &config,
 //|  При state, полученном из неудачного Init (false возврат),       |
 //|  возвращает 0 — цикл итерации в OnTick корректно не              |
 //|  выполняется ни разу.                                            |
-//|                                                                  |
-//|  Тело реализуется в задаче 3.2.                                  |
 //+------------------------------------------------------------------+
 int MultiTfSchedulerActiveCount(const MultiTfSchedulerState &state);
 
@@ -213,14 +201,12 @@ int MultiTfSchedulerActiveCount(const MultiTfSchedulerState &state);
 //|                                                                  |
 //|  Поведение при activeOrdinal вне диапазона [0, ActiveCount):     |
 //|  не специфицировано контрактом — вызывающая сторона обязана      |
-//|  итерировать только до ActiveCount(state). Реализация в задаче   |
-//|  3.2 может вернуть значение по умолчанию для безопасности, но    |
+//|  итерировать только до ActiveCount(state). Реализация может      |
+//|  вернуть значение по умолчанию для безопасности, но              |
 //|  семантика «out-of-range → undefined» зафиксирована здесь как    |
 //|  контракт.                                                       |
 //|                                                                  |
 //|  Не модифицирует state (const &).                                |
-//|                                                                  |
-//|  Тело реализуется в задаче 3.2.                                  |
 //+------------------------------------------------------------------+
 int MultiTfSchedulerActiveAt(const MultiTfSchedulerState &state,
                              const int                    activeOrdinal);
@@ -239,8 +225,6 @@ int MultiTfSchedulerActiveAt(const MultiTfSchedulerState &state,
 //|                                                                  |
 //|  Не имеет параметров-state — это чистая функция от индекса в     |
 //|  модульный массив-константу.                                     |
-//|                                                                  |
-//|  Тело реализуется в задаче 3.2.                                  |
 //+------------------------------------------------------------------+
 ENUM_TIMEFRAMES MultiTfSchedulerTFEnum(const int tfIdx);
 
@@ -260,13 +244,10 @@ ENUM_TIMEFRAMES MultiTfSchedulerTFEnum(const int tfIdx);
 //|    PERIOD_MN1 → "MN"                                             |
 //|    default    → EnumToString(tf)  (fallback)                     |
 //|                                                                  |
-//|  Формат строго идентичен TFToString из crt-push_v7.2.mq5 —       |
-//|  изменение формата сломает поведенческую эквивалентность с       |
-//|  Crt_Push_V7 в сообщениях push-уведомлений.                      |
+//|  Формат используется в текстах push-уведомлений — менять         |
+//|  его без необходимости не стоит.                                 |
 //|                                                                  |
 //|  Чистая функция от значения tf; не зависит от state.             |
-//|                                                                  |
-//|  Тело реализуется в задаче 3.2.                                  |
 //+------------------------------------------------------------------+
 string MultiTfSchedulerTFToString(const ENUM_TIMEFRAMES tf);
 
@@ -294,8 +275,6 @@ string MultiTfSchedulerTFToString(const ENUM_TIMEFRAMES tf);
 //|                                                                  |
 //|  tfIdx ∈ [0, MULTITF_SCHEDULER_MAX_TF). Поведение за пределами   |
 //|  диапазона не специфицировано.                                   |
-//|                                                                  |
-//|  Тело реализуется в задаче 3.3.                                  |
 //+------------------------------------------------------------------+
 bool MultiTfSchedulerIsNewBar(MultiTfSchedulerState &state,
                               const int             tfIdx,
@@ -323,8 +302,6 @@ bool MultiTfSchedulerIsNewBar(MultiTfSchedulerState &state,
 //|  расширений и для симметрии с Save.                              |
 //|                                                                  |
 //|  tfIdx ∈ [0, MULTITF_SCHEDULER_MAX_TF).                          |
-//|                                                                  |
-//|  Тело реализуется в задаче 3.3.                                  |
 //+------------------------------------------------------------------+
 datetime MultiTfSchedulerLoadLastSignalBar(const MultiTfSchedulerState &state,
                                            const int                    tfIdx);
@@ -344,12 +321,10 @@ datetime MultiTfSchedulerLoadLastSignalBar(const MultiTfSchedulerState &state,
 //|                                                                  |
 //|  state передаётся как const & — функция не модифицирует state    |
 //|  (вся модификация состояния идёт через GlobalVariable). Параметр |
-//|  state в сигнатуре зарезервирован для будущих расширений и для  |
+//|  state в сигнатуре зарезервирован для будущих расширений и для   |
 //|  симметрии с Load.                                               |
 //|                                                                  |
 //|  tfIdx ∈ [0, MULTITF_SCHEDULER_MAX_TF).                          |
-//|                                                                  |
-//|  Тело реализуется в задаче 3.3.                                  |
 //+------------------------------------------------------------------+
 void MultiTfSchedulerSaveLastSignalBar(const MultiTfSchedulerState &state,
                                        const int                    tfIdx,
@@ -374,9 +349,8 @@ void MultiTfSchedulerSaveLastSignalBar(const MultiTfSchedulerState &state,
 //|                        _Symbol,                                  |
 //|                        EnumToString(MultiTfScheduler_AllTF[tfIdx])); |
 //|                                                                  |
-//|  Формат ключа идентичен GVarName из crt-push_v7.2.mq5.           |
 //|  Менять нельзя — изменение схемы ключа обнулит историю           |
-//|  антидубля для уже работающих установок Crt_Push_V7.             |
+//|  антидубля для уже работающих установок crt-push.                |
 //|                                                                  |
 //|  Замечание: используется именно EnumToString(tf) (т.е.           |
 //|  "PERIOD_H1"), а не короткое имя из MultiTfSchedulerTFToString   |
@@ -385,19 +359,11 @@ void MultiTfSchedulerSaveLastSignalBar(const MultiTfSchedulerState &state,
 //|                                                                  |
 //|  tfIdx ∈ [0, MULTITF_SCHEDULER_MAX_TF). Поведение за пределами   |
 //|  диапазона не специфицировано.                                   |
-//|                                                                  |
-//|  Тело реализуется в задаче 3.3.                                  |
 //+------------------------------------------------------------------+
 string MultiTfScheduler_GVarName(const int tfIdx);
 
 //+------------------------------------------------------------------+
 //| Implementations                                                  |
-//|                                                                  |
-//|  Тела публичных функций и приватного хелпера реализуются в       |
-//|  задачах 3.2 (управление активным набором ТФ + TFToString +      |
-//|  TFEnum + ActiveCount/ActiveAt) и 3.3 (антидубль по бару +       |
-//|  GlobalVariable round-trip + GVarName) этой же спеки             |
-//|  (crt-push-modularization).                                      |
 //|                                                                  |
 //|  Реализация выполняется в том же .mqh-файле, в соответствии со   |
 //|  стилем существующих модулей Include/* (см.                      |
@@ -522,10 +488,8 @@ ENUM_TIMEFRAMES MultiTfSchedulerTFEnum(const int tfIdx)
 //+------------------------------------------------------------------+
 //| MultiTfSchedulerTFToString (см. контракт в прототипе выше).      |
 //|                                                                  |
-//|  Формат строго идентичен                                         |
-//|  TFToString из crt-push_v7.2.mq5 (десять явных кейсов + fallback |
-//|  EnumToString). Изменение формата сломает поведенческую          |
-//|  эквивалентность с Crt_Push_V7 в push-уведомлениях.              |
+//|  Десять явных кейсов + fallback EnumToString. Формат             |
+//|  используется в текстах push-уведомлений.                        |
 //+------------------------------------------------------------------+
 string MultiTfSchedulerTFToString(const ENUM_TIMEFRAMES tf)
   {
@@ -548,17 +512,14 @@ string MultiTfSchedulerTFToString(const ENUM_TIMEFRAMES tf)
 //+------------------------------------------------------------------+
 //| MultiTfScheduler_GVarName (см. контракт в прототипе выше).       |
 //|                                                                  |
-//|  Формат ключа GlobalVariable строго                              |
-//|  идентичен GVarName из crt-push_v7.2.mq5                         |
+//|  Формат ключа GlobalVariable:                                    |
 //|    StringFormat("RBCRT_%s_%s_lastBar",                           |
 //|                 _Symbol,                                         |
-//|                 EnumToString(g_allTF[tfIdx]))                    |
-//|  с заменой g_allTF на MultiTfScheduler_AllTF — массив тот же,    |
-//|  в том же порядке, поэтому ключи бит-в-бит совпадают             |
-//|  для соответствующих tfIdx. Менять формат нельзя — это обнулит   |
-//|  историю антидубля для уже работающих установок Crt_Push_V7.     |
+//|                 EnumToString(MultiTfScheduler_AllTF[tfIdx]))     |
+//|  Менять формат нельзя — это обнулит историю антидубля            |
+//|  для уже работающих установок crt-push.                          |
 //|                                                                  |
-//|  Здесь намеренно используется EnumToString(tf) (например          |
+//|  Здесь намеренно используется EnumToString(tf) (например         |
 //|  "PERIOD_H1"), а НЕ короткое имя из MultiTfSchedulerTFToString   |
 //|  ("H1") — историческая схема ключа использует полное имя enum.   |
 //+------------------------------------------------------------------+

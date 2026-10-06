@@ -3,17 +3,17 @@
 //|                                                                  |
 //|  TradeExecutor — унифицированная отправка сделок (market/limit). |
 //|                                                                  |
-//|  Champion summary:                                               |
-//|   - Структура pipeline — от engulfing: validate → enforce min-SL |
+//|  Кратко:                                                         |
+//|   - Pipeline: validate → enforce min-SL                          |
 //|     → normalize → dispatch → read result.                        |
-//|   - Формат success-лога — crt-bot:                               |
-//|     "✅ %s [%s] | Lot:%.2f | SL:%.0f pts | TP:%.0f pts | RR:%.2f"|
+//|   - Формат success-лога:                                         |
+//|     "✅ %s [%s] | Lot:%.2f | SL:%.0f pts | TP:%.0f pts | RR:%.2f" |
 //|   - Fallback limit→market при пересечённой цене.                 |
 //|                                                                  |
-//|  Не переезжает в модуль (остаётся в EA как guard перед вызовом):  |
+//|  Остаётся в EA (guard перед вызовом):                            |
 //|   - Trade-lock (g_last_trade_request_time) — EA-specific.        |
 //|   - Spread-check — разная семантика между EA (MaxSpreadPips vs   |
-//|     MaxSpread).                                                   |
+//|     MaxSpread).                                                  |
 //+------------------------------------------------------------------+
 #ifndef TRADEEXECUTOR_MQH
 #define TRADEEXECUTOR_MQH
@@ -47,8 +47,7 @@
 //|               через BrokerEnforceMinSLDist.                      |
 //|   tp        — цена тейк-профита, либо 0.0. Должна быть >= 0.     |
 //|               Модулем не модифицируется; пересчёт TP             |
-//|               после клампа SL — ответственность caller'а         |
-//|               (champion-driven рефайнинг).                       |
+//|               после клампа SL — ответственность caller'а.        |
 //|   lot       — объём в лотах. Должен быть > 0.                    |
 //|   comment   — комментарий к ордеру для журнала брокера.          |
 //+------------------------------------------------------------------+
@@ -129,7 +128,7 @@ TradeResult TradeExecutorSend(CTrade              &tr,
                               TradeOrderRequest   &req);
 
 //+------------------------------------------------------------------+
-//| TradeExecutorSend — реализация. См. doc-comment над прототипом. |
+//| TradeExecutorSend — реализация. См. doc-comment над прототипом.  |
 //+------------------------------------------------------------------+
 TradeResult TradeExecutorSend(CTrade              &tr,
                               const BrokerContext &broker,

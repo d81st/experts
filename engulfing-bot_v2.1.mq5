@@ -1,6 +1,6 @@
 ﻿//+------------------------------------------------------------------+
-//|                      EngulfingBot_v2.1.mq5                       |
-//|  Engulfing + EntryModes + HTF Trend/ADX filter                  |
+//|                                           engulfing-bot_v2.1.mq5 |
+//|  Engulfing + EntryModes + HTF Trend/ADX filter                   |
 //+------------------------------------------------------------------+
 #property strict
 #include <Trade\Trade.mqh>
@@ -64,8 +64,8 @@ input int  SessionWindowMinutes = 5;    // Окно блокировки вок�
 
 input group "── Selected Sessions Filter ──"
 // Опциональный фильтр выбора торговых сессий (Asian/London/NewYork) в
-// UTC-координатах. При UseSelectedSessions=false — полная rollback safety:
-// legacy путь Session Filter работает без изменений.
+// UTC-координатах. При UseSelectedSessions=false работает только
+// legacy Session Filter.
 input bool          UseSelectedSessions         = false; // Включить выбор сессий
 input bool          UseAsianSession             = false; // Торговать в Asian
 input bool          UseLondonSession            = false; // Торговать в London
@@ -114,7 +114,7 @@ input double                SyncTrailStepPoints   = 0.0;
 
 //── Статические глобальные переменные (вычисляются в OnInit) ─────────
 // adjustedPoint, minBrokerDistance, fillType — внутри g_broker.
-// Engulfing — champion-эталон LOT_BY_TICK_VALUE.
+// Лот: LOT_BY_TICK_VALUE.
 // BrokerEnforceMinSLDist модифицирует только SL; пересчёт TP — caller через CalcTPByRR.
 BrokerContext g_broker;
 
@@ -167,7 +167,7 @@ bool g_swept = false;
 //+------------------------------------------------------------------+
 
 //+------------------------------------------------------------------+
-//| СЕССИИ — реализация в Include/SessionFilter.mqh                 |
+//| СЕССИИ — реализация в Include/SessionFilter.mqh                  |
 //+------------------------------------------------------------------+
 
 bool IsSpreadAllowed()
@@ -285,7 +285,6 @@ void ResetPattern()
 //| РАСЧЁТ ЛОТА                                                      |
 //+------------------------------------------------------------------+
 
-// Engulfing — champion-эталон LOT_BY_TICK_VALUE.
 double CalcTPByRR(double entry, double sl, int dir)
 {
    double sl_dist = MathAbs(entry - sl);
@@ -296,8 +295,8 @@ double CalcTPByRR(double entry, double sl, int dir)
 //+------------------------------------------------------------------+
 //| РАСЧЁТ SL И TP                                                   |
 //|                                                                  |
-//| SL = экстремум свечей [2] и [1] ± BufferPips                    |
-//| TP = дистанция SL * RiskReward                                  |
+//| SL = экстремум свечей [2] и [1] ± BufferPips                     |
+//| TP = дистанция SL * RiskReward                                   |
 //+------------------------------------------------------------------+
 
 void CalcSLTP(double entry, int dir,
@@ -326,13 +325,13 @@ void CalcSLTP(double entry, int dir,
 }
 
 //+------------------------------------------------------------------+
-//| ПРОВЕРКА И КОРРЕКЦИЯ МИНИМАЛЬНОЙ ДИСТАНЦИИ SL                   |
+//| ПРОВЕРКА И КОРРЕКЦИЯ МИНИМАЛЬНОЙ ДИСТАНЦИИ SL                    |
 //| (BrokerEnforceMinSLDist модифицирует только SL; TP пересчитывает |
-//|  caller через CalcTPByRR — RR сохраняется, идентично v2.1.)     |
+//|  caller через CalcTPByRR — RR сохраняется.)                      |
 //+------------------------------------------------------------------+
 
 //+------------------------------------------------------------------+
-//| ОТКРЫТИЕ РЫНОЧНОЙ СДЕЛКИ (ENTRY_MARKET/SWEEP_RECLAIM)        |
+//| ОТКРЫТИЕ РЫНОЧНОЙ СДЕЛКИ (ENTRY_MARKET/SWEEP_RECLAIM)            |
 //+------------------------------------------------------------------+
 
 bool OpenEngulfingTrade(ENUM_ORDER_TYPE orderType, double entry,
@@ -342,8 +341,8 @@ bool OpenEngulfingTrade(ENUM_ORDER_TYPE orderType, double entry,
    if(IsTradeRequestLocked()) return false;
    if(!IsSpreadAllowed())     return false;
 
-   // Caller-side TP recalc при подтяжке SL до мин. брокерской дистанции
-   // (parity с v2.1). Делаем ДО формирования запроса, чтобы избежать
+   // Caller-side TP recalc при подтяжке SL до мин. брокерской дистанции.
+   // Делаем ДО формирования запроса, чтобы избежать
    // post-condition guard'а INVALID_STOPS внутри TradeExecutorSend.
    {
       const double sl_before = sl;
@@ -384,13 +383,13 @@ bool OpenEngulfingTrade(ENUM_ORDER_TYPE orderType, double entry,
 }
 
 //+------------------------------------------------------------------+
-//| РАЗМЕЩЕНИЕ ЛИМИТНОГО ОРДЕРА (ENTRY_LIMIT)                    |
+//| РАЗМЕЩЕНИЕ ЛИМИТНОГО ОРДЕРА (ENTRY_LIMIT)                        |
 //+------------------------------------------------------------------+
 
 void PlaceLimitOrder(ENUM_ORDER_TYPE orderType, double price,
                      double sl, double tp)
 {
-   // Caller-side TP recalc (parity с v2.1).
+   // Caller-side TP recalc.
    {
       const double sl_before = sl;
       BrokerEnforceMinSLDist(g_broker, orderType, price, sl);
@@ -408,7 +407,7 @@ void PlaceLimitOrder(ENUM_ORDER_TYPE orderType, double price,
    const string          dir      = (orderType == ORDER_TYPE_BUY_LIMIT ? "BUY LIMIT" : "SELL LIMIT");
 
    // Fallback BUY_LIMIT→BUY / SELL_LIMIT→SELL делает TradeExecutorSend.
-   // Поведенческое отличие от v2.1: при fallback TP не пересчитывается под market-цену
+   // При fallback TP не пересчитывается под market-цену
    // (RR сохраняется относительно limit-price; отклонение ≤ min broker distance).
    TradeOrderRequest req;
    req.orderType = orderType;
@@ -468,7 +467,7 @@ void CloseAllOpenPositions()
 }
 
 //+------------------------------------------------------------------+
-//| ЗАКРЫТИЕ ПО SESSION_EXIT_EVENT (новый Selected Sessions API)    |
+//| ЗАКРЫТИЕ ПО SESSION_EXIT_EVENT (новый Selected Sessions API)     |
 //|                                                                  |
 //| Вызывается из OnTick prelude после SelectedSessionsDetectExit==  |
 //| true и только при CloseOnSessionExit=true. Edge-trigger в        |
@@ -506,13 +505,13 @@ void HandleSessionExitClose()
 }
 
 //+------------------------------------------------------------------+
-//| ОСНОВНАЯ ЛОГИКА: ПОИСК И ВХОД В ПАТТЕРН                         |
+//| ОСНОВНАЯ ЛОГИКА: ПОИСК И ВХОД В ПАТТЕРН                          |
 //|                                                                  |
 //| 1. Лимитный ордер уже исполнен → сбросить состояние              |
-//| 2. Открытая позиция → ничего не делаем                          |
-//| 3. Паттерн активен и таймаут → сброс                            |
-//| 4. Паттерна нет → проверить новый паттерн на rates[1/2]         |
-//| 5. Паттерн активен → MARKET/SWEEP_RECLAIM/LIMIT логика          |
+//| 2. Открытая позиция → ничего не делаем                           |
+//| 3. Паттерн активен и таймаут → сброс                             |
+//| 4. Паттерна нет → проверить новый паттерн на rates[1/2]          |
+//| 5. Паттерн активен → MARKET/SWEEP_RECLAIM/LIMIT логика           |
 //+------------------------------------------------------------------+
 
 void CheckEngulfingEntry()
