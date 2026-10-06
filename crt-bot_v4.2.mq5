@@ -93,43 +93,9 @@ input double             TrailingStartFactor   = 0.5;
 input double             BreakevenOffsetPoints = 175;
 input double             SyncTrailStepPoints   = 0;
 
-input group "── Сессионный фильтр ──"
-input bool UseSessionFilter     = true;
-input int  AmericanCloseHour    = 21;
-input int  AmericanCloseMinute  = 0;
-input int  AsianOpenHour        = 0;
-input int  AsianOpenMinute      = 0;
-input int  SessionWindowMinutes = 1;
-
-input group "── Selected Sessions Filter ──"
-// Опциональный фильтр выбора торговых сессий (Asian/London/NewYork) в
-// UTC-координатах. При UseSelectedSessions=false работает только
-// legacy Session Filter.
-input bool          UseSelectedSessions         = true; // Включить выбор сессий
-input bool          UseAsianSession             = false; // Торговать в Asian
-input bool          UseLondonSession            = true; // Торговать в London
-input bool          UseNewYorkSession           = false; // Торговать в NewYork
-
-input int           AsianStartHour              = 0;   // Asian start UTC [0,23]
-input int           AsianStartMinute            = 0;   // Asian start UTC [0,59]
-input int           AsianEndHour                = 9;   // Asian end   UTC [0,23]
-input int           AsianEndMinute              = 0;   // Asian end   UTC [0,59]
-
-input int           LondonStartHour             = 7;   // London start UTC [0,23]
-input int           LondonStartMinute           = 0;   // London start UTC [0,59]
-input int           LondonEndHour               = 16;  // London end   UTC [0,23]
-input int           LondonEndMinute             = 0;   // London end   UTC [0,59]
-
-input int           NYStartHour                 = 12;  // NewYork start UTC [0,23]
-input int           NYStartMinute               = 0;   // NewYork start UTC [0,59]
-input int           NYEndHour                   = 21;  // NewYork end   UTC [0,23]
-input int           NYEndMinute                 = 0;   // NewYork end   UTC [0,59]
-
-input int           SessionGmtOffsetHours       = 0;        // GMT offset, ч [-12,14]
-input ENUM_DST_MODE SessionDstMode              = DST_AUTO; // Режим DST
-
-input bool          CloseOnSessionExit          = true; // Закрывать позиции на выходе
-input bool          UseBrokerSessionsAsFallback = false; // Брокерские сессии как fallback
+// Параметры сессий — общие для всех ботов; у crt-bot окно у стыка сессий 1 мин.
+#define SESSION_DEFAULT_WINDOW_MINUTES 1
+#include "Include/Inputs/SessionInputs.mqh"
 
 input group "── Фильтр тренда (HTF) ──"
 input bool            UseTrendFilter = true;
@@ -179,12 +145,6 @@ struct PendingSignal
 //+------------------------------------------------------------------+
 
 BrokerContext g_broker;
-SessionConfig g_session_cfg;
-SessionState  g_session_state;
-
-//── Selected Sessions Filter (новый API, ортогонален legacy SessionFilter) ──
-SelectedSessionsConfig g_selected_cfg;
-SelectedSessionsState  g_selected_state;
 
 datetime      g_last_signal_doji = 0;
 PendingSignal g_pending;
@@ -989,107 +949,7 @@ int OnInit()
       return INIT_FAILED;
      }
 
-   MqlDateTime srv;
-   TimeToStruct(TimeTradeServer(), srv);
-   PrintFormat("🕐 Серверное время: %04d.%02d.%02d %02d:%02d:%02d",
-               srv.year, srv.mon, srv.day, srv.hour, srv.min, srv.sec);
-
-   if(UseSessionFilter)
-   {
-      g_session_cfg.enabled             = UseSessionFilter;
-      g_session_cfg.americanCloseHour   = AmericanCloseHour;
-      g_session_cfg.americanCloseMinute = AmericanCloseMinute;
-      g_session_cfg.asianOpenHour       = AsianOpenHour;
-      g_session_cfg.asianOpenMinute     = AsianOpenMinute;
-      g_session_cfg.windowMinutes       = SessionWindowMinutes;
-
-      const bool auto_ok = SessionInit(g_session_cfg, g_session_state);
-
-      long eff_am = 0, eff_as = 0;
-      SessionGetEffective(g_session_cfg, g_session_state, eff_am, eff_as);
-
-      if(auto_ok)
-         PrintFormat("✅ Сессии: АВТО | Закр. Амер: %02d:%02d | Откр. Азия: %02d:%02d | Окно: ±%d мин",
-                     (int)(eff_am / 3600), (int)((eff_am % 3600) / 60),
-                     (int)(eff_as / 3600), (int)((eff_as % 3600) / 60),
-                     SessionWindowMinutes);
-      else
-      {
-         PrintFormat("⚠️  Сессии: РУЧНОЙ | Закр. Амер: %02d:%02d | Откр. Азия: %02d:%02d | Окно: ±%d мин",
-                     AmericanCloseHour, AmericanCloseMinute,
-                     AsianOpenHour, AsianOpenMinute, SessionWindowMinutes);
-         Print("⚠️  Укажите часы в СЕРВЕРНОМ времени брокера.");
-      }
-   }
-   else
-   {
-      // Фильтр выключен — Session* вернут false благодаря enabled=false.
-      g_session_cfg.enabled             = false;
-      g_session_cfg.americanCloseHour   = AmericanCloseHour;
-      g_session_cfg.americanCloseMinute = AmericanCloseMinute;
-      g_session_cfg.asianOpenHour       = AsianOpenHour;
-      g_session_cfg.asianOpenMinute     = AsianOpenMinute;
-      g_session_cfg.windowMinutes       = SessionWindowMinutes;
-      SessionInit(g_session_cfg, g_session_state);
-      Print("⏰ Сессионный фильтр выключен");
-   }
-
-   //── Selected Sessions Filter (новый API) ──
-   g_selected_cfg.enabled                     = UseSelectedSessions;
-   g_selected_cfg.useAsian                    = UseAsianSession;
-   g_selected_cfg.useLondon                   = UseLondonSession;
-   g_selected_cfg.useNewYork                  = UseNewYorkSession;
-   g_selected_cfg.asianStartSec               = (long)AsianStartHour  * 3600 + (long)AsianStartMinute  * 60;
-   g_selected_cfg.asianEndSec                 = (long)AsianEndHour    * 3600 + (long)AsianEndMinute    * 60;
-   g_selected_cfg.londonStartSec              = (long)LondonStartHour * 3600 + (long)LondonStartMinute * 60;
-   g_selected_cfg.londonEndSec                = (long)LondonEndHour   * 3600 + (long)LondonEndMinute   * 60;
-   g_selected_cfg.nyStartSec                  = (long)NYStartHour     * 3600 + (long)NYStartMinute     * 60;
-   g_selected_cfg.nyEndSec                    = (long)NYEndHour       * 3600 + (long)NYEndMinute       * 60;
-   g_selected_cfg.gmtOffsetSeconds            = (long)SessionGmtOffsetHours * 3600;
-   g_selected_cfg.dstMode                     = SessionDstMode;
-   g_selected_cfg.closeOnSessionExit          = CloseOnSessionExit;
-   g_selected_cfg.useBrokerSessionsAsFallback = UseBrokerSessionsAsFallback;
-
-   const bool selected_ok = SelectedSessionsInit(g_selected_cfg, g_selected_state);
-
-   if(!UseSelectedSessions)
-   {
-      Print("⏰ Selected sessions filter OFF");
-   }
-   else if(selected_ok)
-   {
-      // Список выбранных сессий через запятую.
-      string sessions = "";
-      if(UseAsianSession)   sessions += (StringLen(sessions) > 0 ? "," : "") + "Asian";
-      if(UseLondonSession)  sessions += (StringLen(sessions) > 0 ? "," : "") + "London";
-      if(UseNewYorkSession) sessions += (StringLen(sessions) > 0 ? "," : "") + "NewYork";
-      if(StringLen(sessions) == 0) sessions = "(none)";
-
-      long aS = 0, aE = 0, lS = 0, lE = 0, nS = 0, nE = 0;
-      SelectedSessionsGetEffective(g_selected_cfg, g_selected_state,
-                                   aS, aE, lS, lE, nS, nE);
-
-      const double eff_hours = (double)g_selected_state.effectiveGmtOffsetSec / 3600.0;
-
-      PrintFormat("⏰ Selected sessions ON | %s | GMT%+.2fh | "
-                  "Asian %02d:%02d-%02d:%02d UTC | "
-                  "London %02d:%02d-%02d:%02d UTC | "
-                  "NY %02d:%02d-%02d:%02d UTC",
-                  sessions, eff_hours,
-                  (int)(aS / 3600), (int)((aS % 3600) / 60),
-                  (int)(aE / 3600), (int)((aE % 3600) / 60),
-                  (int)(lS / 3600), (int)((lS % 3600) / 60),
-                  (int)(lE / 3600), (int)((lE % 3600) / 60),
-                  (int)(nS / 3600), (int)((nS % 3600) / 60),
-                  (int)(nE / 3600), (int)((nE % 3600) / 60));
-   }
-   else
-   {
-      // Init вернул false — детальная диагностика уже выведена внутри
-      // SelectedSessionsInit (errorMessage из ValidateConfig). Добавляем
-      // один summary-лог о факте отключения фильтра.
-      Print("❌ Selected sessions filter: невалидная конфигурация — фильтр отключён");
-   }
+   SessionsSetup();
 
    string modeStr;
    switch(EntryMode)
