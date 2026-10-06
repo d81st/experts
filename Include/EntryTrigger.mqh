@@ -2,7 +2,8 @@
 //|                                                 EntryTrigger.mqh |
 //|                                                                  |
 //|  Проверка условия входа для сигнала, ожидающего уровня:          |
-//|  режимы MARKET (касание) и SWEEP+RECLAIM (снятие → возврат).     |
+//|  режимы MARKET (касание), SWEEP+RECLAIM (снятие → возврат) и      |
+//|  CLOSE_CONFIRM (снятие → закрытие бара за уровнем).              |
 //|  Ордера модуль не отправляет — это делает бот.                   |
 //+------------------------------------------------------------------+
 #ifndef ENTRYTRIGGER_MQH
@@ -15,7 +16,8 @@ enum ENUM_ENTRY_MODE
   {
    ENTRY_SWEEP_RECLAIM = 0,  // Sweep + Reclaim   (двухфазное подтверждение)
    ENTRY_MARKET        = 1,  // Рыночный вход      (касание уровня → сразу открыть)
-   ENTRY_LIMIT         = 2   // Лимитный ордер     (BUY/SELL LIMIT на уровне)
+   ENTRY_LIMIT         = 2,  // Лимитный ордер     (BUY/SELL LIMIT на уровне)
+   ENTRY_CLOSE_CONFIRM = 3   // Снятие + закрытие бара за уровнем → вход на следующем баре
   };
 
 //+------------------------------------------------------------------+
@@ -91,6 +93,63 @@ bool EntryTriggerBeyondSL(const int dir, const double sl)
       return false;
    return (dir == 1) ? (SymbolInfoDouble(_Symbol, SYMBOL_BID) <= sl)
                      : (SymbolInfoDouble(_Symbol, SYMBOL_ASK) >= sl);
+  }
+
+//+------------------------------------------------------------------+
+//| EntryTriggerOnClose — снятие и возврат по ЗАКРЫТЫМ барам tf      |
+//| (режим ENTRY_CLOSE_CONFIRM). Не зависит от пути цены внутри бара |
+//| и одинаково срабатывает в тестере и в реале.                     |
+//|                                                                  |
+//|   Учитываются бары, открывшиеся в [firstBar, lastBar]            |
+//|   (lastBar = 0 — без ограничения).                               |
+//|   BUY:  low бара < level — снятие; close бара > level после      |
+//|         снятия (можно в том же баре) — вход по Ask.              |
+//|   SELL: high > level — снятие; close < level — вход по Bid.      |
+//|   До исполнения возвращает true на каждом тике бара, следующего  |
+//|   за подтверждением (повтор, если вход отсёк фильтр).            |
+//|   loggedBar — бар, уже записанный в журнал (без повторов).       |
+//+------------------------------------------------------------------+
+bool EntryTriggerOnClose(const ENUM_TIMEFRAMES tf,
+                         const int             dir,
+                         const double          level,
+                         const datetime        firstBar,
+                         const datetime        lastBar,
+                         bool                 &swept,
+                         datetime             &loggedBar,
+                         const string          label,
+                         double               &price)
+  {
+   const datetime t = iTime(_Symbol, tf, 1);
+   if(t <= 0 || t < firstBar || (lastBar > 0 && t > lastBar))
+      return false;
+
+   const bool   buy = (dir == 1);
+   const double lo  = iLow(_Symbol, tf, 1);
+   const double hi  = iHigh(_Symbol, tf, 1);
+   const double cl  = iClose(_Symbol, tf, 1);
+   const bool   log = (t != loggedBar);
+   loggedBar = t;
+
+   if(!swept && (buy ? (lo < level) : (hi > level)))
+     {
+      swept = true;
+      if(log)
+         PrintFormat("%s Sweep по бару (%s): %s=%.5f %s Level=%.5f [%s]",
+                     buy ? "📉" : "📈", buy ? "BUY" : "SELL",
+                     buy ? "Low" : "High", buy ? lo : hi, buy ? "<" : ">", level, label);
+     }
+   if(!swept)
+      return false;
+
+   const bool reclaim = buy ? (cl > level) : (cl < level);
+   if(!reclaim)
+      return false;
+
+   price = buy ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   if(log)
+      PrintFormat("✅ Закрытие за уровнем (%s): Close=%.5f %s Level=%.5f → открываем [%s]",
+                  buy ? "BUY" : "SELL", cl, buy ? ">" : "<", level, label);
+   return true;
   }
 
 #endif // ENTRYTRIGGER_MQH

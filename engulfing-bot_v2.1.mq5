@@ -123,6 +123,7 @@ ulong g_pending_ticket = 0;
 
 //── Sweep/Reclaim состояние (только для ENTRY_SWEEP_RECLAIM) ──────
 bool g_swept = false;
+datetime g_logged_bar = 0;   // только для CLOSE_CONFIRM: последний записанный в журнал бар
 
 //+------------------------------------------------------------------+
 //| УТИЛИТЫ                                                          |
@@ -248,6 +249,7 @@ void ResetPattern()
    g_sl_level          = 0.0;
    g_tp_level          = 0.0;
    g_swept             = false;
+   g_logged_bar        = 0;
 }
 
 //+------------------------------------------------------------------+
@@ -581,8 +583,10 @@ void CheckEngulfingEntry()
       g_entry_level       = entry_level;
       g_pattern_dir       = new_dir;
       g_entry_candle_time = rates[0].time;
+      // CLOSE_CONFIRM: +1 бар, чтобы закрытие последнего бара ожидания успели проверить.
       if(MaxBarsToWait > 0)
-         g_pattern_expire_at = rates[1].time + (datetime)(MaxBarsToWait + 1) * PeriodSeconds(TradingTimeframe);
+         g_pattern_expire_at = rates[1].time + (datetime)(MaxBarsToWait + 1 + (EntryMode == ENTRY_CLOSE_CONFIRM ? 1 : 0))
+                                               * PeriodSeconds(TradingTimeframe);
       else
          g_pattern_expire_at = 0;
       g_sl_level          = sl;
@@ -612,7 +616,18 @@ void CheckEngulfingEntry()
       if(!IsSpreadAllowed()) return;
 
       double price = 0.0;
-      if(EntryTriggerPoll(EntryMode, g_pattern_dir, g_entry_level, g_swept, "RB 50%", price))
+      bool   fire  = false;
+      if(EntryMode == ENTRY_CLOSE_CONFIRM)
+      {
+         const int period = PeriodSeconds(TradingTimeframe);
+         fire = EntryTriggerOnClose(TradingTimeframe, g_pattern_dir, g_entry_level,
+                                    g_entry_candle_time,
+                                    MaxBarsToWait > 0 ? g_entry_candle_time + (datetime)(MaxBarsToWait - 1) * period : 0,
+                                    g_swept, g_logged_bar, "RB 50%", price);
+      }
+      else
+         fire = EntryTriggerPoll(EntryMode, g_pattern_dir, g_entry_level, g_swept, "RB 50%", price);
+      if(fire)
       {
          const ENUM_ORDER_TYPE type = (g_pattern_dir == 1) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
          const double tp_actual = CalcTPByRR(price, g_sl_level, g_pattern_dir);
@@ -678,6 +693,7 @@ int OnInit()
    if(EntryMode == ENTRY_SWEEP_RECLAIM) modeStr = "SWEEP+RECLAIM";
       else if(EntryMode == ENTRY_MARKET)   modeStr = "MARKET";
       else if(EntryMode == ENTRY_LIMIT)    modeStr = "LIMIT";
+      else if(EntryMode == ENTRY_CLOSE_CONFIRM) modeStr = "CLOSE";
 
    PrintFormat("✅ Engulfing Bot v2.1 | Magic:%d TF:%s Mode:%s D:%d P:%.8f "
                "MinSL:%.0f MaxSL:%.0f Buf:%.0f RR:%.2f RBTol:%.1f MinBody:%.1f MaxSpr:%.1f Lock:%d MaxBars:%d Fill:%s",
