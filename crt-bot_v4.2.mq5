@@ -17,6 +17,7 @@
 #include "Include/Trailing/BreakevenTrail.mqh"
 #include "Include/Trailing/TrailingDispatcher.mqh"
 #include "Include/CrtDetector.mqh"
+#include "Include/EntryTrigger.mqh"
 CTrade trade;
 ITradeAdapter *g_trade_adapter = NULL;
 TrailingConfig g_trail_cfg;   // заполняется в OnInit, используется TrailingManage
@@ -25,12 +26,7 @@ TrailingConfig g_trail_cfg;   // заполняется в OnInit, исполь�
 //| Enum: режим входа                                                |
 //+------------------------------------------------------------------+
 
-enum ENUM_ENTRY_MODE
-{
-   ENTRY_SWEEP_RECLAIM = 0,  // Sweep + Reclaim   (двухфазное подтверждение)
-   ENTRY_MARKET        = 1,  // Рыночный вход      (касание уровня → сразу открыть)
-   ENTRY_LIMIT         = 2   // Лимитный ордер     (BUY/SELL LIMIT на уровне)
-};
+// ENUM_ENTRY_MODE — в Include/EntryTrigger.mqh
 
 //+------------------------------------------------------------------+
 //| Входные параметры                                                |
@@ -587,73 +583,13 @@ void CheckPendingEntry()
 
    if(EntryMode == ENTRY_LIMIT) return;
 
-   double ask   = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-   double bid   = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   double level = g_pending.entryLevel;
-   string label = g_pending.patternName + (g_pending.isFVG ? "+FVG" : "");
-
-   if(EntryMode == ENTRY_MARKET)
+   const int    dir   = -g_pending.imbDir;   // бычья IMB → SELL, медвежья → BUY
+   const string label = g_pending.patternName + (g_pending.isFVG ? "+FVG" : "");
+   double price = 0.0;
+   if(EntryTriggerPoll(EntryMode, dir, g_pending.entryLevel, g_pending.swept, label, price))
    {
-      if(g_pending.imbDir == 1)
-      {
-         if(bid >= level)
-         {
-            PrintFormat("✅ MARKET SELL: Bid=%.5f ≥ Level=%.5f → открываем [%s]", bid, level, label);
-            OpenCRTTrade(ORDER_TYPE_SELL, bid, g_pending.sl, g_pending.tp, label);
-            g_pending.Reset();
-         }
-      }
-      else
-      {
-         if(ask <= level)
-         {
-            PrintFormat("✅ MARKET BUY: Ask=%.5f ≤ Level=%.5f → открываем [%s]", ask, level, label);
-            OpenCRTTrade(ORDER_TYPE_BUY, ask, g_pending.sl, g_pending.tp, label);
-            g_pending.Reset();
-         }
-      }
-      return;
-   }
-
-   if(g_pending.imbDir == 1)
-   {
-      if(!g_pending.swept)
-      {
-         if(ask > level)
-         {
-            g_pending.swept = true;
-            PrintFormat("📈 Sweep (SELL): Ask=%.5f > Level=%.5f [%s]", ask, level, label);
-         }
-      }
-      else
-      {
-         if(bid < level)
-         {
-            PrintFormat("✅ Reclaim (SELL): Bid=%.5f < Level=%.5f → открываем [%s]", bid, level, label);
-            OpenCRTTrade(ORDER_TYPE_SELL, bid, g_pending.sl, g_pending.tp, label);
-            g_pending.Reset();
-         }
-      }
-   }
-   else
-   {
-      if(!g_pending.swept)
-      {
-         if(bid < level)
-         {
-            g_pending.swept = true;
-            PrintFormat("📉 Sweep (BUY): Bid=%.5f < Level=%.5f [%s]", bid, level, label);
-         }
-      }
-      else
-      {
-         if(ask > level)
-         {
-            PrintFormat("✅ Reclaim (BUY): Ask=%.5f > Level=%.5f → открываем [%s]", ask, level, label);
-            OpenCRTTrade(ORDER_TYPE_BUY, ask, g_pending.sl, g_pending.tp, label);
-            g_pending.Reset();
-         }
-      }
+      OpenCRTTrade(dir == 1 ? ORDER_TYPE_BUY : ORDER_TYPE_SELL, price, g_pending.sl, g_pending.tp, label);
+      g_pending.Reset();
    }
 }
 

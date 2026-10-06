@@ -13,15 +13,11 @@
 #include "Include/Trailing/SyncTrail.mqh"
 #include "Include/Trailing/BreakevenTrail.mqh"
 #include "Include/Trailing/TrailingDispatcher.mqh"
+#include "Include/EntryTrigger.mqh"
 CTrade trade;
 
 //── Режим входа ──────────────────────────────────────────────────────
-enum ENUM_ENTRY_MODE
-{
-   ENTRY_SWEEP_RECLAIM = 0,  // Sweep + Reclaim   (двухфазное подтверждение)
-   ENTRY_MARKET        = 1,  // Рыночный вход      (касание уровня → сразу открыть)
-   ENTRY_LIMIT         = 2   // Лимитный ордер     (BUY/SELL LIMIT на уровне)
-};
+// ENUM_ENTRY_MODE — в Include/EntryTrigger.mqh
 
 //── Входные параметры ─────────────────────────────────────────────────
 
@@ -604,75 +600,12 @@ void CheckEngulfingEntry()
       if(SessionIsBoundary(g_session_cfg, g_session_state)) return;
       if(!IsSpreadAllowed()) return;
 
-      double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-      double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-
-      // ── ENTRY_MARKET: касание уровня → вход ───────────────────
-      if(EntryMode == ENTRY_MARKET)
+      double price = 0.0;
+      if(EntryTriggerPoll(EntryMode, g_pattern_dir, g_entry_level, g_swept, "RB 50%", price))
       {
-         if(g_pattern_dir == 1)   // BUY: ждём, пока ASK опустится до 50%
-         {
-            if(ask <= g_entry_level)
-            {
-               PrintFormat("💡 MARKET BUY касание 50%% | ASK:%.5f ≤ Level:%.5f",
-                           ask, g_entry_level);
-               double tp_actual = CalcTPByRR(ask, g_sl_level, 1);
-               if(OpenEngulfingTrade(ORDER_TYPE_BUY, ask, g_sl_level, tp_actual)) ResetPattern();
-            }
-         }
-         else                     // SELL: ждём, пока BID поднимется до 50%
-         {
-            if(bid >= g_entry_level)
-            {
-               PrintFormat("💡 MARKET SELL касание 50%% | BID:%.5f ≥ Level:%.5f",
-                           bid, g_entry_level);
-               double tp_actual = CalcTPByRR(bid, g_sl_level, -1);
-               if(OpenEngulfingTrade(ORDER_TYPE_SELL, bid, g_sl_level, tp_actual)) ResetPattern();
-            }
-         }
-         return;
-      }
-
-      // ── ENTRY_SWEEP_RECLAIM: двухфазная логика ────────────────
-      if(g_pattern_dir == 1) // BUY
-      {
-         if(!g_swept)
-         {
-            if(bid < g_entry_level)
-            {
-               g_swept = true;
-               PrintFormat("📉 Sweep (BUY): Bid=%.5f < Level=%.5f", bid, g_entry_level);
-            }
-         }
-         else
-         {
-            if(ask > g_entry_level)
-            {
-               PrintFormat("✅ Reclaim (BUY): Ask=%.5f > Level=%.5f → открываем", ask, g_entry_level);
-               double tp_actual = CalcTPByRR(ask, g_sl_level, 1);
-               if(OpenEngulfingTrade(ORDER_TYPE_BUY, ask, g_sl_level, tp_actual)) ResetPattern();
-            }
-         }
-      }
-      else // SELL
-      {
-         if(!g_swept)
-         {
-            if(ask > g_entry_level)
-            {
-               g_swept = true;
-               PrintFormat("📈 Sweep (SELL): Ask=%.5f > Level=%.5f", ask, g_entry_level);
-            }
-         }
-         else
-         {
-            if(bid < g_entry_level)
-            {
-               PrintFormat("✅ Reclaim (SELL): Bid=%.5f < Level=%.5f → открываем", bid, g_entry_level);
-               double tp_actual = CalcTPByRR(bid, g_sl_level, -1);
-               if(OpenEngulfingTrade(ORDER_TYPE_SELL, bid, g_sl_level, tp_actual)) ResetPattern();
-            }
-         }
+         const ENUM_ORDER_TYPE type = (g_pattern_dir == 1) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+         const double tp_actual = CalcTPByRR(price, g_sl_level, g_pattern_dir);
+         if(OpenEngulfingTrade(type, price, g_sl_level, tp_actual)) ResetPattern();
       }
    }
 }
