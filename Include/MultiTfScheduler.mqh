@@ -6,10 +6,6 @@
 //|  ENUM_TIMEFRAMES → короткое имя, двухслойный антидубль по бару   |
 //|  (in-memory + GlobalVariable).                                   |
 //|                                                                  |
-//|  Feature: crt-push-modularization                                |
-//|  Spec:    .kiro/specs/crt-push-modularization/design.md          |
-//|           (Components and Interfaces → 2. Include/MultiTfScheduler)|
-//|                                                                  |
 //|  This header declares:                                           |
 //|   - константу MULTITF_SCHEDULER_MAX_TF и массив                  |
 //|     MultiTfScheduler_AllTF в фиксированном порядке               |

@@ -3,10 +3,6 @@
 //|                                                                  |
 //|  Trend Filter — HTF EMA-cross + optional ADX/DI bias gate        |
 //|                                                                  |
-//|  Feature: ea-modular-architecture                                |
-//|  Spec:    .kiro/specs/ea-modular-architecture/design.md          |
-//|           (Module 3: Include/TrendFilter.mqh)                    |
-//|                                                                  |
 //|  This header declares:                                           |
 //|   - TrendConfig   — настройки EMA-кросса и ADX/DI (Req 3.1, 3.2) |
 //|   - TrendHandles  — индикаторные хэндлы lifecycle (Req 3.3, 3.4) |

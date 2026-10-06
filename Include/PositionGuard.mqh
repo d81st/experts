@@ -4,9 +4,6 @@
 //|  Безопасные операции над позициями и pending-ордерами текущего   |
 //|  символа и магического номера.                                   |
 //|                                                                  |
-//|  Feature: ea-modular-architecture                                |
-//|  Spec:    .kiro/specs/ea-modular-architecture/design.md          |
-//|                                                                  |
 //|  Champion: crt-bot — `PendingOrderStillExists(ulong ticket)` с   |
 //|  явным тикетом. Модуль не читает глобалов EA — ticket передаётся |
 //|  параметром. Engulfing после миграции передаёт свой              |

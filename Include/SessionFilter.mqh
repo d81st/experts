@@ -4,9 +4,6 @@
 //|  Session filter — конфигурация, состояние и прототипы            |
 //|  публичных функций сессионного фильтра.                          |
 //|                                                                  |
-//|  Feature: ea-modular-architecture                                |
-//|  Spec:    .kiro/specs/ea-modular-architecture/design.md          |
-//|                                                                  |
 //|  Этот header объявляет:                                          |
 //|   - SessionConfig — входная конфигурация (Req 2.2, 2.3, 2.4)     |
 //|   - SessionState  — заполняется SessionInit, дальше read-only    |
@@ -136,9 +133,6 @@ void SessionGetEffective(const SessionConfig &cfg,
 
 //+------------------------------------------------------------------+
 //| trading-session-filter — новый публичный API.                    |
-//|                                                                  |
-//| Feature: trading-session-filter                                  |
-//| Spec:    .kiro/specs/trading-session-filter/design.md            |
 //|                                                                  |
 //| Этот блок объявляет:                                             |
 //|   - ENUM_DST_MODE — режим обработки часового пояса и DST         |
@@ -778,7 +772,7 @@ void SelectedSessions_ResetState(SelectedSessionsState &state)
 //| Сигнатура: `cfg` принимается по неконстантной ссылке, потому     |
 //| что `SelectedSessions_TryBrokerFallback` мутирует поля           |
 //| `londonStart/EndSec` и `nyStart/EndSec` (Req 10.2). Это          |
-//| небольшое отклонение от design.md-прототипа (там `const &`),     |
+//| осознанное отклонение от `const &`,                              |
 //| продиктованное согласованностью с TryBrokerFallback — иначе      |
 //| мутации фоллбэка не доживают до первого `IsInside` и Req 10.2    |
 //| не выполняется. `SelectedSessionsIsInside` / `DetectExit` /      |

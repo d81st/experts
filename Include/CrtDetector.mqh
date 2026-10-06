@@ -4,10 +4,6 @@
 //|  CRT Detector — чистая функция детекции CRT-паттернов на         |
 //|  тройке свечей (prev, imb, doji).                                |
 //|                                                                  |
-//|  Feature: crt-push-modularization                                |
-//|  Spec:    .kiro/specs/crt-push-modularization/design.md          |
-//|           (Components and Interfaces → 1. Include/CrtDetector)   |
-//|                                                                  |
 //|  This header declares:                                           |
 //|   - CrtDetectorConfig — иммутабельная конфигурация детектора     |
 //|                          (Req 1.2)                               |

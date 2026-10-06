@@ -5,10 +5,6 @@
 //|  распознанном CRT-сигнале, обновление HUD через Comment,         |
 //|  печать диагностики через Print.                                 |
 //|                                                                  |
-//|  Feature: crt-push-modularization                                |
-//|  Spec:    .kiro/specs/crt-push-modularization/design.md          |
-//|           (Components and Interfaces → 3. Include/PushNotifier)  |
-//|                                                                  |
 //|  This header declares:                                           |
 //|   - прототип публичной функции модуля:                           |
 //|       PushNotifierSendCrt        (Req 8.1..8.5, 9.1..9.3)        |

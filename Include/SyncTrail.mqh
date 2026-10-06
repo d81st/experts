@@ -3,9 +3,6 @@
 //|                                                                  |
 //|  Synchronized SL/TP Trailing — common types and pure helpers     |
 //|                                                                  |
-//|  Feature: synchronized-sl-tp-trailing                            |
-//|  Spec:    .kiro/specs/synchronized-sl-tp-trailing/design.md      |
-//|                                                                  |
 //|  This header declares:                                           |
 //|   - ENUM_TRAILING_MODE  — режим трейлинга (Req 1.1, 1.5)         |
 //|   - SyncTrailState      — per-ticket состояние (Req 2.5, 3.1)    |
@@ -13,8 +10,7 @@
 //|                                                                  |
 //|  Тела pure-хелперов реализуются в task 1.2 в этом же файле.      |
 //|  Хелперы НЕ обращаются ни к терминалу, ни к trade.*  — все       |
-//|  входы и выходы передаются параметрами (см. design.md,           |
-//|  "Pure-хелперы для SyncTrailing").                               |
+//|  входы и выходы передаются параметрами.                          |
 //+------------------------------------------------------------------+
 #ifndef SYNCTRAIL_MQH
 #define SYNCTRAIL_MQH
@@ -38,7 +34,6 @@ enum ENUM_TRAILING_MODE
 //| Per-ticket состояние SyncTrailing.                               |
 //|                                                                  |
 //| Поля заполняются в FindOrCreateState / ManageSyncTrailing        |
-//| (см. design.md, "Components and Interfaces" и "Data Models").    |
 //|                                                                  |
 //|   ticket              — тикет позиции (Req 9.2)                  |
 //|   dir                 — +1 для BUY, -1 для SELL                  |

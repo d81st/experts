@@ -4,9 +4,6 @@
 //|  Trailing mode dispatcher — единая точка вызова трейлинга:        |
 //|  switch по `ENUM_TRAILING_MODE_EX` между OFF / BREAKEVEN / SYNC. |
 //|                                                                  |
-//|  Feature: ea-modular-architecture                                |
-//|  Spec:    design.md Module 6                                     |
-//|                                                                  |
 //|  Объявляет ENUM_TRAILING_MODE_EX, TrailingConfig и прототип      |
 //|  TrailingManage. Реализация делегирует в подмодули:              |
 //|   - OFF       → no-op                                            |

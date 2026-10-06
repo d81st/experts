@@ -3,9 +3,6 @@
 //|                                                                  |
 //|  TradeExecutor — унифицированная отправка сделок (market/limit). |
 //|                                                                  |
-//|  Feature: ea-modular-architecture                                |
-//|  Spec:    design.md §10.5 (market) и §10.6 (limit)               |
-//|                                                                  |
 //|  Champion summary:                                               |
 //|   - Структура pipeline — от engulfing: validate → enforce min-SL |
 //|     → normalize → dispatch → read result.                        |
@@ -53,7 +50,7 @@
 //|   tp        — цена тейк-профита, либо 0.0. Должна быть >= 0      |
 //|               (Req 14.5). Модулем не модифицируется; пересчёт TP |
 //|               после клампа SL — ответственность caller'а         |
-//|               (champion-driven рефайнинг §10.4 design.md).       |
+//|               (champion-driven рефайнинг).                       |
 //|   lot       — объём в лотах. Должен быть > 0 (Req 5.16).         |
 //|   comment   — комментарий к ордеру для журнала брокера.          |
 //+------------------------------------------------------------------+
@@ -77,7 +74,7 @@ struct TradeOrderRequest
 //|   success     — true ⇔ брокер подтвердил операцию с              |
 //|                 retcode = TRADE_RETCODE_DONE (Req 5.10).         |
 //|                 При success = false поле `ticket` гарантированно |
-//|                 равно 0 (design.md «Инварианты» Module 5).       |
+//|                 равно 0 (инвариант модуля).                      |
 //|   ticket      — тикет открытой позиции или pending-ордера,       |
 //|                 полученный через `trade.ResultOrder()` при       |
 //|                 успехе; 0 при failure (Req 5.10, 5.11).          |
