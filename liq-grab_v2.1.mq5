@@ -35,7 +35,7 @@ input double MaxSpreadToSL   = 0.10; // Макс. спред как доля р�
 input double MaxSlippageToSL = 0.10; // Макс. проскальзывание как доля расстояния до SL (0 = без ограничения)
 
 input group "Trade Parameters"
-input ENUM_LIQ_SL_MODE StopMode = SL_BEYOND_SWEEP; // Режим стоп-лосса
+input ENUM_LIQ_SL_MODE StopMode = SL_FIXED; // Режим стоп-лосса (SL_BEYOND_SWEEP хуже на эталоне, см. tester/results)
 input double StopLossPoints = 3175; // SL в пунктах (режим SL_FIXED)
 input double SweepSLBufferPoints = 100;  // Буфер за экстремумом снятия, пункты (SL_BEYOND_SWEEP)
 input double MinSLPoints = 1000;         // Мин. SL, пункты (SL_BEYOND_SWEEP)
