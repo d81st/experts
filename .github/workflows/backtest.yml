@@ -96,9 +96,24 @@ jobs:
           $failed = @()
           foreach ($cfgFile in $configs) {
             $cfg = Get-Content $cfgFile.FullName -Raw | ConvertFrom-Json
+            # Варианты параметров бота: "variants": [{"name": "be-off", "inputs": {"TrailingMode": 0}}].
+            # Без "variants" — один прогон с параметрами по умолчанию (или общими "inputs").
+            $variants = @($cfg.variants)
+            if (-not $cfg.variants) { $variants = @([pscustomobject]@{ name = ""; inputs = $cfg.inputs }) }
+            foreach ($var in $variants) {
+            $inputLines = @()
+            if ($var.inputs) {
+              foreach ($prop in $var.inputs.PSObject.Properties) {
+                $v = "$($prop.Value)"
+                if ($prop.Value -is [bool]) { $v = $v.ToLower() }
+                $inputLines += "$($prop.Name)=$v||$v||0||$v||N"
+              }
+            }
+            $suffix = ""
+            if ($var.name) { $suffix = "_$($var.name)" }
             $done = $false
             foreach ($sym in $cfg.symbols) {
-              $name = "$($cfg.expert)_$($sym)_$($cfg.period)"
+              $name = "$($cfg.expert)_$($sym)_$($cfg.period)$suffix"
               $ini = "$env:RUNNER_TEMP\tester.ini"
               @("[Common]", "Login=$env:MT5_LOGIN", "Password=$env:MT5_PASSWORD", "Server=$env:MT5_SERVER",
                 "ProxyEnable=0", "NewsEnable=0",
@@ -119,18 +134,20 @@ jobs:
                 "Report=reports\$name",
                 "ReplaceReport=1",
                 "ShutdownTerminal=1") | Out-File $ini -Encoding Unicode
-              Write-Host "=== $($cfgFile.Name): $($cfg.expert) on $sym $($cfg.period) $($cfg.from)-$($cfg.to), model $($cfg.model), delay $($cfg.delay) ==="
+              if ($inputLines) { (@("[TesterInputs]") + $inputLines) | Out-File $ini -Encoding Unicode -Append }
+              Write-Host "=== $($cfgFile.Name)$suffix: $($cfg.expert) on $sym $($cfg.period) $($cfg.from)-$($cfg.to), model $($cfg.model), delay $($cfg.delay) | inputs: $($inputLines -join '; ') ==="
               $t = Start-Process -FilePath "$env:MT5_ROOT\terminal64.exe" -ArgumentList "/portable", "/config:`"$ini`"" -PassThru
               if (-not $t.WaitForExit(60 * 60 * 1000)) {
                 Write-Host "Tester did not finish in time, killing terminal"
                 Get-Process terminal64, metatester64 -ErrorAction SilentlyContinue | Stop-Process -Force
               }
               Remove-Item $ini -Force
-              $rep = Get-ChildItem $reports -Filter "$name*.htm*" -ErrorAction SilentlyContinue
+              $rep = Get-ChildItem $reports -Filter "$name.htm" -ErrorAction SilentlyContinue
               if ($rep) { Write-Host "Report created: $($rep.Name -join ', ')"; $done = $true; break }
               Write-Host "No report for $sym, trying next symbol"
             }
-            if (-not $done) { $failed += $cfgFile.Name }
+            if (-not $done) { $failed += "$($cfgFile.Name)$suffix" }
+            }
           }
           Write-Host "--- tester journal (tail) ---"
           Get-ChildItem "$env:MT5_ROOT\Tester\logs" -Filter *.log -ErrorAction SilentlyContinue |
