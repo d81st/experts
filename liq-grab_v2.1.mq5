@@ -24,7 +24,15 @@ CTrade trade;
 enum ENUM_LIQ_SL_MODE
 {
    SL_FIXED        = 0,  // Фиксированно: StopLossPoints от цены входа
-   SL_BEYOND_SWEEP = 1   // За экстремумом свечи, снявшей ликвидность, + буфер
+   SL_BEYOND_SWEEP = 1,  // За экстремумом свечи, снявшей ликвидность, + буфер
+   SL_ATR          = 2   // AtrSLMultiplier × ATR(AtrPeriod) от цены входа
+};
+
+// Где ставить тейк-профит.
+enum ENUM_LIQ_TP_MODE
+{
+   TP_RR        = 0,  // RiskRewardRatio × SL
+   TP_LIQUIDITY = 1   // Противоположный экстремум за HistoryDepth баров, если он ≥ MinLiquidityRR × SL, иначе RR
 };
 
 input group "Money Management"
@@ -39,8 +47,12 @@ input ENUM_LIQ_SL_MODE StopMode = SL_FIXED; // Режим стоп-лосса (S
 input double StopLossPoints = 3175; // SL в пунктах (режим SL_FIXED)
 input double SweepSLBufferPoints = 100;  // Буфер за экстремумом снятия, пункты (SL_BEYOND_SWEEP)
 input double MinSLPoints = 1000;         // Мин. SL, пункты (SL_BEYOND_SWEEP)
-input double MaxSLPoints = 6350;         // Макс. SL, пункты (SL_BEYOND_SWEEP)
+input double MaxSLPoints = 6350;         // Макс. SL, пункты (SL_BEYOND_SWEEP, SL_ATR)
+input int    AtrPeriod       = 14;       // Период ATR (SL_ATR)
+input double AtrSLMultiplier = 1.5;      // SL = множитель × ATR (SL_ATR)
 input double RiskRewardRatio = 2.0; // RR
+input ENUM_LIQ_TP_MODE TPMode = TP_RR;   // Режим тейк-профита
+input double MinLiquidityRR  = 1.5;      // Мин. RR для цели у противоположной ликвидности (TP_LIQUIDITY)
 input int    MaxTradesPerDay    = 0;  // Макс. входов за день (серверное время), 0 = без лимита
 input int    PauseAfterLosses   = 0;  // Пауза после N стопов подряд, 0 = выкл
 input int    LossPauseMinutes   = 60; // Длительность паузы, мин
@@ -133,6 +145,9 @@ BrokerContext g_broker;
 // TrendFilter (opt-in). При UseTrendFilter=false TrendInit no-op и TrendIsAllowed → true.
 TrendConfig  g_trend_cfg;
 TrendHandles g_trend_h;
+
+// ATR для StopMode = SL_ATR.
+int g_atr_handle = INVALID_HANDLE;
 
 // TradeAdapter + TrailingConfig для TrailingDispatcher.
 ITradeAdapter *g_trade_adapter = NULL;
@@ -284,6 +299,16 @@ int OnInit()
    g_trend_cfg.adxMin    = ADXMin;
 
    // При UseTrendFilter=false TrendInit no-op (все хэндлы → INVALID_HANDLE, return true).
+   if(StopMode == SL_ATR)
+   {
+      g_atr_handle = iATR(_Symbol, TradingTimeframe, AtrPeriod);
+      if(g_atr_handle == INVALID_HANDLE)
+      {
+         Print("❌ Не удалось создать ATR");
+         return INIT_FAILED;
+      }
+   }
+
    if(!TrendInit(g_trend_cfg, g_trend_h))
    {
       PrintFormat("❌ TrendFilter init failed | UseTrend=%s UseADX=%s | h.emaFast=%d h.emaSlow=%d h.adx=%d",
@@ -311,6 +336,11 @@ int OnInit()
 void OnDeinit(const int reason)
 {
    TrendDeinit(g_trend_h);
+   if(g_atr_handle != INVALID_HANDLE)
+   {
+      IndicatorRelease(g_atr_handle);
+      g_atr_handle = INVALID_HANDLE;
+   }
 
    if(g_trade_adapter != NULL)
      {
@@ -544,12 +574,24 @@ void CheckEntrySignals()
       return;
    }
 
-   // Стоп: фиксированный или за экстремумом свечи, снявшей ликвидность.
+   const double entry = (order_type == ORDER_TYPE_BUY) ? SymbolInfoDouble(_Symbol, SYMBOL_ASK)
+                                                       : SymbolInfoDouble(_Symbol, SYMBOL_BID);
+
+   // Стоп: фиксированный, за экстремумом снятия или от ATR.
    double slPoints = StopLossPoints;
-   if(StopMode == SL_BEYOND_SWEEP)
+   if(StopMode == SL_ATR)
    {
-      const double entry   = (order_type == ORDER_TYPE_BUY) ? SymbolInfoDouble(_Symbol, SYMBOL_ASK)
-                                                            : SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      double atr[1];
+      if(CopyBuffer(g_atr_handle, 0, 1, 1, atr) < 1 || atr[0] <= 0.0) return;
+      slPoints = MathMax(AtrSLMultiplier * atr[0] / g_broker.adjustedPoint, MinSLPoints);
+      if(slPoints > MaxSLPoints)
+      {
+         PrintFormat("🚫 SL от ATR %.0f пт > MaxSLPoints %.0f — вход пропущен", slPoints, MaxSLPoints);
+         return;
+      }
+   }
+   else if(StopMode == SL_BEYOND_SWEEP)
+   {
       const double extreme = (order_type == ORDER_TYPE_BUY) ? rates[sig].low : rates[sig].high;
       slPoints = MathAbs(entry - extreme) / g_broker.adjustedPoint + SweepSLBufferPoints;
       slPoints = MathMax(slPoints, MinSLPoints);
@@ -560,9 +602,22 @@ void CheckEntrySignals()
       }
    }
 
+   // Тейк: RR или противоположный экстремум (ближайшая ликвидность с той стороны).
+   double rr = RiskRewardRatio;
+   if(TPMode == TP_LIQUIDITY)
+   {
+      double target = (order_type == ORDER_TYPE_BUY) ? rates[sig + 1].high : rates[sig + 1].low;
+      for(int i = sig + 2; i < HistoryDepth; i++)
+         target = (order_type == ORDER_TYPE_BUY) ? MathMax(target, rates[i].high)
+                                                 : MathMin(target, rates[i].low);
+      const double liqRR = MathAbs(target - entry) / (slPoints * g_broker.adjustedPoint);
+      const bool   ahead = (order_type == ORDER_TYPE_BUY) ? (target > entry) : (target < entry);
+      if(ahead && liqRR >= MinLiquidityRR) rr = liqRR;
+   }
+
    Print(signal_msg);
 
-   OpenTrade(order_type, slPoints, RiskRewardRatio);
+   OpenTrade(order_type, slPoints, rr);
 }
 
 //+------------------------------------------------------------------+
