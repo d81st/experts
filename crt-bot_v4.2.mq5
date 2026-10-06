@@ -18,6 +18,7 @@
 #include "Include/Trailing/TrailingDispatcher.mqh"
 #include "Include/CrtDetector.mqh"
 #include "Include/EntryTrigger.mqh"
+#include "Include/TimeExit.mqh"
 #include "Include/TesterMetric.mqh"
 CTrade trade;
 ITradeAdapter *g_trade_adapter = NULL;
@@ -83,6 +84,10 @@ input double BufferPoints = 200;   // Отступ от экстремума, п
 input double MinSLPoints  = 1525;  // Мин. SL, пункты (1525 = 1.525 USD)
 input double MaxSLPoints  = 3175;  // Макс. SL, пункты (3175 = 3.175 USD)
 
+input group "── Выход ──"
+input bool   UseTakeProfit = true;  // false — без тейка: выход по SL или по времени (проверка входа)
+input int    TimeExitBars  = 0;     // Закрыть позицию через N баров TradingTimeframe (0 = выкл)
+
 input group "── Трейлинг ──"
 input ENUM_TRAILING_MODE_EX TrailingMode          = TRAILING_OFF_EX;
 input double                TrailingStartFactor   = 0.5;
@@ -120,6 +125,8 @@ struct PendingSignal
    bool     swept;          // только для SWEEP_RECLAIM: фаза 1 пройдена
    datetime expireTime;     // 0 = без ограничения
    ulong    limitTicket;    // только для ENTRY_LIMIT: тикет лимитного ордера
+   datetime signalBar;      // время бара сигнала (doji)
+   datetime loggedBar;      // только для CLOSE_CONFIRM: последний записанный в журнал бар
 
    void Reset()
    {
@@ -133,6 +140,8 @@ struct PendingSignal
       isFVG       = false;
       imbDir      = 0;
       limitTicket = 0;
+      signalBar   = 0;
+      loggedBar   = 0;
    }
 };
 
@@ -282,7 +291,7 @@ void OpenCRTTrade(ENUM_ORDER_TYPE orderType, double entry, double sl, double tp,
    req.orderType = orderType;
    req.price     = entry;
    req.sl        = sl;
-   req.tp        = tp;
+   req.tp        = UseTakeProfit ? tp : 0.0;
    req.lot       = lot;
    req.comment   = StringFormat("CRT_%s_%s TF:%s", label, dir, EnumToString(TradingTimeframe));
    req.maxSpreadToSL   = MaxSpreadToSL;
@@ -296,7 +305,7 @@ void OpenCRTTrade(ENUM_ORDER_TYPE orderType, double entry, double sl, double tp,
       const double sl_pts = (g_broker.adjustedPoint > 0.0)
                             ? MathAbs(req.price - req.sl) / g_broker.adjustedPoint
                             : 0.0;
-      const double tp_pts = (g_broker.adjustedPoint > 0.0)
+      const double tp_pts = (g_broker.adjustedPoint > 0.0 && req.tp > 0.0)
                             ? MathAbs(req.tp - req.price) / g_broker.adjustedPoint
                             : 0.0;
       const double rr     = (sl_pts > 0.0) ? tp_pts / sl_pts : 0.0;
@@ -350,7 +359,7 @@ void PlaceCRTLimitOrder(ENUM_ORDER_TYPE orderType, double price,
    req.orderType = orderType;
    req.price     = price;
    req.sl        = sl;
-   req.tp        = tp;
+   req.tp        = UseTakeProfit ? tp : 0.0;
    req.lot       = lot;
    req.comment   = StringFormat("CRT_%s TF:%s", label, EnumToString(TradingTimeframe));
 
@@ -361,7 +370,7 @@ void PlaceCRTLimitOrder(ENUM_ORDER_TYPE orderType, double price,
       const double sl_pts = (g_broker.adjustedPoint > 0.0)
                             ? MathAbs(req.price - req.sl) / g_broker.adjustedPoint
                             : 0.0;
-      const double tp_pts = (g_broker.adjustedPoint > 0.0)
+      const double tp_pts = (g_broker.adjustedPoint > 0.0 && req.tp > 0.0)
                             ? MathAbs(req.tp - req.price) / g_broker.adjustedPoint
                             : 0.0;
       const double rr     = (sl_pts > 0.0) ? tp_pts / sl_pts : 0.0;
@@ -506,9 +515,13 @@ void ProcessCRTSignal(const MqlRates &imb, const MqlRates &doji,
    g_pending.isFVG       = isFVG;
    g_pending.swept       = false;
    g_pending.limitTicket = 0;
+   g_pending.signalBar   = doji.time;
+   g_pending.loggedBar   = 0;
 
+   // CLOSE_CONFIRM: +1 бар, чтобы закрытие последнего бара ожидания успели проверить.
    if(MaxBarsToWait > 0)
-      g_pending.expireTime = doji.time + (datetime)(MaxBarsToWait + 1) * PeriodSeconds(TradingTimeframe);
+      g_pending.expireTime = doji.time + (datetime)(MaxBarsToWait + 1 + (EntryMode == ENTRY_CLOSE_CONFIRM ? 1 : 0))
+                                         * PeriodSeconds(TradingTimeframe);
    else
       g_pending.expireTime = 0;
 
@@ -529,7 +542,8 @@ void ProcessCRTSignal(const MqlRates &imb, const MqlRates &doji,
       return;
    }
 
-   string modeStr = (EntryMode == ENTRY_MARKET) ? "MARKET" : "SWEEP+RECLAIM";
+   string modeStr = (EntryMode == ENTRY_MARKET) ? "MARKET"
+                  : (EntryMode == ENTRY_CLOSE_CONFIRM) ? "CLOSE" : "SWEEP+RECLAIM";
 
    PrintFormat("⏳ Pending %s [%s] Mode:%s | Level: %.5f | SL: %.0f pts | TP: %.0f pts | RR: %.2f | Exp: %s",
                dir, label, modeStr, entry, sl_pts, tp_pts, rr,
@@ -595,7 +609,18 @@ void CheckPendingEntry()
       return;
    }
    double price = 0.0;
-   if(EntryTriggerPoll(EntryMode, dir, g_pending.entryLevel, g_pending.swept, label, price))
+   bool   fire  = false;
+   if(EntryMode == ENTRY_CLOSE_CONFIRM)
+   {
+      const int period = PeriodSeconds(TradingTimeframe);
+      fire = EntryTriggerOnClose(TradingTimeframe, dir, g_pending.entryLevel,
+                                 g_pending.signalBar + period,
+                                 MaxBarsToWait > 0 ? g_pending.signalBar + (datetime)MaxBarsToWait * period : 0,
+                                 g_pending.swept, g_pending.loggedBar, label, price);
+   }
+   else
+      fire = EntryTriggerPoll(EntryMode, dir, g_pending.entryLevel, g_pending.swept, label, price);
+   if(fire)
    {
       OpenCRTTrade(dir == 1 ? ORDER_TYPE_BUY : ORDER_TYPE_SELL, price, g_pending.sl, g_pending.tp, label);
       g_pending.Reset();
@@ -706,6 +731,7 @@ int OnInit()
       case ENTRY_SWEEP_RECLAIM: modeStr = "SWEEP+RECLAIM"; break;
       case ENTRY_MARKET:        modeStr = "MARKET";        break;
       case ENTRY_LIMIT:         modeStr = "LIMIT";         break;
+      case ENTRY_CLOSE_CONFIRM: modeStr = "CLOSE";         break;
       default:                  modeStr = "?";
    }
 
@@ -768,6 +794,9 @@ void OnDeinit(const int reason)
 
 void OnTick()
 {
+   // Выход по времени — и вне торговой сессии.
+   TimeExitManage(trade, MagicNumber, TradingTimeframe, TimeExitBars);
+
    const ENUM_SESSION_STATE session = SessionsOnTick();
    if(session == SESSION_JUST_EXITED && CloseOnSessionExit)
       HandleSessionExitClose();

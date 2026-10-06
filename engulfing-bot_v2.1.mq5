@@ -14,6 +14,7 @@
 #include "Include/Trailing/BreakevenTrail.mqh"
 #include "Include/Trailing/TrailingDispatcher.mqh"
 #include "Include/EntryTrigger.mqh"
+#include "Include/TimeExit.mqh"
 #include "Include/TesterMetric.mqh"
 CTrade trade;
 
@@ -54,6 +55,8 @@ input double BufferPoints = 200;     // Отступ от экстремума �
 input double MinSLPoints  = 1500;    // Минимальный SL, пункты (1500 = 1.50 USD)
 input double MaxSLPoints  = 3175;    // Максимальный SL, пункты (3175 = 3.175 USD)
 input double RiskReward = 1.5;     // TP = SL distance * RiskReward
+input bool   UseTakeProfit = true;  // false — без тейка: выход по SL или по времени (проверка входа)
+input int    TimeExitBars  = 0;     // Закрыть позицию через N баров TradingTimeframe (0 = выкл)
 
 // Параметры сессий — общие для всех ботов; у engulfing выбор сессий по умолчанию выключен.
 #define SESSION_DEFAULT_SELECTED      false
@@ -120,6 +123,7 @@ ulong g_pending_ticket = 0;
 
 //── Sweep/Reclaim состояние (только для ENTRY_SWEEP_RECLAIM) ──────
 bool g_swept = false;
+datetime g_logged_bar = 0;   // только для CLOSE_CONFIRM: последний записанный в журнал бар
 
 //+------------------------------------------------------------------+
 //| УТИЛИТЫ                                                          |
@@ -245,6 +249,7 @@ void ResetPattern()
    g_sl_level          = 0.0;
    g_tp_level          = 0.0;
    g_swept             = false;
+   g_logged_bar        = 0;
 }
 
 //+------------------------------------------------------------------+
@@ -329,7 +334,7 @@ bool OpenEngulfingTrade(ENUM_ORDER_TYPE orderType, double entry,
    req.orderType = orderType;
    req.price     = entry;
    req.sl        = sl;
-   req.tp        = tp;
+   req.tp        = UseTakeProfit ? tp : 0.0;
    req.lot       = BrokerCalcLot(g_broker, RiskPercent,
                                  sl_dist / g_broker.adjustedPoint,
                                  LOT_BY_TICK_VALUE, MaxRiskOvershoot);
@@ -389,7 +394,7 @@ void PlaceLimitOrder(ENUM_ORDER_TYPE orderType, double price,
    req.orderType = orderType;
    req.price     = price;
    req.sl        = sl;
-   req.tp        = tp;
+   req.tp        = UseTakeProfit ? tp : 0.0;
    req.lot       = BrokerCalcLot(g_broker, RiskPercent,
                                  sl_dist / g_broker.adjustedPoint,
                                  LOT_BY_TICK_VALUE, MaxRiskOvershoot);
@@ -578,8 +583,10 @@ void CheckEngulfingEntry()
       g_entry_level       = entry_level;
       g_pattern_dir       = new_dir;
       g_entry_candle_time = rates[0].time;
+      // CLOSE_CONFIRM: +1 бар, чтобы закрытие последнего бара ожидания успели проверить.
       if(MaxBarsToWait > 0)
-         g_pattern_expire_at = rates[1].time + (datetime)(MaxBarsToWait + 1) * PeriodSeconds(TradingTimeframe);
+         g_pattern_expire_at = rates[1].time + (datetime)(MaxBarsToWait + 1 + (EntryMode == ENTRY_CLOSE_CONFIRM ? 1 : 0))
+                                               * PeriodSeconds(TradingTimeframe);
       else
          g_pattern_expire_at = 0;
       g_sl_level          = sl;
@@ -609,7 +616,18 @@ void CheckEngulfingEntry()
       if(!IsSpreadAllowed()) return;
 
       double price = 0.0;
-      if(EntryTriggerPoll(EntryMode, g_pattern_dir, g_entry_level, g_swept, "RB 50%", price))
+      bool   fire  = false;
+      if(EntryMode == ENTRY_CLOSE_CONFIRM)
+      {
+         const int period = PeriodSeconds(TradingTimeframe);
+         fire = EntryTriggerOnClose(TradingTimeframe, g_pattern_dir, g_entry_level,
+                                    g_entry_candle_time,
+                                    MaxBarsToWait > 0 ? g_entry_candle_time + (datetime)(MaxBarsToWait - 1) * period : 0,
+                                    g_swept, g_logged_bar, "RB 50%", price);
+      }
+      else
+         fire = EntryTriggerPoll(EntryMode, g_pattern_dir, g_entry_level, g_swept, "RB 50%", price);
+      if(fire)
       {
          const ENUM_ORDER_TYPE type = (g_pattern_dir == 1) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
          const double tp_actual = CalcTPByRR(price, g_sl_level, g_pattern_dir);
@@ -675,6 +693,7 @@ int OnInit()
    if(EntryMode == ENTRY_SWEEP_RECLAIM) modeStr = "SWEEP+RECLAIM";
       else if(EntryMode == ENTRY_MARKET)   modeStr = "MARKET";
       else if(EntryMode == ENTRY_LIMIT)    modeStr = "LIMIT";
+      else if(EntryMode == ENTRY_CLOSE_CONFIRM) modeStr = "CLOSE";
 
    PrintFormat("✅ Engulfing Bot v2.1 | Magic:%d TF:%s Mode:%s D:%d P:%.8f "
                "MinSL:%.0f MaxSL:%.0f Buf:%.0f RR:%.2f RBTol:%.1f MinBody:%.1f MaxSpr:%.1f Lock:%d MaxBars:%d Fill:%s",
@@ -721,6 +740,9 @@ void OnDeinit(const int reason)
 
 void OnTick()
 {
+   // Выход по времени — и вне торговой сессии.
+   TimeExitManage(trade, MagicNumber, TradingTimeframe, TimeExitBars);
+
    const ENUM_SESSION_STATE session = SessionsOnTick();
    if(session == SESSION_JUST_EXITED && CloseOnSessionExit)
       HandleSessionExitClose();
