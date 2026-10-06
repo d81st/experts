@@ -52,6 +52,7 @@ input int HistoryDepth = 30;
 input int TrendLookback = 5;
 input int MinStreak = 3;
 input int SignalCandleShift = 0;
+input int TrendMaxAgeBars = 0; // Забыть тренд, если не подтверждался N баров (0 = никогда)
 
 input group "── Трейлинг ──"
 // Унифицированный TrailingDispatcher (OFF / BREAKEVEN / SYNC). Default = BREAKEVEN.
@@ -473,8 +474,18 @@ void CheckEntrySignals()
    if(streak_high >= MinStreak && streak_low < MinStreak) proposed_trend = 1;
    else if(streak_low >= MinStreak && streak_high < MinStreak) proposed_trend = 2;
 
-   static int current_trend = 0;
-   if(proposed_trend != 0) current_trend = proposed_trend;
+   static int      current_trend    = 0;
+   static datetime trend_confirmed  = 0;   // время бара последнего подтверждения тренда
+   if(proposed_trend != 0)
+   {
+      current_trend   = proposed_trend;
+      trend_confirmed = rates[0].time;
+   }
+   else if(TrendMaxAgeBars > 0 && current_trend != 0 &&
+           rates[0].time - trend_confirmed > (datetime)TrendMaxAgeBars * PeriodSeconds(TradingTimeframe))
+   {
+      current_trend = 0;   // тренд устарел
+   }
    if(current_trend == 0) return;
 
    int last_sig_idx = non_ghost_idx[SignalCandleShift];
