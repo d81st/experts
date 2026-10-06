@@ -14,6 +14,7 @@
 #include "Include/Trailing/BreakevenTrail.mqh"
 #include "Include/Trailing/TrailingDispatcher.mqh"
 #include "Include/EntryTrigger.mqh"
+#include "Include/TesterMetric.mqh"
 CTrade trade;
 
 //── Режим входа ──────────────────────────────────────────────────────
@@ -745,4 +746,19 @@ void OnTick()
 
    // 4. Поиск паттерна → вход
    CheckEngulfingEntry();
+}
+
+//+------------------------------------------------------------------+
+//| Журнал выходов (CSV) и критерий оптимизатора.                     |
+//+------------------------------------------------------------------+
+void OnTradeTransaction(const MqlTradeTransaction &trans,
+                        const MqlTradeRequest     &request,
+                        const MqlTradeResult      &result)
+{
+   TradeJournalOnTransaction(trans, MagicNumber);
+}
+
+double OnTester()
+{
+   return TesterMetric();
 }

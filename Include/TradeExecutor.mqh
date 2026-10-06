@@ -21,6 +21,7 @@
 
 #include <Trade\Trade.mqh>
 #include "BrokerAdapter.mqh"
+#include "TradeJournal.mqh"
 
 //+------------------------------------------------------------------+
 //| TradeOrderRequest — параметры одного торгового запроса.          |
@@ -187,6 +188,7 @@ TradeResult TradeExecutor_Skip(const uint rc, const string why)
    if(rc != s_lastRc || TimeCurrent() - s_lastTime >= 60)
      {
       PrintFormat("⏸️ Ордер не отправлен: %s", why);
+      TradeJournalWrite(StringFormat("SKIP;;;;;;;;;;;;;;%u;%s", rc, why));
       s_lastRc   = rc;
       s_lastTime = TimeCurrent();
      }
@@ -392,6 +394,9 @@ TradeResult TradeExecutorSend(CTrade              &tr,
    const int attempts = isMarket ? 3 : 1;
    bool sent = false;
    uint rc   = 0;
+   int  used = 0;   // сколько раз реально отправляли
+   const double spreadAtSend = SymbolInfoDouble(_Symbol, SYMBOL_ASK) - SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   const ulong  t0           = GetMicrosecondCount();
    for(int attempt = 0; attempt < attempts; attempt++)
      {
       if(attempt > 0)
@@ -439,6 +444,7 @@ TradeResult TradeExecutorSend(CTrade              &tr,
             result.description = "Unsupported order type after fallback";
             return result;
         }
+      used++;
       rc = tr.ResultRetcode();
       if(sent && rc == TRADE_RETCODE_DONE)
          break;
@@ -447,7 +453,8 @@ TradeResult TradeExecutorSend(CTrade              &tr,
      }
 
    //--- STEP 9: Read result
-   const string rd = tr.ResultRetcodeDescription();
+   const string rd        = tr.ResultRetcodeDescription();
+   const double latencyMs = (double)(GetMicrosecondCount() - t0) / 1000.0;
    if(sent && rc == TRADE_RETCODE_DONE)
      {
       g_tradeExecutorFailStreak = 0;
@@ -488,6 +495,15 @@ TradeResult TradeExecutorSend(CTrade              &tr,
         }
       PrintFormat("✅ %s [%s] | Lot:%.2f | SL:%.0f pts | TP:%.0f pts | RR:%.2f%s",
                   dirLabel, _Symbol, req.lot, slPoints, tpPoints, rr, slipStr);
+
+      const double fill = (isMarket && tr.ResultPrice() > 0.0) ? tr.ResultPrice() : req.price;
+      const double slip = (req.orderType == ORDER_TYPE_BUY || req.orderType == ORDER_TYPE_BUY_LIMIT)
+                          ? fill - requested : requested - fill;
+      TradeJournalWrite(StringFormat("ENTRY;%I64d;%I64d;%s;%.2f;%s;%s;%s;%s;%s;%s;%.1f;%d;;%u;%s",
+                                     (long)tr.RequestMagic(), (long)result.ticket, dirLabel, req.lot,
+                                     TradeJournal_D(requested), TradeJournal_D(fill), TradeJournal_D(slip),
+                                     TradeJournal_D(spreadAtSend), TradeJournal_D(req.sl), TradeJournal_D(req.tp),
+                                     latencyMs, used, rc, req.comment));
      }
    else
      {
@@ -495,6 +511,10 @@ TradeResult TradeExecutorSend(CTrade              &tr,
       result.ticket      = 0;
       result.retcode     = rc;
       result.description = rd;
+      TradeJournalWrite(StringFormat("REJECT;%I64d;;%s;%.2f;%s;;;%s;%s;%s;%.1f;%d;;%u;%s",
+                                     (long)tr.RequestMagic(), EnumToString(req.orderType), req.lot,
+                                     TradeJournal_D(requested), TradeJournal_D(spreadAtSend),
+                                     TradeJournal_D(req.sl), TradeJournal_D(req.tp), latencyMs, used, rc, rd));
 
       //--- серия отказов брокера → пауза отправки
       g_tradeExecutorFailStreak++;

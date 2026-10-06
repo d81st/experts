@@ -14,6 +14,7 @@
 #include "Include/Trailing/SyncTrail.mqh"
 #include "Include/Trailing/BreakevenTrail.mqh"
 #include "Include/Trailing/TrailingDispatcher.mqh"
+#include "Include/TesterMetric.mqh"
 //--- Создаем объект торгового класса
 CTrade trade;
 
@@ -613,3 +614,18 @@ void OnTick()
    TrailingManage(g_trade_adapter, g_broker, MagicNumber, g_trail_cfg);
 }
 //+------------------------------------------------------------------+
+
+//+------------------------------------------------------------------+
+//| Журнал выходов (CSV) и критерий оптимизатора.                     |
+//+------------------------------------------------------------------+
+void OnTradeTransaction(const MqlTradeTransaction &trans,
+                        const MqlTradeRequest     &request,
+                        const MqlTradeResult      &result)
+{
+   TradeJournalOnTransaction(trans, MagicNumber);
+}
+
+double OnTester()
+{
+   return TesterMetric();
+}

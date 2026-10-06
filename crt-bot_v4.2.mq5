@@ -18,6 +18,7 @@
 #include "Include/Trailing/TrailingDispatcher.mqh"
 #include "Include/CrtDetector.mqh"
 #include "Include/EntryTrigger.mqh"
+#include "Include/TesterMetric.mqh"
 CTrade trade;
 ITradeAdapter *g_trade_adapter = NULL;
 TrailingConfig g_trail_cfg;   // заполняется в OnInit, используется TrailingManage
@@ -779,4 +780,19 @@ void OnTick()
    //── Баровая ветка ──
    if(IsNewBar())
       CheckCRTEntry();
+}
+
+//+------------------------------------------------------------------+
+//| Журнал выходов (CSV) и критерий оптимизатора.                     |
+//+------------------------------------------------------------------+
+void OnTradeTransaction(const MqlTradeTransaction &trans,
+                        const MqlTradeRequest     &request,
+                        const MqlTradeResult      &result)
+{
+   TradeJournalOnTransaction(trans, MagicNumber);
+}
+
+double OnTester()
+{
+   return TesterMetric();
 }
