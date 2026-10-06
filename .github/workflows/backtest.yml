@@ -175,6 +175,16 @@ jobs:
           Copy-Item "$env:MT5_ROOT\logs\*.log" "$out\logs" -ErrorAction SilentlyContinue
           Get-ChildItem "$env:MT5_ROOT\Tester" -Recurse -Filter *.log -ErrorAction SilentlyContinue |
             ForEach-Object { Copy-Item $_.FullName ("$out\logs\tester_" + $_.Directory.Parent.Name + "_" + $_.Name) }
+          # Журналы сжимаем: за длинный период они весят сотни МБ (лимит GitHub — 100 МБ на файл).
+          Get-ChildItem "$out\logs" -File | ForEach-Object {
+            $zip = "$($_.FullName).zip"
+            Compress-Archive -Path $_.FullName -DestinationPath $zip -CompressionLevel Optimal
+            Remove-Item $_.FullName
+            if ((Get-Item $zip).Length -gt 90MB) {
+              Remove-Item $zip
+              "Журнал $($_.Name) не сохранён: даже сжатый больше 90 МБ" | Out-File "$($_.FullName).skipped.txt" -Encoding utf8
+            }
+          }
           Get-ChildItem $out -Recurse | Format-Table FullName, Length
 
       - name: Publish results to tester-results branch
