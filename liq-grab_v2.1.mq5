@@ -20,6 +20,13 @@ CTrade trade;
 //==========================================================================
 // INPUT GROUPS
 //==========================================================================
+// Где ставить стоп-лосс.
+enum ENUM_LIQ_SL_MODE
+{
+   SL_FIXED        = 0,  // Фиксированно: StopLossPoints от цены входа
+   SL_BEYOND_SWEEP = 1   // За экстремумом свечи, снявшей ликвидность, + буфер
+};
+
 input group "Money Management"
 input int MagicNumber = 71001; // Магический номер (уникальный для каждого бота)
 input double RiskPercent = 3.0; // Риск на сделку в %
@@ -28,7 +35,11 @@ input double MaxSpreadToSL   = 0.10; // Макс. спред как доля р�
 input double MaxSlippageToSL = 0.10; // Макс. проскальзывание как доля расстояния до SL (0 = без ограничения)
 
 input group "Trade Parameters"
-input double StopLossPoints = 3175; // SL в пунктах
+input ENUM_LIQ_SL_MODE StopMode = SL_BEYOND_SWEEP; // Режим стоп-лосса
+input double StopLossPoints = 3175; // SL в пунктах (режим SL_FIXED)
+input double SweepSLBufferPoints = 100;  // Буфер за экстремумом снятия, пункты (SL_BEYOND_SWEEP)
+input double MinSLPoints = 1000;         // Мин. SL, пункты (SL_BEYOND_SWEEP)
+input double MaxSLPoints = 6350;         // Макс. SL, пункты (SL_BEYOND_SWEEP)
 input double RiskRewardRatio = 2.0; // RR
 input ENUM_TIMEFRAMES TradingTimeframe = PERIOD_M3;
 input bool UseClosedBarSignal = true; // Сигнал по закрытой свече (false — внутри формирующейся, как раньше)
@@ -463,9 +474,25 @@ void CheckEntrySignals()
       return;
    }
 
+   // Стоп: фиксированный или за экстремумом свечи, снявшей ликвидность.
+   double slPoints = StopLossPoints;
+   if(StopMode == SL_BEYOND_SWEEP)
+   {
+      const double entry   = (order_type == ORDER_TYPE_BUY) ? SymbolInfoDouble(_Symbol, SYMBOL_ASK)
+                                                            : SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      const double extreme = (order_type == ORDER_TYPE_BUY) ? rates[sig].low : rates[sig].high;
+      slPoints = MathAbs(entry - extreme) / g_broker.adjustedPoint + SweepSLBufferPoints;
+      slPoints = MathMax(slPoints, MinSLPoints);
+      if(slPoints > MaxSLPoints)
+      {
+         PrintFormat("🚫 SL за снятием %.0f пт > MaxSLPoints %.0f — вход пропущен", slPoints, MaxSLPoints);
+         return;
+      }
+   }
+
    Print(signal_msg);
 
-   OpenTrade(order_type, StopLossPoints, RiskRewardRatio);
+   OpenTrade(order_type, slPoints, RiskRewardRatio);
 }
 
 //+------------------------------------------------------------------+
