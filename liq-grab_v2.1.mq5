@@ -51,8 +51,8 @@ input int  SessionWindowMinutes = 5;     // Окно блокировки вок
 
 input group "── Selected Sessions Filter ──"
 // Опциональный фильтр выбора торговых сессий (Asian/London/NewYork) в
-// UTC-координатах. При UseSelectedSessions=false — полная rollback safety
-// (Req 9.1, 9.2, 9.5): legacy путь Session Filter работает без изменений.
+// UTC-координатах. При UseSelectedSessions=false — полная rollback safety:
+// legacy путь Session Filter работает без изменений.
 input bool          UseSelectedSessions         = true; // Включить выбор сессий
 input bool          UseAsianSession             = false; // Торговать в Asian
 input bool          UseLondonSession            = true; // Торговать в London
@@ -100,10 +100,10 @@ input double          ADXMin          = 20.0;         // Минимум ADX дл
 SessionConfig g_session_cfg;
 SessionState  g_session_state;
 
-// Selected sessions filter (task 7.2; Req 2.8, 15.1, 15.2). state хранит
+// Selected sessions filter. state хранит
 // effectiveGmtOffsetSec, edge-trigger wasInsideOnPreviousTick и DST-кэш;
 // cfg заполняется из input-параметров в OnInit. При UseSelectedSessions=false
-// модуль не вызывается из OnTick — полная rollback safety (Req 9.1, 9.2).
+// модуль не вызывается из OnTick — полная rollback safety.
 SelectedSessionsConfig g_selected_cfg;
 SelectedSessionsState  g_selected_state;
 
@@ -124,7 +124,7 @@ TrailingConfig g_trail_cfg;
 
 //+------------------------------------------------------------------+
 //| LogSelectedSessionsSummary — одна сводная строка для журнала     |
-//|                              терминала (task 7.2; Req 15.1).     |
+//|                              терминала.                          |
 //|                                                                  |
 //| Формат: список выбранных сессий через запятую, эффективный       |
 //| GMT-offset в часах, шесть пар HH:MM-HH:MM UTC-границ. Источник   |
@@ -221,7 +221,7 @@ int OnInit()
       Print("⏰ Сессионный фильтр выключен");
    }
 
-   // --- Selected Sessions Filter (task 7.2; Req 2.8, 2.9, 15.1, 15.2) ---
+   // --- Selected Sessions Filter ---
    // Заполнение cfg из input-параметров. Часы × 3600 + минуты × 60
    // даёт секунды суток UTC; gmtOffsetSeconds = часы × 3600.
    g_selected_cfg.enabled                     = UseSelectedSessions;
@@ -241,7 +241,7 @@ int OnInit()
 
    // Инициализация state выполняется всегда: SelectedSessionsInit при
    // невалидном cfg сам Print'ает диагностику и сбрасывает state в
-   // безопасные нули (Req 13.1, 13.2, 13.3). При UseSelectedSessions=false
+   // безопасные нули. При UseSelectedSessions=false
    // OnTick prelude не вызывается — фильтр полностью прозрачен.
    const bool selected_ok = SelectedSessionsInit(g_selected_cfg, g_selected_state);
 
@@ -474,14 +474,13 @@ void CheckExitConditions() { /* заглушка */ }
 
 //+------------------------------------------------------------------+
 //| HandleSessionExitClose — закрытие позиций и отмена pending на    |
-//|                          переходе inside → outside (task 7.3;    |
-//|                          Req 4.1, 4.2, 4.6, 15.3).               |
+//|                          переходе inside → outside.              |
 //|                                                                  |
-//| Вызывается из OnTick prelude (task 7.4) ровно один раз на        |
+//| Вызывается из OnTick prelude ровно один раз на                   |
 //| Session_Exit_Event при `CloseOnSessionExit = true`. liq-grab не  |
 //| держит явного EA-pending state (ни g_pending, ни g_pattern_*) —  |
 //| только делегат к PositionGuard + диагностический Print            |
-//| (Req 4.6 anti-spam: вызывающий код гарантирует ровно один        |
+//| (anti-spam: вызывающий код гарантирует ровно один                |
 //| вызов через edge-trigger `wasInsideOnPreviousTick`).             |
 //|                                                                  |
 //| UTC-время выхода берётся из                                      |

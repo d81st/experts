@@ -28,13 +28,12 @@
 //    При первом совпадении `POSITION_SYMBOL == _Symbol` и
 //    `POSITION_MAGIC == magic` записывает `ENUM_POSITION_TYPE`
 //    позиции в `type` и возвращает `true`, прекращая дальнейший
-//    обход (Req 4.1).
+//    обход.
 //    При полном обходе без совпадений (включая `PositionsTotal() == 0`)
 //    возвращает `false` и оставляет `type` идентичным значению
-//    на входе в функцию (Req 4.2).
+//    на входе в функцию.
 //    Не вызывает `trade.*`, не модифицирует глобальные переменные
-//    вызывающего EA и не изменяет торговое состояние терминала
-//    (Req 4.9, 4.10).
+//    вызывающего EA и не изменяет торговое состояние терминала.
 bool PositionGuardHasOpen(const long          magic,
                           ENUM_POSITION_TYPE &type);
 
@@ -43,17 +42,16 @@ bool PositionGuardHasOpen(const long          magic,
 //    Для каждого тикета с `POSITION_SYMBOL == _Symbol` и
 //    `POSITION_MAGIC == magic` вызывает `trade.PositionClose(ticket)`
 //    ровно один раз; продолжает итерацию при отказе отдельного
-//    вызова и фиксирует неудачу через `Print` (Req 4.3, 12.9).
+//    вызова и фиксирует неудачу через `Print`.
 //    Возвращает количество вызовов `trade.PositionClose`,
-//    вернувших `true` (Req 4.3).
+//    вернувших `true`.
 //    Никогда не вызывает `trade.PositionClose` для тикетов с
-//    `POSITION_SYMBOL != _Symbol` или `POSITION_MAGIC != magic`
-//    (Req 4.5, 12.1, 12.2).
+//    `POSITION_SYMBOL != _Symbol` или `POSITION_MAGIC != magic`.
 //    При `magic <= 0` возвращается без обхода `PositionsTotal()`
-//    и без единого вызова `trade.PositionClose` (Req 12.8).
+//    и без единого вызова `trade.PositionClose`.
 //    При `PositionsTotal() == 0` или отсутствии совпадений по
 //    фильтру — завершается без мутирующих вызовов и без записи
-//    ошибок (Req 12.7).
+//    ошибок.
 int PositionGuardCloseAll(CTrade     &tr,
                           const long  magic);
 
@@ -64,13 +62,11 @@ int PositionGuardCloseAll(CTrade     &tr,
 //        ORDER_TYPE_SELL_LIMIT, ORDER_TYPE_BUY_STOP,
 //        ORDER_TYPE_SELL_STOP, ORDER_TYPE_BUY_STOP_LIMIT,
 //        ORDER_TYPE_SELL_STOP_LIMIT },
-//      OrderGetInteger(ORDER_STATE) == ORDER_STATE_PLACED
-//    (Req 4.7).
+//      OrderGetInteger(ORDER_STATE) == ORDER_STATE_PLACED.
 //    При `OrderSelect(ticket) == false` возвращает `false` без
-//    последующих вызовов `OrderGet*` по этому тикету (Req 4.8).
+//    последующих вызовов `OrderGet*` по этому тикету.
 //    Не вызывает `trade.*`, не модифицирует глобальные переменные
-//    вызывающего EA и не изменяет торговое состояние терминала
-//    (Req 4.9, 4.10).
+//    вызывающего EA и не изменяет торговое состояние терминала.
 //    Тикет всегда передаётся явно — модуль не читает глобальных
 //    ticket-флагов EA (champion: crt-bot, §10.7).
 bool PositionGuardPendingExists(const ulong ticket);
@@ -80,17 +76,16 @@ bool PositionGuardPendingExists(const ulong ticket);
 //    Для каждого тикета с `ORDER_SYMBOL == _Symbol` и
 //    `ORDER_MAGIC == magic` вызывает `trade.OrderDelete(ticket)`
 //    ровно один раз; продолжает итерацию при отказе отдельного
-//    вызова и фиксирует неудачу через `Print` (Req 4.4, 12.9).
+//    вызова и фиксирует неудачу через `Print`.
 //    Возвращает количество вызовов `trade.OrderDelete`,
-//    вернувших `true` (Req 4.4).
+//    вернувших `true`.
 //    Никогда не вызывает `trade.OrderDelete` для тикетов с
-//    `ORDER_SYMBOL != _Symbol` или `ORDER_MAGIC != magic`
-//    (Req 4.6, 12.3, 12.4).
+//    `ORDER_SYMBOL != _Symbol` или `ORDER_MAGIC != magic`.
 //    При `magic <= 0` возвращается без обхода `OrdersTotal()`
-//    и без единого вызова `trade.OrderDelete` (Req 12.8).
+//    и без единого вызова `trade.OrderDelete`.
 //    При `OrdersTotal() == 0` или отсутствии совпадений по
 //    фильтру — завершается без мутирующих вызовов и без записи
-//    ошибок (Req 12.7).
+//    ошибок.
 int PositionGuardCancelAllPending(CTrade     &tr,
                                   const long  magic);
 
@@ -136,21 +131,21 @@ bool PositionGuardHasOpen(const long magic, ENUM_POSITION_TYPE &type)
 //+------------------------------------------------------------------+
 int PositionGuardCloseAll(CTrade &tr, const long magic)
   {
-   if(magic <= 0) return 0;              // Req 12.8: early exit
+   if(magic <= 0) return 0;              // early exit
    int closed = 0;
    const int total = PositionsTotal();
    for(int i = total - 1; i >= 0; i--)
      {
       const ulong ticket = PositionGetTicket(i);
       if(ticket == 0) continue;
-      // Req 4.5, 12.1, 12.2: cross-magic guard
+      // cross-magic guard
       if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
       if(PositionGetInteger(POSITION_MAGIC) != magic)   continue;
       if(tr.PositionClose(ticket))
          closed++;
       else
          PrintFormat("PositionGuardCloseAll: PositionClose(%I64u) failed, retcode=%u",
-                     ticket, tr.ResultRetcode()); // Req 12.9 — log but continue
+                     ticket, tr.ResultRetcode()); // log but continue
      }
    return closed;
   }
@@ -170,7 +165,7 @@ int PositionGuardCloseAll(CTrade &tr, const long magic)
 bool PositionGuardPendingExists(const ulong ticket)
   {
    if(!OrderSelect(ticket))
-      return false;                       // Req 4.8: ни одного OrderGet* после false
+      return false;                       // ни одного OrderGet* после false
 
    const ENUM_ORDER_TYPE  type  = (ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
    const ENUM_ORDER_STATE state = (ENUM_ORDER_STATE)OrderGetInteger(ORDER_STATE);
@@ -183,7 +178,7 @@ bool PositionGuardPendingExists(const ulong ticket)
        type == ORDER_TYPE_BUY_STOP_LIMIT  ||
        type == ORDER_TYPE_SELL_STOP_LIMIT);
 
-   return (isPendingType && state == ORDER_STATE_PLACED);  // Req 4.7
+   return (isPendingType && state == ORDER_STATE_PLACED);
   }
 
 //+------------------------------------------------------------------+
@@ -200,7 +195,7 @@ bool PositionGuardPendingExists(const ulong ticket)
 //+------------------------------------------------------------------+
 int PositionGuardCancelAllPending(CTrade &tr, const long magic)
   {
-   if(magic <= 0) return 0;              // Req 12.8: ранний выход без обхода
+   if(magic <= 0) return 0;              // ранний выход без обхода
 
    int cancelled = 0;
    const int total = OrdersTotal();
@@ -208,7 +203,7 @@ int PositionGuardCancelAllPending(CTrade &tr, const long magic)
      {
       const ulong ticket = OrderGetTicket(i);
       if(ticket == 0) continue;
-      // Req 4.6, 12.3, 12.4: cross-magic guard — оба фильтра обязательны
+      // cross-magic guard — оба фильтра обязательны
       if(OrderGetString(ORDER_SYMBOL) != _Symbol) continue;
       if(OrderGetInteger(ORDER_MAGIC) != magic)   continue;
 
@@ -216,7 +211,7 @@ int PositionGuardCancelAllPending(CTrade &tr, const long magic)
          cancelled++;
       else
          PrintFormat("PositionGuardCancelAllPending: OrderDelete(%I64u) failed, retcode=%u",
-                     ticket, tr.ResultRetcode());  // Req 12.9 — log but continue
+                     ticket, tr.ResultRetcode());  // log but continue
      }
    return cancelled;
   }

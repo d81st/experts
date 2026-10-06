@@ -64,8 +64,8 @@ input int  SessionWindowMinutes = 5;    // Окно блокировки вок�
 
 input group "── Selected Sessions Filter ──"
 // Опциональный фильтр выбора торговых сессий (Asian/London/NewYork) в
-// UTC-координатах. При UseSelectedSessions=false — полная rollback safety
-// (Req 9.1, 9.2, 9.5): legacy путь Session Filter работает без изменений.
+// UTC-координатах. При UseSelectedSessions=false — полная rollback safety:
+// legacy путь Session Filter работает без изменений.
 input bool          UseSelectedSessions         = false; // Включить выбор сессий
 input bool          UseAsianSession             = false; // Торговать в Asian
 input bool          UseLondonSession            = false; // Торговать в London
@@ -124,7 +124,7 @@ SessionState  g_session_state;
 
 // Selected Sessions Filter (новый API, UTC-based) — независимо от
 // legacy SessionConfig/State. Заполняется в OnInit из input-параметров
-// группы «── Selected Sessions Filter ──» (Req 1.1, 1.2, 11.3).
+// группы «── Selected Sessions Filter ──».
 SelectedSessionsConfig g_selected_cfg;
 SelectedSessionsState  g_selected_state;
 
@@ -473,16 +473,14 @@ void CloseAllOpenPositions()
 //| Вызывается из OnTick prelude после SelectedSessionsDetectExit==  |
 //| true и только при CloseOnSessionExit=true. Edge-trigger в        |
 //| DetectExit гарантирует ровно один вызов на переход inside→       |
-//| outside (Req 4.4, 15.4), поэтому Print здесь тоже один на        |
-//| событие (Req 4.6, 15.3).                                         |
+//| outside, поэтому Print здесь тоже один на                        |
+//| событие.                                                         |
 //|                                                                  |
 //| Контракт:                                                        |
-//|   1. PositionGuardCloseAll(trade, MagicNumber)         (Req 4.1) |
-//|   2. PositionGuardCancelAllPending(trade, MagicNumber) (Req 4.2) |
+//|   1. PositionGuardCloseAll(trade, MagicNumber)                   |
+//|   2. PositionGuardCancelAllPending(trade, MagicNumber)           |
 //|   3. EA-specific pending: ResetPattern + g_pending_ticket=0      |
-//|                                                        (Req 4.3) |
-//|   4. Один Print с UTC-временем выхода и счётчиками      (Req 4.6,|
-//|                                                          15.3)   |
+//|   4. Один Print с UTC-временем выхода и счётчиками               |
 //|                                                                  |
 //| UTC-время берём из g_selected_state.lastEvaluatedUtcSec — оно    |
 //| записано последним вызовом SelectedSessionsIsInside (внутри      |
@@ -787,9 +785,9 @@ int OnInit()
    // ── Selected Sessions Filter (новый API) ─────────────────────────
    // Заполняется всегда (даже при UseSelectedSessions=false) — при
    // disabled cfg модуль не вызывает SymbolInfoSessionTrade и не
-   // обращается к платформенному времени в OnTick (Req 2.10, 9.1, 9.2,
-   // 9.5). SelectedSessionsInit сам печатает диагностику при невалидном
-   // cfg (Req 2.9, 13.1–13.3); здесь — один сводный лог (Req 15.1, 15.2).
+   // обращается к платформенному времени в OnTick.
+   // SelectedSessionsInit сам печатает диагностику при невалидном
+   // cfg; здесь — один сводный лог.
    g_selected_cfg.enabled                     = UseSelectedSessions;
    g_selected_cfg.useAsian                    = UseAsianSession;
    g_selected_cfg.useLondon                   = UseLondonSession;
@@ -815,7 +813,7 @@ int OnInit()
    {
       // SelectedSessionsInit уже залогировал точную причину (имя поля
       // и значение). Здесь — один итоговый one-liner о том, что фильтр
-      // принудительно выключен на этот запуск (Req 2.9, 13.1–13.3, 15.1).
+      // принудительно выключен на этот запуск.
       Print("⚠️ Selected Sessions Init failed → filter disabled for this session");
    }
    else
@@ -904,17 +902,16 @@ void OnTick()
 {
    // SessionFilter использует TimeCurrent() (см. модуль) — детерминированно в тестере.
 
-   // ── Selected Sessions Filter prelude (task 6.4) ─────────────────
+   // ── Selected Sessions Filter prelude ─────────────────
    // При UseSelectedSessions = true фильтр применяется ДО legacy
-   // SessionIsAmericanPreClose / SessionIsBoundary (Req 8.1).
-   //   1. DetectExit (edge-trigger inside→outside, Req 1.5, 4.4):
+   // SessionIsAmericanPreClose / SessionIsBoundary.
+   //   1. DetectExit (edge-trigger inside→outside):
    //      при CloseOnSessionExit=true вызываем HandleSessionExitClose
-   //      (Req 4.1–4.3, 4.6, 15.3) и выходим из тика (Req 3.5, 8.2).
+   // и выходим из тика.
    //   2. IsInside=false вне Selected_Union_Interval ⇒ ранний return:
-   //      ни поиска паттернов, ни ордеров, ни трейлинга (Req 3.1–3.4).
+   //      ни поиска паттернов, ни ордеров, ни трейлинга.
    // При UseSelectedSessions = false prelude пропускается и legacy
-   // путь работает без изменений и в прежнем порядке (Req 8.4, 9.1,
-   // 9.2).
+   // путь работает без изменений и в прежнем порядке.
    if(UseSelectedSessions)
    {
       if(SelectedSessionsDetectExit(g_selected_cfg, g_selected_state))

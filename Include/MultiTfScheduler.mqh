@@ -9,35 +9,31 @@
 //|  This header declares:                                           |
 //|   - константу MULTITF_SCHEDULER_MAX_TF и массив                  |
 //|     MultiTfScheduler_AllTF в фиксированном порядке               |
-//|     M1, M5, M15, M30, H1, H4, H8, D1, W1, MN1 (Req 6.4)          |
+//|     M1, M5, M15, M30, H1, H4, H8, D1, W1, MN1                    |
 //|   - MultiTfSchedulerConfig — десять bool-флагов use<TF>          |
-//|     (Req 6.2)                                                    |
 //|   - MultiTfSchedulerState — активный набор + lastCheckedBar      |
-//|     (Req 6.4, 7.1, 7.2)                                          |
 //|   - прототипы публичных функций модуля:                          |
-//|       MultiTfSchedulerInit               (Req 6.1, 6.3, 6.4, 6.5)|
-//|       MultiTfSchedulerActiveCount        (Req 6.6)               |
-//|       MultiTfSchedulerActiveAt           (Req 6.6)               |
-//|       MultiTfSchedulerTFEnum             (Req 6.6)               |
-//|       MultiTfSchedulerTFToString         (Req 6.7, 6.8, 15.2)    |
-//|       MultiTfSchedulerIsNewBar           (Req 7.1, 7.2)          |
-//|       MultiTfSchedulerLoadLastSignalBar  (Req 7.3, 7.5, 15.3)    |
-//|       MultiTfSchedulerSaveLastSignalBar  (Req 7.4, 7.5, 15.3)    |
-//|   - прототип приватного хелпера с префиксом MultiTfScheduler_*   |
-//|     (Req 17.8):                                                  |
-//|       MultiTfScheduler_GVarName          (Req 7.5, 15.3)         |
+//|       MultiTfSchedulerInit                                       |
+//|       MultiTfSchedulerActiveCount                                |
+//|       MultiTfSchedulerActiveAt                                   |
+//|       MultiTfSchedulerTFEnum                                     |
+//|       MultiTfSchedulerTFToString                                 |
+//|       MultiTfSchedulerIsNewBar                                   |
+//|       MultiTfSchedulerLoadLastSignalBar                          |
+//|       MultiTfSchedulerSaveLastSignalBar                          |
+//|   - прототип приватного хелпера с префиксом MultiTfScheduler_*:  |
+//|       MultiTfScheduler_GVarName                                  |
 //|                                                                  |
-//|  Модуль соответствует требованиям модульной изоляции             |
-//|  (Req 17.2, 17.4, 17.5, 17.6): include-guard уникален,           |
+//|  Модуль соответствует требованиям модульной изоляции:            |
+//|  include-guard уникален,                                         |
 //|  конфигурация и состояние передаются только через struct-        |
 //|  аргументы по ссылке, `input`-объявления в этом файле            |
 //|  отсутствуют. Глобальное состояние модуля ограничено             |
-//|  массивом-константой MultiTfScheduler_AllTF (Req 6.4); всё       |
+//|  массивом-константой MultiTfScheduler_AllTF; всё                 |
 //|  изменяемое состояние держит вызывающая сторона в                |
-//|  MultiTfSchedulerState (Req 17.4).                               |
+//|  MultiTfSchedulerState.                                          |
 //|                                                                  |
-//|  Стиль файла мирорит TrendFilter.mqh и CrtDetector.mqh           |
-//|  (Req 17.6).                                                     |
+//|  Стиль файла мирорит TrendFilter.mqh и CrtDetector.mqh.          |
 //|                                                                  |
 //|  Тела функций реализуются в задачах 3.2 (управление активным     |
 //|  набором ТФ и форматирование имён) и 3.3 (антидубль по бару +    |
@@ -54,7 +50,7 @@
 //|  MULTITF_SCHEDULER_MAX_TF — фиксированное количество             |
 //|  поддерживаемых таймфреймов. Менять нельзя: размерность          |
 //|  привязана к набору input-флагов в Crt_Push_V7/V8 и к            |
-//|  внутренним массивам MultiTfSchedulerState (Req 6.2, 6.4).       |
+//|  внутренним массивам MultiTfSchedulerState.                      |
 //+------------------------------------------------------------------+
 #define MULTITF_SCHEDULER_MAX_TF 10
 
@@ -64,9 +60,9 @@
 //|                                                                  |
 //|  Порядок соответствует порядку input-флагов use<TF> в            |
 //|  Crt_Push_V7 и Crt_Push_V8: M1, M5, M15, M30, H1, H4, H8, D1,    |
-//|  W1, MN1 (Req 6.4). Менять порядок нельзя — это сломает          |
-//|  поведенческую эквивалентность с Crt_Push_V7 (Req 15.1) и        |
-//|  схему ключа GlobalVariable для антидубля (Req 7.5, 15.3),       |
+//|  W1, MN1. Менять порядок нельзя — это сломает                    |
+//|  поведенческую эквивалентность с Crt_Push_V7 и                   |
+//|  схему ключа GlobalVariable для антидубля,                       |
 //|  потому что MultiTfScheduler_GVarName использует индекс tfIdx    |
 //|  как ключ в этот массив.                                         |
 //|                                                                  |
@@ -83,18 +79,18 @@ ENUM_TIMEFRAMES MultiTfScheduler_AllTF[MULTITF_SCHEDULER_MAX_TF] =
 
 //+------------------------------------------------------------------+
 //| MultiTfSchedulerConfig — иммутабельная конфигурация активного    |
-//| набора таймфреймов (Req 6.2).                                    |
+//| набора таймфреймов.                                              |
 //|                                                                  |
 //|  Ровно десять полей типа bool — по одному на каждый ТФ в         |
 //|  MultiTfScheduler_AllTF, в том же порядке. Поле useX == true     |
-//|  означает «ТФ X активен» (Req 6.4).                              |
+//|  означает «ТФ X активен».                                        |
 //|                                                                  |
 //|  Передаётся в MultiTfSchedulerInit через const & — модуль НЕ     |
-//|  модифицирует поля config (Req 17.4). Имена полей повторяют      |
+//|  модифицирует поля config. Имена полей повторяют                 |
 //|  имена input-флагов в Crt_Push_V7/V8 (`Use_M1`, `Use_H1`, ...),  |
 //|  но без префикса `Use_`: модуль не зависит от EA-специфичных     |
 //|  имён, а оркестратор отвечает за маппинг `Use_X → useX` при      |
-//|  построении config (Req 17.4, 10.5).                             |
+//|  построении config.                                              |
 //+------------------------------------------------------------------+
 struct MultiTfSchedulerConfig
   {
@@ -111,25 +107,24 @@ struct MultiTfSchedulerConfig
   };
 
 //+------------------------------------------------------------------+
-//| MultiTfSchedulerState — мутабельное состояние планировщика       |
-//| (Req 6.4, 7.1, 7.2).                                             |
+//| MultiTfSchedulerState — мутабельное состояние планировщика.      |
 //|                                                                  |
 //|  activeCount       — число активных ТФ ∈ [0, MAX_TF].             |
 //|                       0 ⇔ MultiTfSchedulerInit отказал (все      |
-//|                       флаги config были false; Req 6.3, 6.5).    |
+//|                       флаги config были false).                  |
 //|                                                                  |
 //|  activeIndices[]   — упорядоченный список индексов в массиве     |
 //|                       MultiTfScheduler_AllTF, для которых        |
-//|                       соответствующий флаг config был true       |
-//|                       (Req 6.4). Валидные позиции —              |
+//|                       соответствующий флаг config был true.      |
+//|                       Валидные позиции —                         |
 //|                       [0, activeCount); остальные элементы       |
 //|                       массива не определены (вызывающая сторона  |
 //|                       обязана итерировать только до              |
 //|                       activeCount).                              |
 //|                       Порядок строго возрастающий относительно   |
-//|                       MultiTfScheduler_AllTF (Req 6.4).          |
+//|                       MultiTfScheduler_AllTF.                    |
 //|                                                                  |
-//|  lastCheckedBar[]  — in-memory антидубль по бару (Req 7.1, 7.2). |
+//|  lastCheckedBar[]  — in-memory антидубль по бару.                |
 //|                       Индексируется значением tfIdx (т.е.        |
 //|                       индексом в MultiTfScheduler_AllTF, а НЕ    |
 //|                       порядковым номером ordinal в               |
@@ -138,13 +133,13 @@ struct MultiTfSchedulerConfig
 //|                       тем же tfIdx, что и AllTF, без             |
 //|                       дополнительной трансляции.                 |
 //|                       Все элементы инициализируются в 0 при      |
-//|                       успешном MultiTfSchedulerInit (Req 7.1).   |
+//|                       успешном MultiTfSchedulerInit.             |
 //|                                                                  |
 //|  Структура передаётся в публичные функции по reference; некоторые|
 //|  функции принимают её как const & (read-only итерация и          |
 //|  GlobalVariable round-trip), некоторые — как mutable &           |
 //|  (Init и IsNewBar обновляют поля). Конкретные const-/mutable-    |
-//|  контракты зафиксированы в прототипах ниже (Req 17.4, 7.2).      |
+//|  контракты зафиксированы в прототипах ниже.                      |
 //+------------------------------------------------------------------+
 struct MultiTfSchedulerState
   {
@@ -160,31 +155,30 @@ struct MultiTfSchedulerState
 //+------------------------------------------------------------------+
 //| MultiTfSchedulerInit — построить активный набор ТФ из config.    |
 //|                                                                  |
-//|  Сигнатура (Req 6.1): принимает иммутабельную конфигурацию       |
+//|  Сигнатура: принимает иммутабельную конфигурацию                 |
 //|  через const & и мутабельное состояние через &.                  |
 //|                                                                  |
 //|  Контракт реализации (полный порядок шагов фиксируется в задаче  |
 //|  3.2 этой спеки):                                                |
 //|                                                                  |
-//|   1. Прочитать десять флагов из config (Req 6.2).                |
+//|   1. Прочитать десять флагов из config.                          |
 //|   2. Если все флаги false — вернуть false и оставить             |
-//|      state.activeCount = 0 (Req 6.3, 6.5). Атомарность           |
+//|      state.activeCount = 0. Атомарность                          |
 //|      инициализации: state не должен оказаться в                  |
-//|      полу-инициализированном виде (Req 6.5).                     |
+//|      полу-инициализированном виде.                               |
 //|   3. Иначе заполнить state.activeIndices[0..activeCount-1]       |
 //|      упорядоченным списком индексов в MultiTfScheduler_AllTF,    |
-//|      для которых соответствующий флаг включён (Req 6.4).         |
+//|      для которых соответствующий флаг включён.                   |
 //|      Порядок — строго возрастающий относительно AllTF: сначала   |
 //|      M1, затем M5, ..., MN1.                                     |
 //|   4. Обнулить state.lastCheckedBar[tfIdx] для всех tfIdx ∈       |
-//|      [0, MAX_TF) — это инициализация in-memory антидубля         |
-//|      (Req 7.1).                                                  |
+//|      [0, MAX_TF) — это инициализация in-memory антидубля.        |
 //|   5. Вернуть true.                                               |
 //|                                                                  |
 //|  Возвращаемое значение — true при успешной инициализации с       |
-//|  непустым активным набором; false при пустом активном наборе     |
-//|  (Req 6.3, 6.5). Оркестратор обязан различать эти два случая и   |
-//|  возвращать INIT_FAILED при false (Req 10.6).                    |
+//|  непустым активным набором; false при пустом активном наборе.    |
+//|  Оркестратор обязан различать эти два случая и                   |
+//|  возвращать INIT_FAILED при false.                               |
 //|                                                                  |
 //|  Тело реализуется в задаче 3.2.                                  |
 //+------------------------------------------------------------------+
@@ -194,15 +188,15 @@ bool MultiTfSchedulerInit(const MultiTfSchedulerConfig &config,
 //+------------------------------------------------------------------+
 //| MultiTfSchedulerActiveCount — число активных ТФ.                 |
 //|                                                                  |
-//|  Возвращает state.activeCount без модификации state (Req 6.6,    |
-//|  17.4). Используется как верхняя граница цикла итерации:         |
+//|  Возвращает state.activeCount без модификации state.             |
+//|  Используется как верхняя граница цикла итерации:                |
 //|                                                                  |
 //|    for(int i = 0; i < MultiTfSchedulerActiveCount(state); i++)   |
 //|      { int tfIdx = MultiTfSchedulerActiveAt(state, i); ... }     |
 //|                                                                  |
 //|  При state, полученном из неудачного Init (false возврат),       |
 //|  возвращает 0 — цикл итерации в OnTick корректно не              |
-//|  выполняется ни разу (Req 6.3, 11.1).                            |
+//|  выполняется ни разу.                                            |
 //|                                                                  |
 //|  Тело реализуется в задаче 3.2.                                  |
 //+------------------------------------------------------------------+
@@ -215,7 +209,7 @@ int MultiTfSchedulerActiveCount(const MultiTfSchedulerState &state);
 //|  activeOrdinal ∈ [0, ActiveCount(state)) — порядковый номер в    |
 //|  активном наборе (НЕ индекс в MultiTfScheduler_AllTF).           |
 //|  Возвращает state.activeIndices[activeOrdinal], т.е. индекс в    |
-//|  MultiTfScheduler_AllTF (Req 6.6).                               |
+//|  MultiTfScheduler_AllTF.                                         |
 //|                                                                  |
 //|  Поведение при activeOrdinal вне диапазона [0, ActiveCount):     |
 //|  не специфицировано контрактом — вызывающая сторона обязана      |
@@ -224,7 +218,7 @@ int MultiTfSchedulerActiveCount(const MultiTfSchedulerState &state);
 //|  семантика «out-of-range → undefined» зафиксирована здесь как    |
 //|  контракт.                                                       |
 //|                                                                  |
-//|  Не модифицирует state (const &, Req 17.4).                      |
+//|  Не модифицирует state (const &).                                |
 //|                                                                  |
 //|  Тело реализуется в задаче 3.2.                                  |
 //+------------------------------------------------------------------+
@@ -234,7 +228,7 @@ int MultiTfSchedulerActiveAt(const MultiTfSchedulerState &state,
 //+------------------------------------------------------------------+
 //| MultiTfSchedulerTFEnum — преобразовать tfIdx в ENUM_TIMEFRAMES.  |
 //|                                                                  |
-//|  Возвращает MultiTfScheduler_AllTF[tfIdx] (Req 6.6). Используется|
+//|  Возвращает MultiTfScheduler_AllTF[tfIdx]. Используется          |
 //|  вызывающей стороной для подстановки результата                  |
 //|  ActiveAt(state, ordinal) в API MT5, требующее ENUM_TIMEFRAMES   |
 //|  (CopyRates, iMA, ...).                                          |
@@ -253,7 +247,7 @@ ENUM_TIMEFRAMES MultiTfSchedulerTFEnum(const int tfIdx);
 //+------------------------------------------------------------------+
 //| MultiTfSchedulerTFToString — человеко-читаемое короткое имя ТФ.  |
 //|                                                                  |
-//|  Контракт (Req 6.7, 6.8):                                        |
+//|  Контракт:                                                       |
 //|    PERIOD_M1  → "M1"                                             |
 //|    PERIOD_M5  → "M5"                                             |
 //|    PERIOD_M15 → "M15"                                            |
@@ -264,11 +258,11 @@ ENUM_TIMEFRAMES MultiTfSchedulerTFEnum(const int tfIdx);
 //|    PERIOD_D1  → "D1"                                             |
 //|    PERIOD_W1  → "W1"                                             |
 //|    PERIOD_MN1 → "MN"                                             |
-//|    default    → EnumToString(tf)  (fallback, Req 6.8)            |
+//|    default    → EnumToString(tf)  (fallback)                     |
 //|                                                                  |
 //|  Формат строго идентичен TFToString из crt-push_v7.2.mq5 —       |
 //|  изменение формата сломает поведенческую эквивалентность с       |
-//|  Crt_Push_V7 в сообщениях push-уведомлений (Req 15.2).           |
+//|  Crt_Push_V7 в сообщениях push-уведомлений.                      |
 //|                                                                  |
 //|  Чистая функция от значения tf; не зависит от state.             |
 //|                                                                  |
@@ -279,10 +273,10 @@ string MultiTfSchedulerTFToString(const ENUM_TIMEFRAMES tf);
 //+------------------------------------------------------------------+
 //| MultiTfSchedulerIsNewBar — антидубль по бару (in-memory).        |
 //|                                                                  |
-//|  Контракт (Req 7.1, 7.2):                                        |
+//|  Контракт:                                                       |
 //|    - Возвращает true ⇔ barTime != state.lastCheckedBar[tfIdx].   |
 //|    - При возврате true SHALL обновить state.lastCheckedBar[tfIdx]|
-//|      значением barTime до возврата управления (Req 7.2).         |
+//|      значением barTime до возврата управления.                   |
 //|    - При возврате false state НЕ модифицируется.                 |
 //|                                                                  |
 //|  Семантика: «есть ли новый бар, который мы ещё не обработали     |
@@ -292,11 +286,11 @@ string MultiTfSchedulerTFToString(const ENUM_TIMEFRAMES tf);
 //|  оркестратор использует две проверки последовательно: сначала    |
 //|  IsNewBar (защита от лишних CrtDetectorDetect в той же сессии),  |
 //|  затем Load/Save (защита от повторной отправки после             |
-//|  перезапуска) (Req 11.4, 11.5, 11.7).                            |
+//|  перезапуска).                                                   |
 //|                                                                  |
 //|  Параметр state объявлен как mutable & (без const), потому что   |
 //|  функция модифицирует state.lastCheckedBar[tfIdx] при первом     |
-//|  вызове на новом баре (Req 7.2).                                 |
+//|  вызове на новом баре.                                           |
 //|                                                                  |
 //|  tfIdx ∈ [0, MULTITF_SCHEDULER_MAX_TF). Поведение за пределами   |
 //|  диапазона не специфицировано.                                   |
@@ -311,7 +305,7 @@ bool MultiTfSchedulerIsNewBar(MultiTfSchedulerState &state,
 //| MultiTfSchedulerLoadLastSignalBar — чтение last-signal bar через |
 //| GlobalVariable.                                                  |
 //|                                                                  |
-//|  Контракт (Req 7.3, 7.5):                                        |
+//|  Контракт:                                                       |
 //|    - Формирует имя GlobalVariable через                          |
 //|      MultiTfScheduler_GVarName(tfIdx).                           |
 //|    - Если GlobalVariableCheck(name) == false — возвращает 0      |
@@ -321,12 +315,12 @@ bool MultiTfSchedulerIsNewBar(MultiTfSchedulerState &state,
 //|  Это «персистентный» слой антидубля: переживает перезапуск       |
 //|  советника и терминала, в отличие от in-memory                   |
 //|  state.lastCheckedBar. Используется оркестратором сразу после    |
-//|  IsNewBar (Req 11.5).                                            |
+//|  IsNewBar.                                                       |
 //|                                                                  |
 //|  state передаётся как const & — функция не модифицирует          |
 //|  state, обращение идёт исключительно к GlobalVariable.           |
 //|  Параметр state в сигнатуре зарезервирован для будущих           |
-//|  расширений и для симметрии с Save (Req 17.4).                   |
+//|  расширений и для симметрии с Save.                              |
 //|                                                                  |
 //|  tfIdx ∈ [0, MULTITF_SCHEDULER_MAX_TF).                          |
 //|                                                                  |
@@ -339,19 +333,19 @@ datetime MultiTfSchedulerLoadLastSignalBar(const MultiTfSchedulerState &state,
 //| MultiTfSchedulerSaveLastSignalBar — запись last-signal bar в     |
 //| GlobalVariable.                                                  |
 //|                                                                  |
-//|  Контракт (Req 7.4, 7.5):                                        |
+//|  Контракт:                                                       |
 //|    - Формирует имя GlobalVariable через                          |
 //|      MultiTfScheduler_GVarName(tfIdx).                           |
 //|    - Вызывает GlobalVariableSet(name, (double)barTime).          |
 //|                                                                  |
 //|  Используется оркестратором после успешной отправки push-        |
-//|  уведомления (Req 11.7), чтобы избежать повторной отправки на    |
+//|  уведомления, чтобы избежать повторной отправки на               |
 //|  том же баре после перезапуска советника.                        |
 //|                                                                  |
 //|  state передаётся как const & — функция не модифицирует state    |
 //|  (вся модификация состояния идёт через GlobalVariable). Параметр |
 //|  state в сигнатуре зарезервирован для будущих расширений и для  |
-//|  симметрии с Load (Req 17.4).                                    |
+//|  симметрии с Load.                                               |
 //|                                                                  |
 //|  tfIdx ∈ [0, MULTITF_SCHEDULER_MAX_TF).                          |
 //|                                                                  |
@@ -362,7 +356,7 @@ void MultiTfSchedulerSaveLastSignalBar(const MultiTfSchedulerState &state,
                                        const datetime               barTime);
 
 //+------------------------------------------------------------------+
-//| Приватные хелперы модуля (префикс MultiTfScheduler_*, Req 17.8). |
+//| Приватные хелперы модуля (префикс MultiTfScheduler_*).           |
 //|                                                                  |
 //|  Не входят в публичный API; используются только телами публичных |
 //|  функций. Префикс предотвращает коллизии с одноимёнными          |
@@ -374,16 +368,15 @@ void MultiTfSchedulerSaveLastSignalBar(const MultiTfSchedulerState &state,
 //| MultiTfScheduler_GVarName — формирование имени GlobalVariable    |
 //| для антидубля по бару.                                           |
 //|                                                                  |
-//|  Контракт (Req 7.5, 15.3):                                       |
+//|  Контракт:                                                       |
 //|                                                                  |
 //|    return StringFormat("RBCRT_%s_%s_lastBar",                    |
 //|                        _Symbol,                                  |
 //|                        EnumToString(MultiTfScheduler_AllTF[tfIdx])); |
 //|                                                                  |
-//|  Формат ключа идентичен GVarName из crt-push_v7.2.mq5 (Req 15.3, |
-//|  7.5). Менять нельзя — изменение схемы ключа обнулит историю     |
-//|  антидубля для уже работающих установок Crt_Push_V7, что прямо   |
-//|  запрещено Req 7.5.                                              |
+//|  Формат ключа идентичен GVarName из crt-push_v7.2.mq5.           |
+//|  Менять нельзя — изменение схемы ключа обнулит историю           |
+//|  антидубля для уже работающих установок Crt_Push_V7.             |
 //|                                                                  |
 //|  Замечание: используется именно EnumToString(tf) (т.е.           |
 //|  "PERIOD_H1"), а не короткое имя из MultiTfSchedulerTFToString   |
@@ -407,27 +400,27 @@ string MultiTfScheduler_GVarName(const int tfIdx);
 //|  (crt-push-modularization).                                      |
 //|                                                                  |
 //|  Реализация выполняется в том же .mqh-файле, в соответствии со   |
-//|  стилем существующих модулей Include/* (Req 17.6; см.            |
+//|  стилем существующих модулей Include/* (см.                      |
 //|  TrendFilter.mqh и CrtDetector.mqh как канонические примеры).    |
 //+------------------------------------------------------------------+
 
 //+------------------------------------------------------------------+
 //| MultiTfSchedulerInit (см. контракт в прототипе выше).            |
 //|                                                                  |
-//|  Реализует Req 6.1, 6.3, 6.4, 6.5, 7.1:                          |
-//|    - читает десять флагов use<TF> из config в порядке            |
-//|      MultiTfScheduler_AllTF (Req 6.2, 6.4);                      |
+//|  -                                                               |
+//|     читает десять флагов use<TF> из config в порядке             |
+//|      MultiTfScheduler_AllTF;                                     |
 //|    - при всех флагах false возвращает false и оставляет          |
-//|      state.activeCount = 0 (Req 6.3, 6.5);                       |
+//|      state.activeCount = 0;                                      |
 //|    - иначе заполняет state.activeIndices упорядоченным           |
-//|      списком tfIdx (Req 6.4), обнуляет state.lastCheckedBar      |
-//|      на всём диапазоне [0, MAX_TF) (Req 7.1) и возвращает true.  |
+//|      списком tfIdx, обнуляет state.lastCheckedBar                |
+//|      на всём диапазоне [0, MAX_TF) и возвращает true.            |
 //+------------------------------------------------------------------+
 bool MultiTfSchedulerInit(const MultiTfSchedulerConfig &config,
                           MultiTfSchedulerState        &state)
   {
    // Локальный буфер флагов в порядке MultiTfScheduler_AllTF
-   // (M1, M5, M15, M30, H1, H4, H8, D1, W1, MN1) — Req 6.4.
+   // (M1, M5, M15, M30, H1, H4, H8, D1, W1, MN1).
    bool flags[MULTITF_SCHEDULER_MAX_TF];
    flags[0] = config.useM1;
    flags[1] = config.useM5;
@@ -440,7 +433,7 @@ bool MultiTfSchedulerInit(const MultiTfSchedulerConfig &config,
    flags[8] = config.useW1;
    flags[9] = config.useMN1;
 
-   // Сначала проверяем «все флаги false» — это путь отказа (Req 6.3, 6.5).
+   // Сначала проверяем «все флаги false» — это путь отказа.
    // Атомарность инициализации: на этом пути state остаётся пустым
    // (activeCount = 0) и не оказывается в полу-инициализированном виде.
    bool anyActive = false;
@@ -466,8 +459,8 @@ bool MultiTfSchedulerInit(const MultiTfSchedulerConfig &config,
       return false;
      }
 
-   // Заполнить activeIndices упорядоченным списком включённых tfIdx
-   // (Req 6.4): обход индексов 0..9 строго возрастающий — порядок
+   // Заполнить activeIndices упорядоченным списком включённых tfIdx:
+   // обход индексов 0..9 строго возрастающий — порядок
    // в активном наборе совпадает с порядком в MultiTfScheduler_AllTF.
    state.activeCount = 0;
    for(int i = 0; i < MULTITF_SCHEDULER_MAX_TF; i++)
@@ -479,7 +472,7 @@ bool MultiTfSchedulerInit(const MultiTfSchedulerConfig &config,
         }
      }
 
-   // Инициализация in-memory антидубля (Req 7.1): обнуляем
+   // Инициализация in-memory антидубля: обнуляем
    // lastCheckedBar на всём диапазоне [0, MAX_TF), а не только
    // на активных индексах — индексируется значением tfIdx, и
    // вызывающая сторона всё равно обращается только к активным.
@@ -492,7 +485,7 @@ bool MultiTfSchedulerInit(const MultiTfSchedulerConfig &config,
 //+------------------------------------------------------------------+
 //| MultiTfSchedulerActiveCount (см. контракт в прототипе выше).     |
 //|                                                                  |
-//|  Реализует Req 6.6: чистый аксессор state.activeCount без        |
+//|  Чистый аксессор state.activeCount без                           |
 //|  модификации state (const &).                                    |
 //+------------------------------------------------------------------+
 int MultiTfSchedulerActiveCount(const MultiTfSchedulerState &state)
@@ -503,7 +496,7 @@ int MultiTfSchedulerActiveCount(const MultiTfSchedulerState &state)
 //+------------------------------------------------------------------+
 //| MultiTfSchedulerActiveAt (см. контракт в прототипе выше).        |
 //|                                                                  |
-//|  Реализует Req 6.6: возвращает tfIdx по порядковому номеру в     |
+//|  Возвращает tfIdx по порядковому номеру в                        |
 //|  активном наборе. Без bounds-check: контракт фиксирует, что      |
 //|  out-of-range — undefined; вызывающая сторона обязана            |
 //|  итерировать только до ActiveCount(state).                       |
@@ -517,7 +510,7 @@ int MultiTfSchedulerActiveAt(const MultiTfSchedulerState &state,
 //+------------------------------------------------------------------+
 //| MultiTfSchedulerTFEnum (см. контракт в прототипе выше).          |
 //|                                                                  |
-//|  Реализует Req 6.6: чистая функция от tfIdx → ENUM_TIMEFRAMES.   |
+//|  Чистая функция от tfIdx → ENUM_TIMEFRAMES.                      |
 //|  Используется вызывающей стороной для подстановки результата     |
 //|  ActiveAt() в API MT5, требующее ENUM_TIMEFRAMES.                |
 //+------------------------------------------------------------------+
@@ -529,7 +522,7 @@ ENUM_TIMEFRAMES MultiTfSchedulerTFEnum(const int tfIdx)
 //+------------------------------------------------------------------+
 //| MultiTfSchedulerTFToString (см. контракт в прототипе выше).      |
 //|                                                                  |
-//|  Реализует Req 6.7, 6.8, 15.2: формат строго идентичен           |
+//|  Формат строго идентичен                                         |
 //|  TFToString из crt-push_v7.2.mq5 (десять явных кейсов + fallback |
 //|  EnumToString). Изменение формата сломает поведенческую          |
 //|  эквивалентность с Crt_Push_V7 в push-уведомлениях.              |
@@ -555,16 +548,15 @@ string MultiTfSchedulerTFToString(const ENUM_TIMEFRAMES tf)
 //+------------------------------------------------------------------+
 //| MultiTfScheduler_GVarName (см. контракт в прототипе выше).       |
 //|                                                                  |
-//|  Реализует Req 7.5, 15.3: формат ключа GlobalVariable строго     |
+//|  Формат ключа GlobalVariable строго                              |
 //|  идентичен GVarName из crt-push_v7.2.mq5                         |
 //|    StringFormat("RBCRT_%s_%s_lastBar",                           |
 //|                 _Symbol,                                         |
 //|                 EnumToString(g_allTF[tfIdx]))                    |
 //|  с заменой g_allTF на MultiTfScheduler_AllTF — массив тот же,    |
-//|  в том же порядке (Req 6.4), поэтому ключи бит-в-бит совпадают   |
+//|  в том же порядке, поэтому ключи бит-в-бит совпадают             |
 //|  для соответствующих tfIdx. Менять формат нельзя — это обнулит   |
-//|  историю антидубля для уже работающих установок Crt_Push_V7      |
-//|  (Req 7.5).                                                      |
+//|  историю антидубля для уже работающих установок Crt_Push_V7.     |
 //|                                                                  |
 //|  Здесь намеренно используется EnumToString(tf) (например          |
 //|  "PERIOD_H1"), а НЕ короткое имя из MultiTfSchedulerTFToString   |
@@ -580,11 +572,11 @@ string MultiTfScheduler_GVarName(const int tfIdx)
 //+------------------------------------------------------------------+
 //| MultiTfSchedulerIsNewBar (см. контракт в прототипе выше).        |
 //|                                                                  |
-//|  Реализует Req 7.1, 7.2: in-memory антидубль по бару.            |
+//|  In-memory антидубль по бару.                                    |
 //|    - Если state.lastCheckedBar[tfIdx] уже равен barTime,         |
 //|      возвращаем false и НЕ модифицируем state.                   |
 //|    - Иначе обновляем state.lastCheckedBar[tfIdx] := barTime до   |
-//|      возврата управления и возвращаем true (Req 7.2).            |
+//|      возврата управления и возвращаем true.                      |
 //|                                                                  |
 //|  state передан как mutable & (без const) — именно для обновления |
 //|  state.lastCheckedBar[tfIdx] на первом вызове с новым barTime.   |
@@ -602,17 +594,16 @@ bool MultiTfSchedulerIsNewBar(MultiTfSchedulerState &state,
 //+------------------------------------------------------------------+
 //| MultiTfSchedulerLoadLastSignalBar (см. контракт в прототипе выше)|
 //|                                                                  |
-//|  Реализует Req 7.3, 7.5: персистентный слой антидубля через      |
+//|  Персистентный слой антидубля через                              |
 //|  GlobalVariable.                                                 |
-//|    - Имя ключа формируется через MultiTfScheduler_GVarName       |
-//|      (Req 7.5, 15.3).                                            |
+//|    - Имя ключа формируется через MultiTfScheduler_GVarName.      |
 //|    - Если GlobalVariableCheck(name) == false — возвращаем 0      |
-//|      (sentinel «не было ни одной отправки»; Req 7.3).            |
+//|      (sentinel «не было ни одной отправки»).                     |
 //|    - Иначе возвращаем (datetime)GlobalVariableGet(name).         |
 //|                                                                  |
 //|  state передан как const & — функция не модифицирует state;      |
 //|  параметр зарезервирован для симметрии с Save и будущих          |
-//|  расширений (Req 17.4).                                          |
+//|  расширений.                                                     |
 //+------------------------------------------------------------------+
 datetime MultiTfSchedulerLoadLastSignalBar(const MultiTfSchedulerState &state,
                                            const int                    tfIdx)
@@ -626,17 +617,16 @@ datetime MultiTfSchedulerLoadLastSignalBar(const MultiTfSchedulerState &state,
 //+------------------------------------------------------------------+
 //| MultiTfSchedulerSaveLastSignalBar (см. контракт в прототипе выше)|
 //|                                                                  |
-//|  Реализует Req 7.4, 7.5: запись last-signal bar в GlobalVariable.|
-//|    - Имя ключа формируется через MultiTfScheduler_GVarName       |
-//|      (Req 7.5, 15.3).                                            |
+//|  Запись last-signal bar в GlobalVariable.                        |
+//|    - Имя ключа формируется через MultiTfScheduler_GVarName.      |
 //|    - Значение сохраняется как (double)barTime через              |
 //|      GlobalVariableSet — MT5 хранит GlobalVariable как double,   |
 //|      а GlobalVariableGet возвращает double, который Load кастует |
-//|      обратно в datetime (Req 7.4).                               |
+//|      обратно в datetime.                                         |
 //|                                                                  |
 //|  state передан как const & — функция не модифицирует state;      |
 //|  параметр зарезервирован для симметрии с Load и будущих          |
-//|  расширений (Req 17.4).                                          |
+//|  расширений.                                                     |
 //+------------------------------------------------------------------+
 void MultiTfSchedulerSaveLastSignalBar(const MultiTfSchedulerState &state,
                                        const int                    tfIdx,

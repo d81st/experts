@@ -28,18 +28,18 @@
 //| функции модуля. Caller не модифицирует поля напрямую.            |
 //|                                                                  |
 //|   adjustedPoint     — размер «пункта» с поправкой на digits      |
-//|                       (Req 1.4: digits ∈ {3,5} → _Point;         |
-//|                        Req 1.5: digits ∈ {2,4} → _Point/10.0;    |
-//|                        Req 1.6: иначе fallback _Point).          |
+//|                       (digits ∈ {3,5} → _Point;                  |
+//|                        digits ∈ {2,4} → _Point/10.0;             |
+//|                        иначе fallback _Point).                   |
 //|                       Используется для перевода points ↔ price.  |
 //|   minBrokerDistance — минимальная допустимая SL-дистанция в      |
 //|                       единицах цены: (SYMBOL_TRADE_STOPS_LEVEL   |
-//|                       + 3) * _Point (Req 1.7). Используется в    |
-//|                       `BrokerEnforceMinSLDist` (Req 1.13, 1.14). |
+//|                       + 3) * _Point. Используется в              |
+//|                       `BrokerEnforceMinSLDist`.                  |
 //|   fillType          — режим заливки ордера, выбранный по         |
 //|                       приоритету FOK → IOC → RETURN из битовой   |
-//|                       маски `SYMBOL_FILLING_MODE` (Req 1.3,      |
-//|                       fallback Req 1.16).                        |
+//|                       маски `SYMBOL_FILLING_MODE`                |
+//|                       (fallback).                                |
 //+------------------------------------------------------------------+
 struct BrokerContext
   {
@@ -58,10 +58,10 @@ struct BrokerContext
 //|                       пропорционален SL-дистанции, реальный      |
 //|                       риск-в-деньгах ≈ riskPercent от баланса    |
 //|                       вне зависимости от SL.                     |
-//|                       Эталон: liq-grab / engulfing (Req 1.8).    |
+//|                       Эталон: liq-grab / engulfing.              |
 //|   LOT_BY_MARGIN     — margin-сайзинг: лот не зависит от SL,      |
 //|                       рассчитывается из `OrderCalcMargin`.       |
-//|                       Эталон: crt-bot (Req 1.9).                 |
+//|                       Эталон: crt-bot.                           |
 //+------------------------------------------------------------------+
 enum ENUM_LOT_STRATEGY
   {
@@ -79,22 +79,21 @@ enum ENUM_LOT_STRATEGY
 //+------------------------------------------------------------------+
 
 //--- Инициализация BrokerContext по текущему `_Symbol`.
-//    Заполняет ctx.adjustedPoint (Req 1.4, 1.5, 1.6),
-//    ctx.minBrokerDistance (Req 1.7) и ctx.fillType (Req 1.3, 1.16).
+//    Заполняет ctx.adjustedPoint,
+//    ctx.minBrokerDistance и ctx.fillType.
 //    Должна вызываться один раз в `OnInit()` ДО первой торговой
-//    операции (Req 1.1).
+//    операции.
 //    Идемпотентность: повторный вызов для того же `_Symbol` без
 //    изменения SYMBOL_DIGITS, SYMBOL_POINT, SYMBOL_TRADE_STOPS_LEVEL
 //    и SYMBOL_FILLING_MODE даёт побитово равный BrokerContext
-//    относительно первого вызова (Req 1.2).
+//    относительно первого вызова.
 void BrokerInit(BrokerContext &ctx);
 
 //--- Возвращает режим заливки текущего `_Symbol` по приоритету
 //    FOK → IOC → RETURN на основе битовой маски
-//    `SymbolInfoInteger(_Symbol, SYMBOL_FILLING_MODE)` (Req 1.3).
+//    `SymbolInfoInteger(_Symbol, SYMBOL_FILLING_MODE)`.
 //    Если маска не содержит ни одного из бит FOK/IOC/RETURN —
-//    возвращается `ORDER_FILLING_RETURN` как безопасный fallback
-//    (Req 1.16).
+//    возвращается `ORDER_FILLING_RETURN` как безопасный fallback.
 ENUM_ORDER_TYPE_FILLING BrokerGetFillType(void);
 
 //--- Расчёт объёма позиции по выбранной стратегии.
@@ -103,19 +102,18 @@ ENUM_ORDER_TYPE_FILLING BrokerGetFillType(void);
 //     0 < riskPercent <= 100): лот считается как
 //        riskMoney / ((slPoints * ctx.adjustedPoint / tickSize) * tickValue),
 //    где riskMoney = AccountInfoDouble(ACCOUNT_BALANCE) *
-//                    riskPercent / 100.0  (Req 1.8).
+//                    riskPercent / 100.0.
 //    При `strategy == LOT_BY_MARGIN` и `OrderCalcMargin` → true,
 //    marginPerLot > 0: лот считается как riskMoney / marginPerLot
-//    (slPoints игнорируется) (Req 1.9).
+//    (slPoints игнорируется).
 //    Возвращаемое значение ограничивается диапазоном
 //    [SYMBOL_VOLUME_MIN, SYMBOL_VOLUME_MAX] и округляется вниз до
-//    кратности SYMBOL_VOLUME_STEP (Req 1.10).
+//    кратности SYMBOL_VOLUME_STEP.
 //    Защита от деления на 0 и невалидной маржи: если slPoints <= 0
 //    при TICK_VALUE, tickValue == 0 или tickSize == 0 —
 //    возвращается SYMBOL_VOLUME_MIN без обращения к
-//    OrderCalcMargin (Req 1.11). Если OrderCalcMargin → false или
-//    marginPerLot <= 0 при MARGIN — возвращается SYMBOL_VOLUME_MIN
-//    (Req 1.12).
+//    OrderCalcMargin. Если OrderCalcMargin → false или
+//    marginPerLot <= 0 при MARGIN — возвращается SYMBOL_VOLUME_MIN.
 double BrokerCalcLot(const BrokerContext     &ctx,
                      const double             riskPercent,
                      const double             slPoints,
@@ -125,14 +123,13 @@ double BrokerCalcLot(const BrokerContext     &ctx,
 //    Если |entry - sl| < ctx.minBrokerDistance — модифицирует
 //    `sl` так, что |entry - sl| == ctx.minBrokerDistance, сохраняя
 //    направление SL относительно `entry` для типа `orderType`
-//    (BUY/BUY_LIMIT: sl < entry; SELL/SELL_LIMIT: sl > entry)
-//    (Req 1.13).
+//    (BUY/BUY_LIMIT: sl < entry; SELL/SELL_LIMIT: sl > entry).
 //    Если |entry - sl| >= ctx.minBrokerDistance — `sl` остаётся
-//    без изменений (Req 1.14).
+//    без изменений.
 //    TP не модифицируется: пересчёт TP — ответственность caller'а
 //    по EA-специфичной формуле (RR или абсолют от паттерна),
 //    см. шапку этого файла, раздел «Champion-driven рефайнинг для
-//    crt-bot» (Req 1.15).
+//    crt-bot».
 void BrokerEnforceMinSLDist(const BrokerContext   &ctx,
                             const ENUM_ORDER_TYPE  orderType,
                             const double           entry,
@@ -146,8 +143,8 @@ void BrokerEnforceMinSLDist(const BrokerContext   &ctx,
 //| BrokerGetFillType                                                |
 //|                                                                  |
 //| Читает SYMBOL_FILLING_MODE для _Symbol; возвращает по приоритету |
-//| FOK → IOC → RETURN (Req 1.3). RETURN — безопасный fallback       |
-//| (Req 1.16): бит SYMBOL_FILLING_RETURN в маске у большинства      |
+//| FOK → IOC → RETURN. RETURN — безопасный fallback:                |
+//| бит SYMBOL_FILLING_RETURN в маске у большинства                  |
 //| брокеров отсутствует, но режим RETURN исполняется всегда.        |
 //+------------------------------------------------------------------+
 ENUM_ORDER_TYPE_FILLING BrokerGetFillType(void)
@@ -159,7 +156,7 @@ ENUM_ORDER_TYPE_FILLING BrokerGetFillType(void)
    if((filling & SYMBOL_FILLING_IOC) != 0)
       return ORDER_FILLING_IOC;
 
-   // Fallback Req 1.16: SYMBOL_FILLING_RETURN-бит может отсутствовать
+   // Fallback SYMBOL_FILLING_RETURN-бит может отсутствовать
    // в маске, но режим RETURN — гарантированно исполнимый по биржевой
    // спецификации MQL5, поэтому используется как безопасный fallback.
    return ORDER_FILLING_RETURN;
@@ -169,13 +166,12 @@ ENUM_ORDER_TYPE_FILLING BrokerGetFillType(void)
 //| BrokerInit                                                       |
 //|                                                                  |
 //| Заполняет BrokerContext по текущему _Symbol:                     |
-//|   ctx.fillType          = BrokerGetFillType()  (Req 1.3, 1.16)   |
+//|   ctx.fillType          = BrokerGetFillType()                    |
 //|   ctx.adjustedPoint     — по SYMBOL_DIGITS:                      |
-//|     digits ∈ {3,5} → _Point          (Req 1.4)                   |
-//|     digits ∈ {2,4} → _Point / 10.0   (Req 1.5)                   |
-//|     иначе         → _Point          (Req 1.6, fallback)          |
+//|     digits ∈ {3,5} → _Point                                      |
+//|     digits ∈ {2,4} → _Point / 10.0                               |
+//|     иначе         → _Point (fallback)                            |
 //|   ctx.minBrokerDistance = (SYMBOL_TRADE_STOPS_LEVEL + 3) * _Point|
-//|                          (Req 1.7)                               |
 //|                                                                  |
 //| Идемпотентность гарантирована тем, что все поля заполняются      |
 //| детерминированно из свойств _Symbol — повторный вызов при        |
@@ -183,19 +179,19 @@ ENUM_ORDER_TYPE_FILLING BrokerGetFillType(void)
 //+------------------------------------------------------------------+
 void BrokerInit(BrokerContext &ctx)
   {
-   //--- 1. Fill type (Req 1.3, 1.16)
+   //--- 1. Fill type
    ctx.fillType = BrokerGetFillType();
 
-   //--- 2. AdjustedPoint по правилам digits (Req 1.4, 1.5, 1.6)
+   //--- 2. AdjustedPoint по правилам digits
    const int digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
    if(digits == 5 || digits == 3)
-      ctx.adjustedPoint = _Point;                 // Req 1.4
+      ctx.adjustedPoint = _Point;
    else if(digits == 4 || digits == 2)
-      ctx.adjustedPoint = _Point / 10.0;          // Req 1.5
+      ctx.adjustedPoint = _Point / 10.0;
    else
-      ctx.adjustedPoint = _Point;                 // Req 1.6 (fallback)
+      ctx.adjustedPoint = _Point;                 // fallback
 
-   //--- 3. Min broker distance (Req 1.7)
+   //--- 3. Min broker distance
    const long stops_level = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
    ctx.minBrokerDistance  = (stops_level + 3) * _Point;
   }
@@ -203,19 +199,19 @@ void BrokerInit(BrokerContext &ctx)
 //+------------------------------------------------------------------+
 //| BrokerCalcLot                                                    |
 //|                                                                  |
-//| LOT_BY_TICK_VALUE (champion: liq-grab/engulfing, Req 1.8):       |
+//| LOT_BY_TICK_VALUE (champion: liq-grab/engulfing):                |
 //|   moneyPerLot = (slPoints * adjustedPoint / tickSize) * tickValue|
 //|   lot = riskMoney / moneyPerLot                                  |
-//|   Защита (Req 1.11): slPoints<=0 / tickValue==0 / tickSize==0    |
+//|   Защита: slPoints<=0 / tickValue==0 / tickSize==0               |
 //|   → volMin без вызова OrderCalcMargin.                           |
 //|                                                                  |
-//| LOT_BY_MARGIN (champion: crt-bot, Req 1.9):                      |
+//| LOT_BY_MARGIN (champion: crt-bot):                               |
 //|   marginPerLot через OrderCalcMargin(ORDER_TYPE_BUY,_Symbol,1.0, |
 //|                                       SYMBOL_ASK, marginPerLot)  |
 //|   lot = riskMoney / marginPerLot (slPoints игнорируется).        |
-//|   Защита (Req 1.12): false или marginPerLot<=0 → volMin.         |
+//|   Защита: false или marginPerLot<=0 → volMin.                    |
 //|                                                                  |
-//| Клампинг (Req 1.10): сначала floor до volStep, затем clamp в     |
+//| Клампинг: сначала floor до volStep, затем clamp в                |
 //| [volMin, volMax]. Порядок важен: floor может дать значение       |
 //| меньше volMin — его поднимаем обратно.                           |
 //+------------------------------------------------------------------+
@@ -236,14 +232,14 @@ double BrokerCalcLot(const BrokerContext     &ctx,
      {
       const double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
       const double tickSize  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
-      //--- Req 1.11: защита от деления на 0 / невалидного SL.
+      //--- защита от деления на 0 / невалидного SL.
       //    Возврат volMin БЕЗ обращения к OrderCalcMargin.
       if(slPoints <= 0.0 || tickValue == 0.0 || tickSize == 0.0)
          return volMin;
       const double moneyPerLot = (slPoints * ctx.adjustedPoint / tickSize) * tickValue;
       if(moneyPerLot <= 0.0)
          return volMin;
-      lot = riskMoney / moneyPerLot;                 // Req 1.8
+      lot = riskMoney / moneyPerLot;
      }
    else if(strategy == LOT_BY_MARGIN)
      {
@@ -253,11 +249,11 @@ double BrokerCalcLot(const BrokerContext     &ctx,
       const double price = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
       if(!OrderCalcMargin(ORDER_TYPE_BUY, _Symbol, 1.0, price, marginPerLot) ||
          marginPerLot <= 0.0)
-         return volMin;                              // Req 1.12
-      lot = riskMoney / marginPerLot;                // Req 1.9
+         return volMin;
+      lot = riskMoney / marginPerLot;
      }
 
-   //--- Req 1.10: округление ВНИЗ до volStep, затем клампинг в
+   //--- округление ВНИЗ до volStep, затем клампинг в
    //    [volMin, volMax]. Порядок важен: floor может дать значение
    //    меньше volMin, его необходимо поднять обратно до volMin.
    if(volStep > 0.0)
@@ -271,10 +267,10 @@ double BrokerCalcLot(const BrokerContext     &ctx,
 //| BrokerEnforceMinSLDist                                           |
 //|                                                                  |
 //| champion = engulfing, рефайн = пересчёт TP вынесен caller'у.     |
-//|   Req 1.14: |entry - sl| >= minBrokerDistance → no-op            |
-//|   Req 1.13: иначе sl = entry ∓ minBrokerDistance (BUY/BUY_LIMIT  |
+//|   |entry - sl| >= minBrokerDistance → no-op                      |
+//|   иначе sl = entry ∓ minBrokerDistance (BUY/BUY_LIMIT            |
 //|             sl < entry; SELL/SELL_LIMIT sl > entry)              |
-//|   Req 1.15: TP НИКОГДА не модифицируется этим модулем            |
+//|   TP НИКОГДА не модифицируется этим модулем                      |
 //|                                                                  |
 //| Пересчёт TP по EA-специфичной формуле — на стороне caller'а:     |
 //|   engulfing → CalcTPByRR (RR сохраняется)                        |
@@ -287,11 +283,11 @@ void BrokerEnforceMinSLDist(const BrokerContext   &ctx,
                             const double           entry,
                             double                &sl)
   {
-   //--- Req 1.14: дистанция уже достаточна — no-op
+   //--- дистанция уже достаточна — no-op
    if(MathAbs(entry - sl) >= ctx.minBrokerDistance)
       return;
 
-   //--- Req 1.13: подтянуть sl до min-дистанции, сохранив направление
+   //--- подтянуть sl до min-дистанции, сохранив направление
    if(orderType == ORDER_TYPE_BUY || orderType == ORDER_TYPE_BUY_LIMIT)
      {
       // BUY/BUY_LIMIT: sl должен быть НИЖЕ entry
@@ -303,7 +299,7 @@ void BrokerEnforceMinSLDist(const BrokerContext   &ctx,
       sl = entry + ctx.minBrokerDistance;
      }
    // Иначе (defensive, unreachable в production-пайплайне): sl без
-   // изменений. Req 1.15: TP не трогается ни в одной ветке.
+   // изменений. TP не трогается ни в одной ветке.
   }
 
 #endif // BROKERADAPTER_MQH

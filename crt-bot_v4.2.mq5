@@ -2,7 +2,7 @@
 //|                       CRT_TradeBot.mq5                           |
 //+------------------------------------------------------------------+
 #property strict
-#property description "CRT Trade Bot v1.5 | TrueRB, InsideWick, ghostTrueRB, ghostInsideWick | 3 режима входа | EMA/ADX фильтр"
+#property description "CRT Trade Bot v4.2 | TrueRB, InsideWick, ghostTrueRB, ghostInsideWick | 3 режима входа | EMA/ADX фильтр"
 
 #include <Trade\Trade.mqh>
 #include "Include/TradeAdapter.mqh"
@@ -98,8 +98,8 @@ input int  SessionWindowMinutes = 1;
 
 input group "── Selected Sessions Filter ──"
 // Опциональный фильтр выбора торговых сессий (Asian/London/NewYork) в
-// UTC-координатах. При UseSelectedSessions=false — полная rollback safety
-// (Req 9.1, 9.2, 9.5): legacy путь Session Filter работает без изменений.
+// UTC-координатах. При UseSelectedSessions=false — полная rollback safety:
+// legacy путь Session Filter работает без изменений.
 input bool          UseSelectedSessions         = true; // Включить выбор сессий
 input bool          UseAsianSession             = false; // Торговать в Asian
 input bool          UseLondonSession            = true; // Торговать в London
@@ -256,15 +256,15 @@ void CloseAllOpenPositions()
 //+------------------------------------------------------------------+
 //| HandleSessionExitClose — Session_Exit_Event для Selected Sessions|
 //|                                                                  |
-//| Вызывается из OnTick prelude (task 5.4) ровно один раз на        |
+//| Вызывается из OnTick prelude ровно один раз на                   |
 //| переход inside→outside, когда CloseOnSessionExit = true.         |
-//| Edge-trigger гарантируется SelectedSessionsDetectExit (Req 4.4). |
+//| Edge-trigger гарантируется SelectedSessionsDetectExit.           |
 //|                                                                  |
-//| 1) PositionGuardCloseAll(trade, MagicNumber)       — Req 4.1     |
-//| 2) PositionGuardCancelAllPending(trade, MagicNumber) — Req 4.2   |
+//| 1) PositionGuardCloseAll(trade, MagicNumber)                     |
+//| 2) PositionGuardCancelAllPending(trade, MagicNumber)             |
 //| 3) g_pending.Reset() — сбрасывает active/swept/limitTicket и     |
-//|    прочие поля EA-pending (Req 4.3).                             |
-//| 4) Один Print с UTC-временем выхода + counts (Req 4.6, 15.3).    |
+//|    прочие поля EA-pending.                                       |
+//| 4) Один Print с UTC-временем выхода + counts.                    |
 //+------------------------------------------------------------------+
 void HandleSessionExitClose()
 {
@@ -903,25 +903,25 @@ void CheckCRTEntry()
    cfg.DojiToImbSizeRatio   = DojiToImbSizeRatio;
    cfg.DojiToImbRangeRatio  = DojiToImbRangeRatio;
    cfg.OpenTolerance        = OpenTolerance;
-   cfg.BareImbWickTolerance = BareImbWickTolerance;                        // Req 7.3, 8.1
+   cfg.BareImbWickTolerance = BareImbWickTolerance;
 
    CrtPatternFlags flags;
    flags.AlertTrueRB          = TradeTrueRB;
    flags.AlertInsideWick      = TradeInsideWick;
    flags.AlertGhostTrueRB     = TradeGhostTrueRB;
    flags.AlertGhostInsideWick = TradeGhostInsideWick;
-   flags.AlertBareImbalance   = TradeBareImbalance;                        // Req 7.4, 8.1
+   flags.AlertBareImbalance   = TradeBareImbalance;
 
-   // Единственный вызов детектора (Req 13.4).
+   // Единственный вызов детектора.
    CrtSignal signal;
    CrtDetectorDetect(prev, imb, doji, cfg, flags, signal);
 
-   if(!signal.detected) return;                                            // Req 13.5
+   if(!signal.detected) return;
 
    // Трендовый фильтр: imbDir=+1 (bull IMB) → SELL → -1; imbDir=-1 → BUY → +1
-   if(!TrendIsAllowed(g_trend_cfg, g_trend_h, -signal.imbDir)) return;     // Req 13.6
+   if(!TrendIsAllowed(g_trend_cfg, g_trend_h, -signal.imbDir)) return;
 
-   // Делегирование в существующий ProcessCRTSignal (Req 13.7).
+   // Делегирование в существующий ProcessCRTSignal.
    ProcessCRTSignal(imb, doji, signal.imbDir, signal.patternName, signal.isFVG);
 }
 
@@ -1070,7 +1070,7 @@ int OnInit()
    {
       // Init вернул false — детальная диагностика уже выведена внутри
       // SelectedSessionsInit (errorMessage из ValidateConfig). Добавляем
-      // один summary-лог о факте отключения фильтра (Req 2.9, 13.x, 15.1).
+      // один summary-лог о факте отключения фильтра.
       Print("❌ Selected sessions filter: невалидная конфигурация — фильтр отключён");
    }
 
@@ -1083,7 +1083,7 @@ int OnInit()
       default:                  modeStr = "?";
    }
 
-   PrintFormat("✅ CRT Trade Bot v1.5 инициализирован. TF: %s | Режим входа: %s | MaxBars: %d",
+   PrintFormat("✅ CRT Trade Bot v4.2 инициализирован. TF: %s | Режим входа: %s | MaxBars: %d",
                EnumToString(TradingTimeframe), modeStr, MaxBarsToWait);
 
    PrintFormat("📈 TrendFilter:%s TF:%s EMA(%d,%d) | ADX:%s Period:%d Min:%.1f",
@@ -1133,7 +1133,7 @@ void OnDeinit(const int reason)
    TrendDeinit(g_trend_h);
 
    Comment("");
-   Print("✅ CRT Trade Bot v1.5 выгружен");
+   Print("✅ CRT Trade Bot v4.2 выгружен");
 }
 
 //+------------------------------------------------------------------+
@@ -1142,25 +1142,24 @@ void OnDeinit(const int reason)
 
 void OnTick()
 {
-   //── Selected Sessions Filter prelude (task 5.4) ──
-   // Применяется ДО legacy SessionIsAmericanPreClose / SessionIsBoundary
-   // (Req 8.1). При UseSelectedSessions = false prelude полностью
-   // пропускается и legacy путь работает без изменений (Req 8.4, 9.1, 9.2).
+   //── Selected Sessions Filter prelude ──
+   // Применяется ДО legacy SessionIsAmericanPreClose / SessionIsBoundary.
+   // При UseSelectedSessions = false prelude полностью
+   // пропускается и legacy путь работает без изменений.
    if(UseSelectedSessions)
    {
-      // Edge-trigger: ровно один раз на переход inside→outside (Req 4.4).
+      // Edge-trigger: ровно один раз на переход inside→outside.
       // DetectExit внутри обновляет state.wasInsideOnPreviousTick.
       if(SelectedSessionsDetectExit(g_selected_cfg, g_selected_state))
       {
          if(CloseOnSessionExit)
-            HandleSessionExitClose();        // Req 4.1, 4.2, 4.3, 4.6, 15.3
-         return;                              // Req 3.5, 8.2: пропуск legacy и логики входа
+            HandleSessionExitClose();
+         return;                              // пропуск legacy и логики входа
       }
-      // Вне Selected_Union_Interval — никакой работы с рынком
-      // (Req 3.1, 3.2, 3.3, 3.4).
+      // Вне Selected_Union_Interval — никакой работы с рынком.
       if(!SelectedSessionsIsInside(g_selected_cfg, g_selected_state))
          return;
-      // Inside: продолжаем в legacy путь (Req 8.3).
+      // Inside: продолжаем в legacy путь.
    }
 
    //── Тиковая ветка ──

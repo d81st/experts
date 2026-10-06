@@ -5,22 +5,19 @@
 //|  публичных функций сессионного фильтра.                          |
 //|                                                                  |
 //|  Этот header объявляет:                                          |
-//|   - SessionConfig — входная конфигурация (Req 2.2, 2.3, 2.4)     |
+//|   - SessionConfig — входная конфигурация                         |
 //|   - SessionState  — заполняется SessionInit, дальше read-only    |
-//|                     (Req 2.1, 2.2, 2.3)                          |
 //|   - прототипы SessionInit / SessionIsBoundary /                  |
 //|     SessionIsAmericanPreClose / SessionGetEffective              |
-//|     (Req 2.1, 2.5, 2.6)                                          |
 //|                                                                  |
-//|  Тела функций реализуются в task 2.2 в этом же файле.            |
+//|  Тела функций реализованы ниже в этом же файле.                  |
 //|  Модуль НЕ объявляет `input`-переменных и НЕ держит глобального  |
-//|  состояния (Req 15.1, 15.2, 15.3, 15.5, 17.2). Вся конфигурация  |
+//|  состояния. Вся конфигурация                                     |
 //|  и состояние передаются параметрами по ссылке.                   |
 //|                                                                  |
 //|  Функции модуля обращаются к `SymbolInfoSessionTrade` только     |
 //|  внутри SessionInit и не вызывают `trade.*`, `PositionGet*`,     |
-//|  `OrderGet*` или иные `SymbolInfo*` в остальных функциях         |
-//|  (Req 2.8).                                                      |
+//|  `OrderGet*` или иные `SymbolInfo*` в остальных функциях.        |
 //+------------------------------------------------------------------+
 #ifndef SESSIONFILTER_MQH
 #define SESSIONFILTER_MQH
@@ -33,16 +30,14 @@
 //| модифицируются модулем.                                          |
 //|                                                                  |
 //|   enabled             — глобальный switch фильтра. При false все |
-//|                         проверочные функции возвращают false     |
-//|                         (Req 2.4).                               |
+//|                         проверочные функции возвращают false.    |
 //|   americanCloseHour   — час закрытия Американской сессии         |
 //|                         (ручной режим, fallback автодетекта).    |
 //|   americanCloseMinute — минута закрытия Американской сессии.     |
 //|   asianOpenHour       — час открытия Азиатской сессии (ручной).  |
 //|   asianOpenMinute     — минута открытия Азиатской сессии.        |
 //|   windowMinutes       — полуширина окна вокруг границы сессии    |
-//|                         в минутах, допустимый диапазон [1, 120]  |
-//|                         (Req 2.5, 2.6, 2.10).                    |
+//|                         в минутах, допустимый диапазон [1, 120]. |
 //+------------------------------------------------------------------+
 struct SessionConfig
   {
@@ -64,9 +59,9 @@ struct SessionConfig
 //|   useAuto    — true, если SessionInit получил валидную           |
 //|                информацию о сессиях от брокера через             |
 //|                SymbolInfoSessionTrade и заполнил amCloseSec /    |
-//|                asOpenSec из брокера (Req 2.1).                   |
+//|                asOpenSec из брокера.                             |
 //|                false — если использован ручной fallback из cfg   |
-//|                (Req 2.2) либо невалидный cfg (Req 2.3).          |
+//| либо невалидный cfg.                                             |
 //|   amCloseSec — секунда суток (0..86399) закрытия Американской    |
 //|                сессии. При useAuto=true — от брокера; иначе —    |
 //|                из cfg.americanCloseHour/Minute.                  |
@@ -84,7 +79,7 @@ struct SessionState
 //+------------------------------------------------------------------+
 //| Публичный интерфейс (прототипы).                                 |
 //|                                                                  |
-//| Тела добавляются в task 2.2. Все функции — детерминированные     |
+//| Все функции — детерминированные                                  |
 //| относительно (cfg, state, TimeCurrent()), без скрытого           |
 //| глобального состояния.                                           |
 //+------------------------------------------------------------------+
@@ -92,35 +87,32 @@ struct SessionState
 //--- Инициализация state по cfg.
 //    1) Пробует автодетект через SymbolInfoSessionTrade по дням
 //       MONDAY..FRIDAY; при успехе устанавливает state.useAuto=true
-//       и возвращает true (Req 2.1).
+//       и возвращает true.
 //    2) Иначе при валидных cfg.amCloseSec/asOpenSec — записывает их
-//       в state, ставит useAuto=false, возвращает false (Req 2.2).
+//       в state, ставит useAuto=false, возвращает false.
 //    3) Иначе оставляет amCloseSec/asOpenSec в state без изменений,
-//       ставит useAuto=false, возвращает false (Req 2.3).
+//       ставит useAuto=false, возвращает false.
 //    Идемпотентность: повторный вызов с тем же cfg и без изменения
-//    брокерской информации даёт идентичный state (Req 2.9).
+//    брокерской информации даёт идентичный state.
 bool SessionInit(const SessionConfig &cfg,
                  SessionState        &state);
 
 //--- Проверка «сейчас граница какой-либо сессии».
 //    Возвращает true, если TimeCurrent() % 86400 находится в окне
 //    ±(cfg.windowMinutes * 60) секунд от state.amCloseSec или от
-//    state.asOpenSec с циркулярной арифметикой по модулю 86400
-//    (Req 2.5, 2.7).
-//    При cfg.enabled=false — всегда false (Req 2.4).
+//    state.asOpenSec с циркулярной арифметикой по модулю 86400.
+//    При cfg.enabled=false — всегда false.
 //    При невалидных cfg.windowMinutes или state.amCloseSec /
-//    state.asOpenSec — false (Req 2.10).
+//    state.asOpenSec — false.
 bool SessionIsBoundary(const SessionConfig &cfg,
                        const SessionState  &state);
 
 //--- Проверка «сейчас окно перед закрытием Американской».
 //    Возвращает true, если TimeCurrent() % 86400 находится в
 //    полу-открытом окне (state.amCloseSec - cfg.windowMinutes*60,
-//    state.amCloseSec] с циркулярной арифметикой по модулю 86400
-//    (Req 2.6, 2.7).
-//    При cfg.enabled=false — всегда false (Req 2.4).
-//    При невалидных cfg.windowMinutes или state.amCloseSec — false
-//    (Req 2.10).
+//    state.amCloseSec] с циркулярной арифметикой по модулю 86400.
+//    При cfg.enabled=false — всегда false.
+//    При невалидных cfg.windowMinutes или state.amCloseSec — false.
 bool SessionIsAmericanPreClose(const SessionConfig &cfg,
                                const SessionState  &state);
 
@@ -136,24 +128,21 @@ void SessionGetEffective(const SessionConfig &cfg,
 //|                                                                  |
 //| Этот блок объявляет:                                             |
 //|   - ENUM_DST_MODE — режим обработки часового пояса и DST         |
-//|     (Req 14.4)                                                   |
-//|   - константы SELECTED_SESSIONS_* (Req 5.2, 6.1, 6.2)            |
+//|   - константы SELECTED_SESSIONS_*                                |
 //|   - SelectedSessionsConfig — иммутабельная конфигурация фильтра  |
-//|     выбранных сессий (Req 1.1)                                   |
+//|     выбранных сессий                                             |
 //|   - SelectedSessionsState — мутабельное состояние фильтра        |
-//|     (Req 1.2)                                                    |
 //|                                                                  |
 //| Существующие декларации SessionConfig / SessionState и прототипы |
-//| старого API сохраняются без изменений сигнатур (Req 9.4).        |
+//| старого API сохраняются без изменений сигнатур.                  |
 //+------------------------------------------------------------------+
 
 //--- Режим обработки часового пояса и DST.
 //    DST_AUTO   — effectiveGmtOffsetSec вычисляется как
 //                 TimeTradeServer() − TimeGMT(), округлённый до
-//                 15 минут (Req 6.1).
+//                 15 минут.
 //    DST_MANUAL — effectiveGmtOffsetSec фиксируется равным
-//                 SelectedSessionsConfig.gmtOffsetSeconds (Req 5.3,
-//                 6.3).
+//                 SelectedSessionsConfig.gmtOffsetSeconds.
 enum ENUM_DST_MODE
   {
    DST_AUTO   = 0,
@@ -162,14 +151,11 @@ enum ENUM_DST_MODE
 
 //--- Сентинелы и границы для нового API.
 //    SEC_PER_DAY    — 24 часа в секундах (модуль секунд суток UTC).
-//    DST_ROUND_SEC  — шаг округления автодетекта offset (15 минут,
-//                     Req 6.1).
+//    DST_ROUND_SEC  — шаг округления автодетекта offset (15 минут).
 //    DST_LOG_DELTA  — порог логирования изменения offset между
-//                     тиками (30 минут, Req 6.2).
-//    GMT_MIN_SEC    — нижняя граница допустимого offset (UTC−12,
-//                     Req 5.2, 5.6).
-//    GMT_MAX_SEC    — верхняя граница допустимого offset (UTC+14,
-//                     Req 5.2, 5.6).
+//                     тиками (30 минут).
+//    GMT_MIN_SEC    — нижняя граница допустимого offset (UTC−12).
+//    GMT_MAX_SEC    — верхняя граница допустимого offset (UTC+14).
 #define SELECTED_SESSIONS_SEC_PER_DAY    86400L
 #define SELECTED_SESSIONS_DST_ROUND_SEC  900L
 #define SELECTED_SESSIONS_DST_LOG_DELTA  1800L
@@ -180,31 +166,24 @@ enum ENUM_DST_MODE
 //| SelectedSessionsConfig — иммутабельная конфигурация фильтра.     |
 //|                                                                  |
 //| Заполняется EA в OnInit из input-параметров и передаётся в       |
-//| публичные функции по `const &`. Модуль не модифицирует поля      |
-//| (Req 1.1, 11.3).                                                 |
+//| публичные функции по `const &`. Модуль не модифицирует поля.     |
 //|                                                                  |
 //|   enabled                     — глобальный switch фильтра. При   |
 //|                                  false `SelectedSessionsIsInside`|
-//|                                  всегда возвращает false (Req    |
-//|                                  2.4, 8.4).                      |
+//|                                  всегда возвращает false.        |
 //|   useAsian, useLondon,        — флаги выбранных сессий из        |
-//|   useNewYork                    Selected_Session_Set (Req 2.1,   |
-//|                                  7.5).                           |
+//|   useNewYork                    Selected_Session_Set.            |
 //|   asianStartSec, asianEndSec, — границы сессий в секундах суток  |
 //|   londonStartSec, londonEndSec, UTC, диапазон [0, 86399]. Случай |
 //|   nyStartSec, nyEndSec          start == end трактуется как      |
-//|                                  пустая сессия (Req 7.1, 7.4).   |
+//|                                  пустая сессия.                  |
 //|   gmtOffsetSeconds            — ручное смещение сервер→UTC в    |
-//|                                  секундах, [-43200, 50400] (Req  |
-//|                                  2.6, 5.6).                      |
-//|   dstMode                     — режим обработки часового пояса  |
-//|                                  (Req 2.7, 6.1, 6.3).            |
+//|                                  секундах, [-43200, 50400].      |
+//|   dstMode                     — режим обработки часового пояса. |
 //|   closeOnSessionExit          — флаг закрытия позиций при       |
-//|                                  Session_Exit_Event (Req 2.5,    |
-//|                                  4.1).                           |
+//|                                  Session_Exit_Event.             |
 //|   useBrokerSessionsAsFallback — опциональный broker-fallback для |
-//|                                  London/NewYork границ (Req      |
-//|                                  10.1).                          |
+//|                                  London/NewYork границ.          |
 //+------------------------------------------------------------------+
 struct SelectedSessionsConfig
   {
@@ -227,24 +206,20 @@ struct SelectedSessionsConfig
 //+------------------------------------------------------------------+
 //| SelectedSessionsState — мутабельное состояние фильтра.           |
 //|                                                                  |
-//| Обновляется только функциями SelectedSessions* (Req 1.2, 11.1,   |
-//| 11.2).                                                           |
+//| Обновляется только функциями SelectedSessions*.                  |
 //|                                                                  |
 //|   effectiveGmtOffsetSec     — текущее эффективное смещение       |
 //|                                сервер→UTC в секундах. DST_AUTO   |
 //|                                пересчитывает на каждом тике;    |
-//|                                DST_MANUAL фиксирует в Init       |
-//|                                (Req 5.2, 5.3, 6.3).               |
+//|                                DST_MANUAL фиксирует в Init.      |
 //|   wasInsideOnPreviousTick   — edge-trigger состояние для        |
-//|                                Session_Exit_Event (Req 1.5,      |
-//|                                4.4).                              |
+//|                                Session_Exit_Event.               |
 //|   lastEvaluatedUtcSec       — последний оценённый utcNowSec,    |
-//|                                для диагностики (Req 1.2).        |
+//|                                для диагностики.                  |
 //|   lastEffectiveGmtOffsetSec — предыдущее значение offset, для   |
-//|                                DST_AUTO change-detect (Req 6.2). |
+//|                                DST_AUTO change-detect.           |
 //|   timeGmtFallbackLogged     — антиспам-флаг для предупреждения  |
-//|                                «TimeGMT=0 → DST_MANUAL» (Req     |
-//|                                5.5).                              |
+//|                                «TimeGMT=0 → DST_MANUAL».         |
 //+------------------------------------------------------------------+
 struct SelectedSessionsState
   {
@@ -256,17 +231,17 @@ struct SelectedSessionsState
   };
 
 //+------------------------------------------------------------------+
-//| Реализации (task 2.2).                                           |
+//| Реализации.                                                      |
 //|                                                                  |
 //| Приватный хелпер циркулярного расстояния и тела четырёх          |
 //| публичных функций. Хелпер имеет уникальный префикс имени, чтобы  |
 //| не конфликтовать с локальными утилитами вызывающих EA до         |
-//| полного перевода на модуль (Req 15.5).                           |
+//| полного перевода на модуль.                                      |
 //+------------------------------------------------------------------+
 
 //--- Циркулярное расстояние между секундами суток t1 и t2 по        |
-//    модулю 86400. Эквивалент эталонной формулы с базой 43200       |
-//    (Req 2.7):                                                     |
+//    модулю 86400. Эквивалент эталонной формулы с базой 43200       |:
+//    |
 //        MathMin((t1 - t2 + 86400) % 86400,                         |
 //                (t2 - t1 + 86400) % 86400)                         |
 //    Возвращаемое значение в [0, 43200].                            |
@@ -293,7 +268,7 @@ long SessionFilter_ComposeHM(const int hour, const int minute)
 
 //--- SessionInit ----------------------------------------------------
 //
-// Алгоритм (Req 2.1, 2.2, 2.3, 2.9):
+// Алгоритм:
 //
 // 1) Перебираем дни MONDAY..FRIDAY (ENUM_DAY_OF_WEEK значения 1..5).
 //    Для каждого дня сканируем все сессии по индексу через
@@ -306,14 +281,14 @@ long SessionFilter_ComposeHM(const int hour, const int minute)
 //    fallback на cfg. Компонуем cfgAm = americanCloseHour*3600 +
 //    americanCloseMinute*60 и cfgAs = asianOpenHour*3600 +
 //    asianOpenMinute*60. Если оба ∈ [0, 86399] — пишем их в state,
-//    state.useAuto = false, возвращаем false (Req 2.2).
+//    state.useAuto = false, возвращаем false.
 //
 // 3) Иначе оставляем state.amCloseSec / state.asOpenSec без
-//    модификаций (Req 2.3), ставим state.useAuto = false, возвращаем
+//    модификаций, ставим state.useAuto = false, возвращаем
 //    false.
 //
 // SymbolInfoSessionTrade — единственное обращение к SymbolInfo* в
-// модуле (Req 2.8).
+// модуле.
 bool SessionInit(const SessionConfig &cfg,
                  SessionState        &state)
   {
@@ -364,13 +339,13 @@ bool SessionInit(const SessionConfig &cfg,
 //
 // Возвращает true, если now = TimeCurrent() % 86400 находится в
 // окне ±(cfg.windowMinutes * 60) секунд от state.amCloseSec или
-// state.asOpenSec по циркулярной арифметике mod 86400 (Req 2.5).
+// state.asOpenSec по циркулярной арифметике mod 86400.
 //
-// При cfg.enabled = false — false (Req 2.4).
+// При cfg.enabled = false — false.
 // При невалидных cfg.windowMinutes ∉ [1, 120] или state.amCloseSec /
-// state.asOpenSec ∉ [0, 86399] — false без модификаций (Req 2.10).
+// state.asOpenSec ∉ [0, 86399] — false без модификаций.
 //
-// Не вызывает trade.*, PositionGet*, OrderGet*, SymbolInfo* (Req 2.8).
+// Не вызывает trade.*, PositionGet*, OrderGet*, SymbolInfo*.
 bool SessionIsBoundary(const SessionConfig &cfg,
                        const SessionState  &state)
   {
@@ -394,13 +369,13 @@ bool SessionIsBoundary(const SessionConfig &cfg,
 //
 // Возвращает true, если now = TimeCurrent() % 86400 находится в
 // полу-открытом окне (state.amCloseSec - windowSec, state.amCloseSec]
-// с циркулярной арифметикой mod 86400 (Req 2.6).
+// с циркулярной арифметикой mod 86400.
 //
 // Эквивалентно: forwardDist(now → amCloseSec) ∈ [0, windowSec), где
 // forwardDist = (amCloseSec - now + 86400) % 86400.
 //
-// При cfg.enabled = false — false (Req 2.4).
-// Те же guard'ы, что и в SessionIsBoundary (Req 2.10).
+// При cfg.enabled = false — false.
+// Те же guard'ы, что и в SessionIsBoundary.
 bool SessionIsAmericanPreClose(const SessionConfig &cfg,
                                const SessionState  &state)
   {
@@ -432,7 +407,7 @@ void SessionGetEffective(const SessionConfig &cfg,
   }
 
 //+------------------------------------------------------------------+
-//| trading-session-filter — приватные чистые хелперы (task 1.2).    |
+//| trading-session-filter — приватные чистые хелперы.               |
 //|                                                                  |
 //| Module-private утилиты, используемые только реализациями         |
 //| SelectedSessions* публичных функций. Не объявляются в публичном  |
@@ -444,7 +419,7 @@ void SessionGetEffective(const SessionConfig &cfg,
 //| вызова платформенного API (`TimeTradeServer` / `_Symbol` +       |
 //| `SymbolInfoSessionTrade`). Никаких обращений к `trade.*`,        |
 //| `PositionGet*`, `OrderGet*`, `PositionSelect`, `OrderSelect`,    |
-//| `HistorySelect`, `ExpertRemove` (Req 1.8, 11.3, 13.4).           |
+//| `HistorySelect`, `ExpertRemove`.                                 |
 //+------------------------------------------------------------------+
 
 //--- SelectedSessions_NormalizeSecOfDay -----------------------------
@@ -464,12 +439,12 @@ long SelectedSessions_NormalizeSecOfDay(const long sec)
 //--- SelectedSessions_IsInOneSession --------------------------------
 //
 // Принадлежность секунды суток `t` к полу-открытому интервалу
-// `[startSec, endSec)` на окружности Z/86400Z (Req 7.1, 7.2, 7.3,
-// 7.4). Случаи:
-//   - startSec == endSec → false (пустая сессия, Req 7.4)
-//   - startSec <  endSec → startSec ≤ t < endSec        (Req 7.2)
-//   - startSec >  endSec → t ≥ startSec OR t < endSec   (Req 7.3,
-//     пересечение полуночи UTC)
+// `[startSec, endSec)` на окружности Z/86400Z.
+// Случаи:
+//   - startSec == endSec → false (пустая сессия)
+//   - startSec <  endSec → startSec ≤ t < endSec
+//   - startSec >  endSec → t ≥ startSec OR t < endSec
+//     (пересечение полуночи UTC)
 //
 // Все три аргумента предполагаются в [0, 86399]; ответственность за
 // валидацию диапазона лежит на ValidateConfig.
@@ -487,7 +462,7 @@ bool SelectedSessions_IsInOneSession(const long t,
 
 //--- SelectedSessions_ComputeUtcNowSec ------------------------------
 //
-// UTC_Now в секундах суток по формуле (Req 5.4):
+// UTC_Now в секундах суток по формуле:
 //   utcNowSec = ((TimeTradeServer() − offset) mod 86400 + 86400)
 //                mod 86400
 //
@@ -505,8 +480,7 @@ long SelectedSessions_ComputeUtcNowSec(const long effectiveGmtOffsetSec)
 //
 // Округление сырого offset (`TimeTradeServer() − TimeGMT()`) к
 // ближайшим 900 секундам (15 минут) и clamp в диапазон
-// [SELECTED_SESSIONS_GMT_MIN_SEC, SELECTED_SESSIONS_GMT_MAX_SEC]
-// (Req 5.2, 6.1).
+// [SELECTED_SESSIONS_GMT_MIN_SEC, SELECTED_SESSIONS_GMT_MAX_SEC].
 //
 // Round-half-away-from-zero на целочисленной арифметике:
 //   raw ≥ 0  → ((raw + 450) / 900) * 900
@@ -534,7 +508,7 @@ long SelectedSessions_RoundOffsetToQuarterHour(const long rawOffsetSec)
 
 //--- SelectedSessions_ValidateConfig --------------------------------
 //
-// Проверка cfg перед использованием (Req 13.1, 13.2, 13.3):
+// Проверка cfg перед использованием:
 //   - Все шесть границ (asianStart/End, londonStart/End, nyStart/End)
 //     ∈ [0, 86399].
 //   - При dstMode == DST_MANUAL: gmtOffsetSeconds ∈
@@ -543,13 +517,12 @@ long SelectedSessions_RoundOffsetToQuarterHour(const long rawOffsetSec)
 // Возвращает true, если cfg валиден; иначе false и заполняет
 // errorMessage диагностической строкой с указанием параметра и
 // его значения (используется в SelectedSessionsInit для одного
-// Print при провале — Req 2.9, 5.6).
+// Print при провале).
 //
 // Часы вне [0, 23] и минуты вне [0, 59] на EA-уровне дают
 // секунду суток вне [0, 86399] (например, час=24 → 86400), что
-// корректно отлавливается проверкой границы. Это удовлетворяет
-// Req 13.1 / 13.2 без отдельной валидации часов/минут на стороне
-// модуля (на момент вызова EA уже сложил час*3600 + минута*60).
+// корректно отлавливается проверкой границы. Отдельная валидация
+// часов/минут на стороне модуля не нужна (на момент вызова EA уже сложил час*3600 + минута*60).
 bool SelectedSessions_ValidateConfig(const SelectedSessionsConfig &cfg,
                                      string                       &errorMessage)
   {
@@ -614,27 +587,26 @@ bool SelectedSessions_ValidateConfig(const SelectedSessionsConfig &cfg,
 
 //--- SelectedSessions_TryBrokerFallback -----------------------------
 //
-// Опциональный broker fallback для London/NewYork границ (Req 10.2,
-// 10.3, 10.4).
+// Опциональный broker fallback для London/NewYork границ.
 //
 // Применяется только когда:
-//   - cfg.useBrokerSessionsAsFallback == true (Req 10.3 — при false
+//   - cfg.useBrokerSessionsAsFallback == true (при false
 //     SymbolInfoSessionTrade не вызывается),
-//   - все шесть кастомных границ нулевые (Req 10.2 — «пустая»
+//   - все шесть кастомных границ нулевые («пустая»
 //     конфигурация на стороне EA).
 //
 // Алгоритм: сканирует MONDAY..FRIDAY через SymbolInfoSessionTrade,
 // собирает первые две различные валидные пары (from, to) с
 // from, to ∈ [0, 86399] и from != to. Первая пара →
 // london{Start,End}Sec, вторая → ny{Start,End}Sec. Asian-границы не
-// модифицируются (Req 10.2 — фоллбэк только для London/NY).
+// модифицируются (фоллбэк только для London/NY).
 //
 // Возвращает true ⇔ заполнены обе пары; в этом случае cfgInOut
 // мутирован. False ⇔ либо предусловия не выполнены, либо брокер не
 // вернул двух валидных пар. В случае «попытка была, но данные
 // невалидны» (предусловия выполнены, пар не нашлось) — один warning
 // `Print` и rollback (cfgInOut остаётся нетронутым — мутации
-// происходят только после успешного сбора обеих пар, Req 10.4).
+// происходят только после успешного сбора обеих пар).
 bool SelectedSessions_TryBrokerFallback(SelectedSessionsConfig &cfgInOut)
   {
    if(!cfgInOut.useBrokerSessionsAsFallback)
@@ -701,8 +673,7 @@ bool SelectedSessions_TryBrokerFallback(SelectedSessionsConfig &cfgInOut)
 //--- SelectedSessions_ResetState ------------------------------------
 //
 // Полный сброс `SelectedSessionsState` к «cold»-нулю. Используется
-// SelectedSessionsInit на пути «невалидный cfg» (Req 11.2, 13.1, 13.2,
-// 13.3 — no partial init; «выключенный» фильтр через нулевые поля).
+// SelectedSessionsInit на пути «невалидный cfg» (no partial init; «выключенный» фильтр через нулевые поля).
 // Никаких побочных эффектов, никаких обращений к платформенному API.
 void SelectedSessions_ResetState(SelectedSessionsState &state)
   {
@@ -716,52 +687,50 @@ void SelectedSessions_ResetState(SelectedSessionsState &state)
 //+------------------------------------------------------------------+
 //| SelectedSessionsInit — публичная инициализация фильтра.          |
 //|                                                                  |
-//| Алгоритм (task 2.1; Req 1.3, 1.8, 5.2, 5.3, 5.6, 6.1, 6.3, 10.2, |
-//| 10.3, 10.4, 11.2, 11.3, 13.1, 13.2, 13.3, 13.4):                 |
+//| Алгоритм:                                                        |
 //|                                                                  |
 //| 1. Валидация cfg через `SelectedSessions_ValidateConfig`. При    |
 //|    провале — один `Print(errorMessage)`, полный сброс `state`    |
-//|    через `SelectedSessions_ResetState`, возврат `false` (Req     |
-//|    13.1, 13.2, 13.3, 13.4).                                      |
+//|    через `SelectedSessions_ResetState`, возврат `false`.         |
 //|                                                                  |
 //| 2. Опциональный broker fallback: если                            |
 //|    `cfg.useBrokerSessionsAsFallback = true` — вызвать            |
 //|    `SelectedSessions_TryBrokerFallback`, который сам проверяет   |
-//|    «все шесть границ нулевые» (Req 10.2). При выключенном флаге  |
-//|    fallback `SymbolInfoSessionTrade` не вызывается (Req 10.3).   |
+//|    «все шесть границ нулевые». При выключенном флаге             |
+//|    fallback `SymbolInfoSessionTrade` не вызывается.              |
 //|    Rollback на cfg + warning Print реализованы внутри            |
-//|    TryBrokerFallback (Req 10.4).                                 |
+//|    TryBrokerFallback.                                            |
 //|                                                                  |
 //| 3. Вычислить `state.effectiveGmtOffsetSec` по `cfg.dstMode`:     |
 //|    - `DST_AUTO`: rounded `TimeTradeServer() − TimeGMT()` через   |
-//|      `SelectedSessions_RoundOffsetToQuarterHour` (Req 5.2, 6.1). |
+//|      `SelectedSessions_RoundOffsetToQuarterHour`.                |
 //|      Если `TimeGMT() == 0` — fallback на `cfg.gmtOffsetSeconds`  |
-//|      без логирования; первое `SelectedSessionsIsInside` (task   |
-//|      2.2) отвечает за warning Print + установку                  |
-//|      `state.timeGmtFallbackLogged` (Req 5.5).                    |
+//|      без логирования; первое `SelectedSessionsIsInside`         |
+//|       отвечает за warning Print + установку                      |
+//|      `state.timeGmtFallbackLogged`.                              |
 //|    - `DST_MANUAL`: `state.effectiveGmtOffsetSec :=               |
-//|      cfg.gmtOffsetSeconds` (Req 5.3, 6.3).                       |
+//|      cfg.gmtOffsetSeconds`.                                      |
 //|                                                                  |
 //| 4. Записать `state.lastEffectiveGmtOffsetSec :=                  |
 //|    state.effectiveGmtOffsetSec` (baseline DST-change-detect для  |
-//|    `SelectedSessionsIsInside`; Req 6.2) и                        |
+//|    `SelectedSessionsIsInside`) и                                 |
 //|    `state.timeGmtFallbackLogged := false` (анти-спам флаг        |
-//|    стартовый, Req 5.5).                                          |
+//|    стартовый).                                                   |
 //|                                                                  |
 //| 5. Cold-start sync `state.wasInsideOnPreviousTick`: inline       |
 //|    воспроизводим семантику `SelectedSessionsIsInside` на         |
 //|    «нулевом тике». При `cfg.enabled = false` —                   |
-//|    `wasInsideOnPreviousTick := false` (Req 2.4, 8.4). Иначе      |
+//|    `wasInsideOnPreviousTick := false`. Иначе                     |
 //|    `utcNowSec := SelectedSessions_ComputeUtcNowSec(offset)`,     |
 //|    membership через `SelectedSessions_IsInOneSession` по каждой  |
-//|    флагованной сессии, OR-объединение (Req 1.4, 7.5, 7.6, 7.7).  |
+//|    флагованной сессии, OR-объединение.                           |
 //|    Полная функция `SelectedSessionsIsInside` (с DST-change       |
-//|    логом и TimeGMT==0 fallback warning) реализована в task 2.2;  |
+//|    логом и TimeGMT==0 fallback warning) реализована ниже;        |
 //|    логирующие пути там отрабатывают на первом реальном тике.     |
 //|                                                                  |
-//| 6. Записать `state.lastEvaluatedUtcSec := utcNowSec` (Req 1.2).  |
+//| 6. Записать `state.lastEvaluatedUtcSec := utcNowSec`.            |
 //|                                                                  |
-//| Идемпотентность (Req 11.2 / Property 7): два последовательных    |
+//| Идемпотентность: два последовательных                            |
 //| вызова с одним и тем же `cfg` при фиксированных                  |
 //| `TimeTradeServer()` / `TimeGMT()` дают идентичный `state` поле   |
 //| в поле. На втором вызове broker-fallback пропускается (его       |
@@ -771,14 +740,14 @@ void SelectedSessions_ResetState(SelectedSessionsState &state)
 //|                                                                  |
 //| Сигнатура: `cfg` принимается по неконстантной ссылке, потому     |
 //| что `SelectedSessions_TryBrokerFallback` мутирует поля           |
-//| `londonStart/EndSec` и `nyStart/EndSec` (Req 10.2). Это          |
+//| `londonStart/EndSec` и `nyStart/EndSec`. Это                     |
 //| осознанное отклонение от `const &`,                              |
 //| продиктованное согласованностью с TryBrokerFallback — иначе      |
-//| мутации фоллбэка не доживают до первого `IsInside` и Req 10.2    |
-//| не выполняется. `SelectedSessionsIsInside` / `DetectExit` /      |
-//| `GetEffective` остаются `const &` по cfg (task 2.2–2.4).         |
+//| мутации фоллбэка не доживают до первого `IsInside` и фоллбэк     |
+//| не работает. `SelectedSessionsIsInside` / `DetectExit` /         |
+//| `GetEffective` остаются `const &` по cfg.                        |
 //|                                                                  |
-//| Запрещённые вызовы (Req 1.8, 11.3, 13.4): функция не обращается  |
+//| Запрещённые вызовы: функция не обращается                        |
 //| к `trade.*`, `PositionGet*`, `OrderGet*`, `PositionSelect`,      |
 //| `OrderSelect`, `HistorySelect`, `ExpertRemove`.                  |
 //+------------------------------------------------------------------+
@@ -798,7 +767,7 @@ bool SelectedSessionsInit(SelectedSessionsConfig &cfg,
    //    проверяет precondition «useBrokerSessionsAsFallback=true И все
    //    шесть границ нулевые» внутри, поэтому здесь достаточно тонкого
    //    guard'а по флагу — чтобы при выключенном fallback не вызывать
-   //    SymbolInfoSessionTrade ни разу (Req 10.3).
+   //    SymbolInfoSessionTrade ни разу.
    if(cfg.useBrokerSessionsAsFallback)
       SelectedSessions_TryBrokerFallback(cfg);
 
@@ -809,8 +778,8 @@ bool SelectedSessionsInit(SelectedSessionsConfig &cfg,
       if(rawGmt == 0)
         {
          // TimeGMT()==0 → invalid system time. Safe fallback to manual
-         // offset; warning will be emitted by the first IsInside tick
-         // (Req 5.5). state.timeGmtFallbackLogged остаётся false ниже,
+         // offset; warning will be emitted by the first IsInside tick.
+         // state.timeGmtFallbackLogged остаётся false ниже,
          // в шаге 4, чтобы IsInside мог однократно залогировать.
          state.effectiveGmtOffsetSec = cfg.gmtOffsetSeconds;
         }
@@ -826,13 +795,13 @@ bool SelectedSessionsInit(SelectedSessionsConfig &cfg,
       state.effectiveGmtOffsetSec = cfg.gmtOffsetSeconds;
      }
 
-   // 4. Baseline state fields for IsInside (task 2.2):
+   // 4. Baseline state fields for IsInside:
    //    - lastEffectiveGmtOffsetSec  — DST-change-detect baseline.
    //    - timeGmtFallbackLogged      — anti-spam flag, стартовое false.
    state.lastEffectiveGmtOffsetSec = state.effectiveGmtOffsetSec;
    state.timeGmtFallbackLogged     = false;
 
-   // 5. Cold-start sync of wasInsideOnPreviousTick (Req 1.5, 4.4).
+   // 5. Cold-start sync of wasInsideOnPreviousTick.
    //    Inline IsInside semantics: validate enabled, compute utcNowSec,
    //    evaluate union membership over flagged sessions.
    const long utcNowSec =
@@ -859,7 +828,7 @@ bool SelectedSessionsInit(SelectedSessionsConfig &cfg,
       state.wasInsideOnPreviousTick = (inAsian || inLondon || inNY);
      }
 
-   // 6. Record lastEvaluatedUtcSec for diagnostics (Req 1.2).
+   // 6. Record lastEvaluatedUtcSec for diagnostics.
    state.lastEvaluatedUtcSec = utcNowSec;
 
    return true;
@@ -869,11 +838,10 @@ bool SelectedSessionsInit(SelectedSessionsConfig &cfg,
 //| SelectedSessionsIsInside — публичная проверка принадлежности     |
 //|                              UTC_Now к Selected_Union_Interval.  |
 //|                                                                  |
-//| Алгоритм (task 2.2; Req 1.4, 1.8, 5.1, 5.2, 5.4, 5.5, 6.1, 6.2,  |
-//| 6.4, 7.5, 7.6, 7.7, 11.1, 11.3):                                 |
+//| Алгоритм:                                                        |
 //|                                                                  |
 //| 1. Switch-off guard: при `cfg.enabled = false` возврат `false`   |
-//|    без побочных эффектов на `state` (Req 2.4, 7.6 edge, 8.4).    |
+//|    без побочных эффектов на `state`.                             |
 //|                                                                  |
 //| 2. Пересчёт `state.effectiveGmtOffsetSec` по `cfg.dstMode`:      |
 //|    - `DST_AUTO`:                                                 |
@@ -881,51 +849,47 @@ bool SelectedSessionsInit(SelectedSessionsConfig &cfg,
 //|           `state.effectiveGmtOffsetSec := cfg.gmtOffsetSeconds`; |
 //|           при `state.timeGmtFallbackLogged = false` — один       |
 //|           warning `Print` и `state.timeGmtFallbackLogged :=      |
-//|           true` (Req 5.5, anti-spam).                            |
+//|           true` (anti-spam).                                     |
 //|        b) иначе `state.effectiveGmtOffsetSec :=                  |
-//|           SelectedSessions_RoundOffsetToQuarterHour(             |
-//|           TimeTradeServer() − TimeGMT())` (Req 5.2, 6.1).        |
+//|           SelectedSessions_RoundOffsetToQuarterHour              |
+//|           (TimeTradeServer() − TimeGMT())`.                      |
 //|        c) DST change detection: если                             |
 //|           |state.effectiveGmtOffsetSec −                         |
 //|             state.lastEffectiveGmtOffsetSec|                     |
 //|           ≥ `SELECTED_SESSIONS_DST_LOG_DELTA` — один `Print` с   |
 //|           old/new offset и `state.lastEffectiveGmtOffsetSec :=   |
-//|           state.effectiveGmtOffsetSec` (Req 6.2). Обновление     |
+//|           state.effectiveGmtOffsetSec`. Обновление               |
 //|           «last logged» (а не «last seen») гарантирует           |
-//|           идемпотентность повторного вызова при том же времени   |
-//|           (Req 11.1 / Property 8).                               |
+//|           идемпотентность повторного вызова при том же времени.  |
 //|    - `DST_MANUAL`: `state.effectiveGmtOffsetSec` не              |
 //|       модифицируется и остаётся равным `cfg.gmtOffsetSeconds`,   |
-//|       зафиксированному `SelectedSessionsInit` (Req 5.3, 6.3 /    |
-//|       Property 4).                                               |
+//|       зафиксированному `SelectedSessionsInit`.                   |
 //|                                                                  |
 //| 3. Вычислить `utcNowSec` через                                   |
 //|    `SelectedSessions_ComputeUtcNowSec(state.effectiveGmtOffsetSec)`
-//|    (Req 5.4, 6.4) и записать в `state.lastEvaluatedUtcSec`       |
-//|    (Req 1.2).                                                    |
+//| и записать в `state.lastEvaluatedUtcSec`.                        |
 //|                                                                  |
 //| 4. Вычислить членство по каждой флагованной сессии через         |
-//|    `SelectedSessions_IsInOneSession` и вернуть OR-объединение    |
-//|    (Req 1.4, 7.5, 7.6, 7.7). При всех `use*=false` результат —   |
-//|    `false` (Req 7.6, edge: пустой union).                        |
+//|    `SelectedSessions_IsInOneSession` и вернуть OR-объединение.   |
+//|    При всех `use*=false` результат —                             |
+//|    `false` (edge: пустой union).                                 |
 //|                                                                  |
-//| Запрещённые вызовы (Req 1.8, 5.1, 11.3): функция не обращается   |
+//| Запрещённые вызовы: функция не обращается                        |
 //| к `trade.*`, `PositionGet*`, `OrderGet*`, `PositionSelect`,      |
 //| `OrderSelect`, `HistorySelect`, `SymbolInfo*`, `TimeCurrent()`   |
-//| (`TimeCurrent` — legacy-only, Req 5.1). Платформенные вызовы     |
+//| (`TimeCurrent` — legacy-only). Платформенные вызовы              |
 //| ограничены `TimeTradeServer()` и `TimeGMT()`, разрешёнными       |
-//| Req 1.8.                                                         |
 //|                                                                  |
 //| Сигнатура: `cfg` — `const &` (модуль не модифицирует             |
 //| конфигурацию здесь; broker-fallback мутации происходят только в  |
 //| `SelectedSessionsInit`); `state` — мутабельная ссылка, потому    |
 //| что DST-пересчёт и кэширование `utcNowSec` / `lastEvaluated*`    |
-//| обновляют поля state на каждом тике (Req 5.2, 6.2, 1.2).         |
+//| обновляют поля state на каждом тике.                             |
 //+------------------------------------------------------------------+
 bool SelectedSessionsIsInside(const SelectedSessionsConfig &cfg,
                               SelectedSessionsState        &state)
   {
-   // 1. Switch-off guard (Req 2.4, 7.6 edge, 8.4): no side effects.
+   // 1. Switch-off guard: no side effects.
    if(!cfg.enabled)
       return false;
 
@@ -935,7 +899,7 @@ bool SelectedSessionsIsInside(const SelectedSessionsConfig &cfg,
       const long rawGmt = (long)TimeGMT();
       if(rawGmt == 0)
         {
-         // Req 5.5: TimeGMT()==0 → invalid system time. Safe fallback to
+         // TimeGMT()==0 → invalid system time. Safe fallback to
          // manual offset; one warning Print per advisor lifetime
          // (anti-spam via state.timeGmtFallbackLogged).
          state.effectiveGmtOffsetSec = cfg.gmtOffsetSeconds;
@@ -949,16 +913,15 @@ bool SelectedSessionsIsInside(const SelectedSessionsConfig &cfg,
         }
       else
         {
-         // Req 5.2, 6.1: rounded TimeTradeServer() − TimeGMT() to 15 min.
+         // rounded TimeTradeServer() − TimeGMT() to 15 min.
          const long rawOffset = (long)TimeTradeServer() - rawGmt;
          state.effectiveGmtOffsetSec =
             SelectedSessions_RoundOffsetToQuarterHour(rawOffset);
         }
 
-      // Req 6.2: DST change detection. Compare against last *logged*
+      // DST change detection. Compare against last *logged*
       // baseline (lastEffectiveGmtOffsetSec); update only on logging
-      // event so repeated calls at the same time are idempotent
-      // (Req 11.1 / Property 8).
+      // event so repeated calls at the same time are idempotent.
       long delta = state.effectiveGmtOffsetSec
                    - state.lastEffectiveGmtOffsetSec;
       if(delta < 0)
@@ -973,15 +936,15 @@ bool SelectedSessionsIsInside(const SelectedSessionsConfig &cfg,
         }
      }
    // DST_MANUAL: state.effectiveGmtOffsetSec остаётся равным
-   // cfg.gmtOffsetSeconds (Req 5.3, 6.3). Init его уже зафиксировал —
+   // cfg.gmtOffsetSeconds. Init его уже зафиксировал —
    // здесь намеренно не модифицируем.
 
-   // 3. UTC_Now (Req 5.4, 6.4) + cache for diagnostics (Req 1.2).
+   // 3. UTC_Now + cache for diagnostics.
    const long utcNowSec =
       SelectedSessions_ComputeUtcNowSec(state.effectiveGmtOffsetSec);
    state.lastEvaluatedUtcSec = utcNowSec;
 
-   // 4. Union membership over flagged sessions (Req 1.4, 7.5, 7.6, 7.7).
+   // 4. Union membership over flagged sessions.
    const bool inAsian  = cfg.useAsian &&
                          SelectedSessions_IsInOneSession(utcNowSec,
                                                          cfg.asianStartSec,
@@ -1001,7 +964,7 @@ bool SelectedSessionsIsInside(const SelectedSessionsConfig &cfg,
 //| SelectedSessionsDetectExit — edge-trigger детекции Session_Exit_ |
 //|                                Event (inside → outside).         |
 //|                                                                  |
-//| Алгоритм (task 2.3; Req 1.5, 1.8, 4.4, 15.4):                    |
+//| Алгоритм:                                                        |
 //|                                                                  |
 //| 1. Сохранить `wasInside := state.wasInsideOnPreviousTick`        |
 //|    (snapshot до пересчёта; нужен в шаге 4 для оригинального      |
@@ -1011,34 +974,33 @@ bool SelectedSessionsIsInside(const SelectedSessionsConfig &cfg,
 //|    делегируем вычисление членства публичной функции, что         |
 //|    обеспечивает идентичные DST/UTC семантики и побочные эффекты  |
 //|    обновления `state.effectiveGmtOffsetSec` /                    |
-//|    `state.lastEvaluatedUtcSec` (Req 1.4, 5.2, 6.2, 6.4).         |
+//|    `state.lastEvaluatedUtcSec`.                                  |
 //|    `SelectedSessionsIsInside` НЕ модифицирует                    |
 //|    `state.wasInsideOnPreviousTick`, поэтому порядок snapshot →   |
 //|    IsInside корректен.                                           |
 //|                                                                  |
-//| 3. Обновить `state.wasInsideOnPreviousTick := isInsideNow`       |
-//|    (Req 1.5). Это превращает функцию в edge-trigger: повторный   |
+//| 3. Обновить `state.wasInsideOnPreviousTick := isInsideNow`.      |
+//|    Это превращает функцию в edge-trigger: повторный              |
 //|    вызов после `true` без возврата в inside даст `false`,        |
 //|    потому что `wasInside` на следующем вызове станет `false`     |
-//|    (Req 4.4, 15.4 — антиспам закрытия позиций).                  |
+//|    (антиспам закрытия позиций).                                  |
 //|                                                                  |
 //| 4. Вернуть `wasInside AND NOT isInsideNow` — true тогда и        |
 //|    только тогда, когда на предыдущем оценённом тике состояние    |
 //|    было `inside`, а на текущем стало `outside`                   |
-//|    (Session_Exit_Event, Req 1.5).                                |
+//|    (Session_Exit_Event).                                         |
 //|                                                                  |
-//| Запрещённые вызовы (Req 1.8): функция не обращается к            |
+//| Запрещённые вызовы: функция не обращается к                      |
 //| `trade.*`, `PositionGet*`, `OrderGet*`, `PositionSelect`,        |
 //| `OrderSelect`, `HistorySelect`, `SymbolInfo*`. Платформенные     |
 //| обращения к `TimeTradeServer()` / `TimeGMT()` выполняются        |
 //| транзитивно через `SelectedSessionsIsInside` и разрешены         |
-//| Req 1.8.                                                         |
 //|                                                                  |
 //| Сигнатура: `cfg` — `const &` (модуль не модифицирует             |
 //| конфигурацию); `state` — мутабельная ссылка, потому что          |
 //| функция обновляет `wasInsideOnPreviousTick` (шаг 3) и через      |
 //| вложенный вызов `SelectedSessionsIsInside` — поля,               |
-//| относящиеся к DST/UTC кэшу (Req 5.2, 6.2, 1.2).                  |
+//| относящиеся к DST/UTC кэшу.                                      |
 //+------------------------------------------------------------------+
 bool SelectedSessionsDetectExit(const SelectedSessionsConfig &cfg,
                                 SelectedSessionsState        &state)
@@ -1050,7 +1012,7 @@ bool SelectedSessionsDetectExit(const SelectedSessionsConfig &cfg,
    //    side-effects to the canonical implementation.
    const bool isInsideNow = SelectedSessionsIsInside(cfg, state);
 
-   // 3. Advance edge-trigger state for the next tick (Req 1.5, 4.4).
+   // 3. Advance edge-trigger state for the next tick.
    state.wasInsideOnPreviousTick = isInsideNow;
 
    // 4. Edge: previous=inside AND current=outside ⇒ Session_Exit_Event.
@@ -1060,7 +1022,7 @@ bool SelectedSessionsDetectExit(const SelectedSessionsConfig &cfg,
 //+------------------------------------------------------------------+
 //| SelectedSessionsGetEffective — диагностический accessor.         |
 //|                                                                  |
-//| Алгоритм (task 2.4; Req 1.7):                                    |
+//| Алгоритм:                                                        |
 //|                                                                  |
 //| Копирует шесть эффективных секунд суток UTC                      |
 //| (`cfg.asianStartSec`, `cfg.asianEndSec`, `cfg.londonStartSec`,   |
@@ -1074,7 +1036,7 @@ bool SelectedSessionsDetectExit(const SelectedSessionsConfig &cfg,
 //| и возможного будущего расширения (диагностика effective offset / |
 //| lastEvaluatedUtcSec), сейчас фактически не читается.             |
 //|                                                                  |
-//| Запрещённые вызовы (Req 1.8, 11.3): нет обращений к              |
+//| Запрещённые вызовы: нет обращений к                              |
 //| `trade.*`, `PositionGet*`, `OrderGet*`, `PositionSelect`,        |
 //| `OrderSelect`, `HistorySelect`, `SymbolInfo*`, `TimeTradeServer`,|
 //| `TimeGMT`, `TimeCurrent`. Чистая копия.                          |
