@@ -1,0 +1,50 @@
+{
+  "expert": "liq-grab_v2.1",
+  "symbols": [
+    "XAUUSDm",
+    "XAUUSD"
+  ],
+  "period": "M3",
+  "from": "2026.07.06",
+  "to": "2026.10.05",
+  "model": 4,
+  "delay": 200,
+  "deposit": 200,
+  "currency": "USD",
+  "leverage": 2000,
+  "inputs": {
+    "MaxTradesPerDay": 0,
+    "PauseAfterLosses": 0,
+    "LossPauseMinutes": 60
+  },
+  "variants": [
+    {
+      "name": "freq-off",
+      "inputs": {
+        "MaxTradesPerDay": 0,
+        "PauseAfterLosses": 0
+      }
+    },
+    {
+      "name": "max3-day",
+      "inputs": {
+        "MaxTradesPerDay": 3
+      }
+    },
+    {
+      "name": "pause2-60m",
+      "inputs": {
+        "PauseAfterLosses": 2,
+        "LossPauseMinutes": 60
+      }
+    },
+    {
+      "name": "max3-pause2",
+      "inputs": {
+        "MaxTradesPerDay": 3,
+        "PauseAfterLosses": 2,
+        "LossPauseMinutes": 60
+      }
+    }
+  ]
+}
