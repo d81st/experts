@@ -122,7 +122,8 @@ jobs:
             if ($var.name) { $suffix = "_$($var.name)" }
             $done = $false
             foreach ($sym in $cfg.symbols) {
-              $name = "$($cfg.expert)_$($sym)_$($cfg.period)$suffix"
+              # Имя файла настроек в имени отчёта: прогоны разных конфигов не перезаписывают друг друга.
+              $name = "$($cfgFile.BaseName)_$($sym)_$($cfg.period)$suffix"
               $ini = "$env:RUNNER_TEMP\tester.ini"
               @("[Common]", "Login=$env:MT5_LOGIN", "Password=$env:MT5_PASSWORD", "Server=$env:MT5_SERVER",
                 "ProxyEnable=0", "NewsEnable=0",
