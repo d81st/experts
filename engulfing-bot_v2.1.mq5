@@ -34,25 +34,25 @@ input ENUM_TIMEFRAMES TradingTimeframe = PERIOD_M1;
 input ENUM_ENTRY_MODE EntryMode        = ENTRY_SWEEP_RECLAIM;
 input bool RequireOppositeCandle       = true;   // Свеча [2] должна быть противоположной
 input bool RequireFullBodyEngulf       = true;   // Тело [1] должно полностью поглотить тело [2]
-// Все расстояния ниже — в ПУНКТАХ (не пипсах): на золоте с 3 знаками 1000 пт = 1.00 USD цены.
-input double RBOpenCloseTolerancePips  = 100;    // Допуск |open[1] - close[2]|, пункты, 0 = выключено
+// Все расстояния ниже — в пунктах: на золоте 1000 пт = 1.00 USD цены.
+input double RBOpenCloseTolerancePoints  = 100;    // Допуск |open[1] - close[2]|, пункты, 0 = выключено
 
-input double MinBodyPips               = 0;      // Мин. тело свечи [1], пункты, 0 = выключено
+input double MinBodyPoints               = 0;      // Мин. тело свечи [1], пункты, 0 = выключено
 input double R1BodyRatio               = 0.4;    // Мин. доля тела от диапазона [1], 0 = выключено
 input double R2BodyRatio               = 0.2;    // Мин. доля тела от диапазона [2], 0 = выключено
 input double R2ToR1SizeRatio           = 0.3;    // Мин. отношение тела [2] к телу [1], 0 = выключено
 
 
-input double MaxSpreadPips             = 0;      // Макс. спред, пункты, 0 = выключено (см. также MaxSpreadToSL)
+input double MaxSpreadPoints             = 0;      // Макс. спред, пункты, 0 = выключено (см. также MaxSpreadToSL)
 input int    TradeLockSeconds          = 3;      // Пауза после market-входа, сек, 0 = выключено
 
 input group "── Ожидание входа ──"
 input int MaxBarsToWait = 2;   // Макс. баров до отмены сигнала/ордера (0 = без ограничения)
 
 input group "── Stop Loss / Take Profit ──"
-input double BufferPips = 200;     // Отступ от экстремума свечей, пункты (200 = 0.20 USD)
-input double MinSLPips  = 1500;    // Минимальный SL, пункты (1500 = 1.50 USD)
-input double MaxSLPips  = 3175;    // Максимальный SL, пункты (3175 = 3.175 USD)
+input double BufferPoints = 200;     // Отступ от экстремума свечей, пункты (200 = 0.20 USD)
+input double MinSLPoints  = 1500;    // Минимальный SL, пункты (1500 = 1.50 USD)
+input double MaxSLPoints  = 3175;    // Максимальный SL, пункты (3175 = 3.175 USD)
 input double RiskReward = 1.5;     // TP = SL distance * RiskReward
 
 // Параметры сессий — общие для всех ботов; у engulfing выбор сессий по умолчанию выключен.
@@ -131,18 +131,18 @@ bool g_swept = false;
 
 bool IsSpreadAllowed()
 {
-   if(MaxSpreadPips <= 0.0) return true;
+   if(MaxSpreadPoints <= 0.0) return true;
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double spread_pts = (ask - bid) / g_broker.adjustedPoint;
    static bool s_blocked = false;   // печатаем только при смене состояния, а не на каждом тике
-   if(spread_pts <= MaxSpreadPips)
+   if(spread_pts <= MaxSpreadPoints)
    {
       if(s_blocked) PrintFormat("✅ Спред %.1f pts снова в пределах лимита", spread_pts);
       s_blocked = false;
       return true;
    }
-   if(!s_blocked) PrintFormat("🚫 Спред %.1f pts выше лимита %.1f pts", spread_pts, MaxSpreadPips);
+   if(!s_blocked) PrintFormat("🚫 Спред %.1f pts выше лимита %.1f pts", spread_pts, MaxSpreadPoints);
    s_blocked = true;
    return false;
 }
@@ -161,7 +161,7 @@ bool IsEngulfingPattern(const MqlRates &r2, const MqlRates &r1, int &dir)
    double body2 = MathAbs(r2.close - r2.open);
 
    if(body1 <= 0.0 || body2 <= 0.0) return false;
-   if(MinBodyPips > 0.0 && body1 / g_broker.adjustedPoint < MinBodyPips) return false;
+   if(MinBodyPoints > 0.0 && body1 / g_broker.adjustedPoint < MinBodyPoints) return false;
 
    if(R1BodyRatio > 0.0)
    {
@@ -182,10 +182,10 @@ bool IsEngulfingPattern(const MqlRates &r2, const MqlRates &r1, int &dir)
 
    if(body1 <= body2) return false;
 
-   if(RBOpenCloseTolerancePips > 0.0)
+   if(RBOpenCloseTolerancePoints > 0.0)
    {
       double rb_gap_pts = MathAbs(r1.open - r2.close) / g_broker.adjustedPoint;
-      if(rb_gap_pts > RBOpenCloseTolerancePips) return false;
+      if(rb_gap_pts > RBOpenCloseTolerancePoints) return false;
    }
 
    bool c1_bull = r1.close > r1.open;
@@ -261,7 +261,7 @@ double CalcTPByRR(double entry, double sl, int dir)
 //+------------------------------------------------------------------+
 //| РАСЧЁТ SL И TP                                                   |
 //|                                                                  |
-//| SL = экстремум свечей [2] и [1] ± BufferPips                     |
+//| SL = экстремум свечей [2] и [1] ± BufferPoints                     |
 //| TP = дистанция SL * RiskReward                                   |
 //+------------------------------------------------------------------+
 
@@ -275,17 +275,17 @@ void CalcSLTP(double entry, int dir,
    if(dir == -1)  // SELL: SL выше экстремума
    {
       double slBase = MathMax(high2, high1);
-      sl_out = slBase + BufferPips * point;
-      sl_out = MathMax(sl_out, entry + MinSLPips * point);
-      sl_out = MathMin(sl_out, entry + MaxSLPips * point);
+      sl_out = slBase + BufferPoints * point;
+      sl_out = MathMax(sl_out, entry + MinSLPoints * point);
+      sl_out = MathMin(sl_out, entry + MaxSLPoints * point);
       tp_out = CalcTPByRR(entry, sl_out, dir);
    }
    else           // BUY: SL ниже экстремума
    {
       double slBase = MathMin(low2, low1);
-      sl_out = slBase - BufferPips * point;
-      sl_out = MathMin(sl_out, entry - MinSLPips * point);
-      sl_out = MathMax(sl_out, entry - MaxSLPips * point);
+      sl_out = slBase - BufferPoints * point;
+      sl_out = MathMin(sl_out, entry - MinSLPoints * point);
+      sl_out = MathMax(sl_out, entry - MaxSLPoints * point);
       tp_out = CalcTPByRR(entry, sl_out, dir);
    }
 }
@@ -600,6 +600,12 @@ void CheckEngulfingEntry()
    if(g_pattern_active && EntryMode != ENTRY_LIMIT)
    {
       if(SessionsIsBoundary()) return;
+      if(EntryMode == ENTRY_MARKET && EntryTriggerBeyondSL(g_pattern_dir, g_sl_level))
+      {
+         PrintFormat("🚫 Паттерн отменён: цена дошла до стопа %.5f до входа", g_sl_level);
+         ResetPattern();
+         return;
+      }
       if(!IsSpreadAllowed()) return;
 
       double price = 0.0;
@@ -675,7 +681,7 @@ int OnInit()
                MagicNumber, EnumToString(TradingTimeframe),
                modeStr,
                digits, g_broker.adjustedPoint,
-               MinSLPips, MaxSLPips, BufferPips, RiskReward, RBOpenCloseTolerancePips, MinBodyPips, MaxSpreadPips, TradeLockSeconds, MaxBarsToWait,
+               MinSLPoints, MaxSLPoints, BufferPoints, RiskReward, RBOpenCloseTolerancePoints, MinBodyPoints, MaxSpreadPoints, TradeLockSeconds, MaxBarsToWait,
                EnumToString(g_broker.fillType));
 
    PrintFormat("📈 TrendFilter:%s TF:%s EMA(%d,%d) | ADX:%s Period:%d Min:%.1f",

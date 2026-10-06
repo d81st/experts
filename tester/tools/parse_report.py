@@ -54,6 +54,26 @@ def main(path):
     losses = [p for p in outs if p < 0]
     breakeven = [p for p in outs if 0 <= p < 0.5]
     other = [p for p in outs if p >= 0.5]
+    # PF и итог по годам — для проверки стабильности на длинной истории
+    by_year = {}
+    for d in deals:
+        if d[i_dir] not in ("out", "выход") or not d[i_profit]:
+            continue
+        y = d[0][:4]
+        w = by_year.setdefault(y, [0.0, 0.0, 0])
+        # итог сделки = прибыль + своп + комиссия, как в отчёте MT5
+        p = num(d[i_profit]) + num(d[i_profit - 1]) + num(d[i_profit - 2])
+        if p >= 0: w[0] += p
+        else:      w[1] -= p
+        w[2] += 1
+    if len(by_year) > 1:
+        print()
+        print("По годам:")
+        for y in sorted(by_year):
+            gp, gl, n = by_year[y]
+            pf = gp / gl if gl > 0 else float("inf")
+            print(f"  {y}: сделок {n:4d}  PF {pf:5.2f}  итог {gp - gl:10.2f}")
+
     print()
     print(f"Закрытых сделок: {len(outs)}")
     print(f"  убыточные:            {len(losses):5d}  {sum(losses):10.2f}")

@@ -78,5 +78,20 @@ bool EntryTriggerPoll(const ENUM_ENTRY_MODE mode,
    return reclaim;
   }
 
+//+------------------------------------------------------------------+
+//| EntryTriggerBeyondSL — цена до входа уже дошла до стопа сигнала. |
+//|                                                                  |
+//|   Вход по рынку дал бы стоп с неверной стороны (отказ брокера    |
+//|   «invalid stops»), а сам сигнал уже сломан — его надо отменить. |
+//|   BUY — Bid ≤ sl; SELL — Ask ≥ sl (там, где сработал бы стоп).   |
+//+------------------------------------------------------------------+
+bool EntryTriggerBeyondSL(const int dir, const double sl)
+  {
+   if(sl <= 0.0)
+      return false;
+   return (dir == 1) ? (SymbolInfoDouble(_Symbol, SYMBOL_BID) <= sl)
+                     : (SymbolInfoDouble(_Symbol, SYMBOL_ASK) >= sl);
+  }
+
 #endif // ENTRYTRIGGER_MQH
 //+------------------------------------------------------------------+
