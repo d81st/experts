@@ -587,6 +587,13 @@ void CheckPendingEntry()
 
    const int    dir   = -g_pending.imbDir;   // бычья IMB → SELL, медвежья → BUY
    const string label = g_pending.patternName + (g_pending.isFVG ? "+FVG" : "");
+   if(EntryMode == ENTRY_MARKET && EntryTriggerBeyondSL(dir, g_pending.sl))
+   {
+      PrintFormat("🚫 Pending [%s] отменён: цена дошла до стопа %.5f до входа", label, g_pending.sl);
+      g_pending.Reset();
+      Comment("");
+      return;
+   }
    double price = 0.0;
    if(EntryTriggerPoll(EntryMode, dir, g_pending.entryLevel, g_pending.swept, label, price))
    {

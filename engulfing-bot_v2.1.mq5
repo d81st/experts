@@ -600,6 +600,12 @@ void CheckEngulfingEntry()
    if(g_pattern_active && EntryMode != ENTRY_LIMIT)
    {
       if(SessionsIsBoundary()) return;
+      if(EntryMode == ENTRY_MARKET && EntryTriggerBeyondSL(g_pattern_dir, g_sl_level))
+      {
+         PrintFormat("🚫 Паттерн отменён: цена дошла до стопа %.5f до входа", g_sl_level);
+         ResetPattern();
+         return;
+      }
       if(!IsSpreadAllowed()) return;
 
       double price = 0.0;

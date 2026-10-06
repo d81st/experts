@@ -61,7 +61,8 @@ def main(path):
             continue
         y = d[0][:4]
         w = by_year.setdefault(y, [0.0, 0.0, 0])
-        p = num(d[i_profit])
+        # итог сделки = прибыль + своп + комиссия, как в отчёте MT5
+        p = num(d[i_profit]) + num(d[i_profit - 1]) + num(d[i_profit - 2])
         if p >= 0: w[0] += p
         else:      w[1] -= p
         w[2] += 1
