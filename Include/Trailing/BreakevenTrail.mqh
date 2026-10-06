@@ -78,6 +78,10 @@ void BreakevenTrailManage(ITradeAdapter      *adapter,
    //--- нет позиций — выход без побочных эффектов
    if(PositionsTotal() == 0) return;
 
+   // Причины пропуска печатаем один раз на позицию, а не на каждом тике.
+   static ulong s_skipTicket = 0;
+   static int   s_skipReason = 0;
+
    const double min_dist = broker.minBrokerDistance;
    const double point    = broker.adjustedPoint;
 
@@ -124,14 +128,18 @@ void BreakevenTrailManage(ITradeAdapter      *adapter,
         {
          if(ptype == POSITION_TYPE_BUY  && targetSL < currentSL)
            {
+            if(s_skipTicket != ticket || s_skipReason != 1)
             PrintFormat("BreakevenTrailManage: skip #%I64u — targetSL %.5f < currentSL %.5f (BUY, non-monotonic)",
                         ticket, targetSL, currentSL);
+            s_skipTicket = ticket; s_skipReason = 1;
             continue;
            }
          if(ptype == POSITION_TYPE_SELL && targetSL > currentSL)
            {
+            if(s_skipTicket != ticket || s_skipReason != 1)
             PrintFormat("BreakevenTrailManage: skip #%I64u — targetSL %.5f > currentSL %.5f (SELL, non-monotonic)",
                         ticket, targetSL, currentSL);
+            s_skipTicket = ticket; s_skipReason = 1;
             continue;
            }
         }
@@ -139,8 +147,10 @@ void BreakevenTrailManage(ITradeAdapter      *adapter,
       //--- брокерская дистанция
       if(MathAbs(currentPrice - targetSL) < min_dist)
         {
+         if(s_skipTicket != ticket || s_skipReason != 2)
          PrintFormat("BreakevenTrailManage: skip #%I64u — |%.5f - %.5f| < minBrokerDistance %.5f",
                      ticket, currentPrice, targetSL, min_dist);
+         s_skipTicket = ticket; s_skipReason = 2;
          continue;
         }
 

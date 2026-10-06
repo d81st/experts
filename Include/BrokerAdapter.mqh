@@ -111,10 +111,14 @@ ENUM_ORDER_TYPE_FILLING BrokerGetFillType(void);
 //    возвращается SYMBOL_VOLUME_MIN без обращения к
 //    OrderCalcMargin. Если OrderCalcMargin → false или
 //    marginPerLot <= 0 при MARGIN — возвращается SYMBOL_VOLUME_MIN.
+//    maxRiskOvershoot > 0 (только TICK_VALUE): если даже минимальный
+//    лот рискует больше riskMoney * maxRiskOvershoot — возвращается 0,
+//    и вызывающий EA должен пропустить сделку. 0 — проверка выключена.
 double BrokerCalcLot(const BrokerContext     &ctx,
                      const double             riskPercent,
                      const double             slPoints,
-                     const ENUM_LOT_STRATEGY  strategy);
+                     const ENUM_LOT_STRATEGY  strategy,
+                     const double             maxRiskOvershoot = 0.0);
 
 //--- Принуждение минимальной SL-дистанции.
 //    Если |entry - sl| < ctx.minBrokerDistance — модифицирует
@@ -200,6 +204,8 @@ void BrokerInit(BrokerContext &ctx)
 //|   lot = riskMoney / moneyPerLot                                  |
 //|   Защита: slPoints<=0 / tickValue==0 / tickSize==0               |
 //|   → volMin без вызова OrderCalcMargin.                           |
+//|   maxRiskOvershoot > 0: риск минимального лота                   |
+//|   > riskMoney * maxRiskOvershoot → 0 (сделку пропустить).        |
 //|                                                                  |
 //| LOT_BY_MARGIN (crt-bot):                                         |
 //|   marginPerLot через OrderCalcMargin(ORDER_TYPE_BUY,_Symbol,1.0, |
@@ -214,7 +220,8 @@ void BrokerInit(BrokerContext &ctx)
 double BrokerCalcLot(const BrokerContext     &ctx,
                      const double             riskPercent,
                      const double             slPoints,
-                     const ENUM_LOT_STRATEGY  strategy)
+                     const ENUM_LOT_STRATEGY  strategy,
+                     const double             maxRiskOvershoot)
   {
    const double balance   = AccountInfoDouble(ACCOUNT_BALANCE);
    const double riskMoney = balance * riskPercent / 100.0;
@@ -236,6 +243,16 @@ double BrokerCalcLot(const BrokerContext     &ctx,
       if(moneyPerLot <= 0.0)
          return volMin;
       lot = riskMoney / moneyPerLot;
+
+      //--- минимальный лот рискует слишком много — сделку пропускаем.
+      const double minLotRisk = moneyPerLot * volMin;
+      if(maxRiskOvershoot > 0.0 && minLotRisk > riskMoney * maxRiskOvershoot)
+        {
+         PrintFormat("🚫 Лот %.2f рискует %.2f %s > %.2f (%.1f%% × %.1f) — сделка пропущена",
+                     volMin, minLotRisk, AccountInfoString(ACCOUNT_CURRENCY),
+                     riskMoney * maxRiskOvershoot, riskPercent, maxRiskOvershoot);
+         return 0.0;
+        }
      }
    else if(strategy == LOT_BY_MARGIN)
      {

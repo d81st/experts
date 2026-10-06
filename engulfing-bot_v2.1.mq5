@@ -26,8 +26,9 @@ enum ENUM_ENTRY_MODE
 //── Входные параметры ─────────────────────────────────────────────────
 
 input group "── Управление капиталом ──"
-input int    MagicNumber = 77777;
+input int    MagicNumber = 71003;   // Магический номер (уникальный для каждого бота)
 input double RiskPercent = 3.0;    // Риск на сделку, %
+input double MaxRiskOvershoot = 1.5; // Пропуск сделки, если мин. лот рискует > RiskPercent × N (0 = выкл)
 
 input group "── Параметры входа ──"
 input ENUM_TIMEFRAMES TradingTimeframe = PERIOD_M1;
@@ -176,8 +177,15 @@ bool IsSpreadAllowed()
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double spread_pts = (ask - bid) / g_broker.adjustedPoint;
-   if(spread_pts <= MaxSpreadPips) return true;
-   PrintFormat("🚫 Спред %.1f pts выше лимита %.1f pts", spread_pts, MaxSpreadPips);
+   static bool s_blocked = false;   // печатаем только при смене состояния, а не на каждом тике
+   if(spread_pts <= MaxSpreadPips)
+   {
+      if(s_blocked) PrintFormat("✅ Спред %.1f pts снова в пределах лимита", spread_pts);
+      s_blocked = false;
+      return true;
+   }
+   if(!s_blocked) PrintFormat("🚫 Спред %.1f pts выше лимита %.1f pts", spread_pts, MaxSpreadPips);
+   s_blocked = true;
    return false;
 }
 
@@ -366,7 +374,12 @@ bool OpenEngulfingTrade(ENUM_ORDER_TYPE orderType, double entry,
    req.tp        = tp;
    req.lot       = BrokerCalcLot(g_broker, RiskPercent,
                                  sl_dist / g_broker.adjustedPoint,
-                                 LOT_BY_TICK_VALUE);
+                                 LOT_BY_TICK_VALUE, MaxRiskOvershoot);
+   if(req.lot <= 0.0)
+   {
+      ResetPattern();   // минимальный лот слишком рискованный — сигнал отбрасываем
+      return false;
+   }
    req.comment   = StringFormat("ENG_%s TF:%s", dir, EnumToString(TradingTimeframe));
 
    const TradeResult result = TradeExecutorSend(trade, g_broker, req);
@@ -416,7 +429,12 @@ void PlaceLimitOrder(ENUM_ORDER_TYPE orderType, double price,
    req.tp        = tp;
    req.lot       = BrokerCalcLot(g_broker, RiskPercent,
                                  sl_dist / g_broker.adjustedPoint,
-                                 LOT_BY_TICK_VALUE);
+                                 LOT_BY_TICK_VALUE, MaxRiskOvershoot);
+   if(req.lot <= 0.0)
+   {
+      ResetPattern();   // минимальный лот слишком рискованный — сигнал отбрасываем
+      return;
+   }
    req.comment   = StringFormat("ENG_%s TF:%s", dir, EnumToString(TradingTimeframe));
 
    const TradeResult result = TradeExecutorSend(trade, g_broker, req);

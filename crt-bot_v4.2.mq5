@@ -73,7 +73,7 @@ input group "── Ожидание входа ──"
 input int MaxBarsToWait = 2;   // Макс. баров до отмены сигнала/ордера (0 = без ограничения)
 
 input group "── Управление капиталом ──"
-input int    MagicNumber  = 77777;
+input int    MagicNumber  = 71002;   // Магический номер (уникальный для каждого бота)
 input double RiskPercent  = 3.0;
 
 input group "── Параметры входа ──"

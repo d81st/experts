@@ -21,8 +21,9 @@ CTrade trade;
 // INPUT GROUPS
 //==========================================================================
 input group "Money Management"
-input int MagicNumber = 77777; // Магический номер
+input int MagicNumber = 71001; // Магический номер (уникальный для каждого бота)
 input double RiskPercent = 3.0; // Риск на сделку в %
+input double MaxRiskOvershoot = 1.5; // Пропуск сделки, если мин. лот рискует > RiskPercent × N (0 = выкл)
 input int MaxSpread = 1000; // Максимальный спред (в пунктах)
 
 input group "Trade Parameters"
@@ -324,14 +325,16 @@ void OpenTrade(ENUM_ORDER_TYPE orderType, double slPoints, double rrRatio)
                                                              : (price + sl_dist_pre);
    BrokerEnforceMinSLDist(g_broker, orderType, price, sl_tentative);
    const double sl_dist_post = MathAbs(price - sl_tentative);
-   if(sl_dist_post > sl_dist_pre)
+   if(sl_dist_post > sl_dist_pre + 0.5 * _Point)
    {
       slPoints = sl_dist_post / g_broker.adjustedPoint;
       PrintFormat("⚠️ SL→min: %.1f pts", slPoints);
    }
 
    const double tpPoints = slPoints * rrRatio;
-   const double lot      = BrokerCalcLot(g_broker, RiskPercent, slPoints, LOT_BY_TICK_VALUE);
+   const double lot      = BrokerCalcLot(g_broker, RiskPercent, slPoints, LOT_BY_TICK_VALUE,
+                                         MaxRiskOvershoot);
+   if(lot <= 0.0) return;   // минимальный лот слишком рискованный — причина уже в журнале
    const double sl       = sl_tentative;
    const double tp       = (orderType == ORDER_TYPE_BUY)
                            ? price + tpPoints * g_broker.adjustedPoint
