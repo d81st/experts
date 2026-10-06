@@ -41,6 +41,9 @@ input double SweepSLBufferPoints = 100;  // Буфер за экстремумо
 input double MinSLPoints = 1000;         // Мин. SL, пункты (SL_BEYOND_SWEEP)
 input double MaxSLPoints = 6350;         // Макс. SL, пункты (SL_BEYOND_SWEEP)
 input double RiskRewardRatio = 2.0; // RR
+input int    MaxTradesPerDay    = 0;  // Макс. входов за день (серверное время), 0 = без лимита
+input int    PauseAfterLosses   = 0;  // Пауза после N стопов подряд, 0 = выкл
+input int    LossPauseMinutes   = 60; // Длительность паузы, мин
 input ENUM_TIMEFRAMES TradingTimeframe = PERIOD_M3;
 input bool UseClosedBarSignal = true; // Сигнал по закрытой свече (false — внутри формирующейся, как раньше)
 
@@ -368,6 +371,55 @@ void OpenTrade(ENUM_ORDER_TYPE orderType, double slPoints, double rrRatio)
 }
 
 //+------------------------------------------------------------------+
+//| Лимиты частоты сделок: входов за день и пауза после серии стопов. |
+//| Возвращает "" если вход разрешён, иначе причину.                 |
+//+------------------------------------------------------------------+
+string TradeFrequencyBlock()
+{
+   const datetime now = TimeCurrent();
+
+   if(MaxTradesPerDay > 0)
+   {
+      const datetime dayStart = now - (now % 86400);
+      if(!HistorySelect(dayStart, now)) return "";
+      int entries = 0;
+      for(int i = HistoryDealsTotal() - 1; i >= 0; i--)
+      {
+         const ulong d = HistoryDealGetTicket(i);
+         if(HistoryDealGetInteger(d, DEAL_MAGIC) != MagicNumber) continue;
+         if(HistoryDealGetString(d, DEAL_SYMBOL) != _Symbol) continue;
+         if(HistoryDealGetInteger(d, DEAL_ENTRY) == DEAL_ENTRY_IN) entries++;
+      }
+      if(entries >= MaxTradesPerDay)
+         return StringFormat("лимит %d входов за день", MaxTradesPerDay);
+   }
+
+   if(PauseAfterLosses > 0)
+   {
+      if(!HistorySelect(now - 7 * 86400, now)) return "";
+      int      losses   = 0;
+      datetime lastLoss = 0;
+      for(int i = HistoryDealsTotal() - 1; i >= 0; i--)
+      {
+         const ulong d = HistoryDealGetTicket(i);
+         if(HistoryDealGetInteger(d, DEAL_MAGIC) != MagicNumber) continue;
+         if(HistoryDealGetString(d, DEAL_SYMBOL) != _Symbol) continue;
+         if(HistoryDealGetInteger(d, DEAL_ENTRY) != DEAL_ENTRY_OUT) continue;
+         const double pnl = HistoryDealGetDouble(d, DEAL_PROFIT)
+                          + HistoryDealGetDouble(d, DEAL_COMMISSION)
+                          + HistoryDealGetDouble(d, DEAL_SWAP);
+         if(pnl >= 0.0) break;   // серия убытков прервана
+         if(lastLoss == 0) lastLoss = (datetime)HistoryDealGetInteger(d, DEAL_TIME);
+         losses++;
+      }
+      if(losses >= PauseAfterLosses && now < lastLoss + LossPauseMinutes * 60)
+         return StringFormat("пауза после %d стопов подряд до %s",
+                             losses, TimeToString(lastLoss + LossPauseMinutes * 60, TIME_MINUTES));
+   }
+   return "";
+}
+
+//+------------------------------------------------------------------+
 //| Проверка сигналов на открытие                                    |
 //+------------------------------------------------------------------+
 void CheckEntrySignals()
@@ -471,6 +523,13 @@ void CheckEntrySignals()
                   _Symbol,
                   UseTrendFilter ? "true" : "false",
                   UseADXFilter   ? "true" : "false");
+      return;
+   }
+
+   const string freqBlock = TradeFrequencyBlock();
+   if(freqBlock != "")
+   {
+      PrintFormat("⏸️ Сигнал пропущен: %s", freqBlock);
       return;
    }
 
