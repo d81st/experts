@@ -78,10 +78,10 @@ input group "── Параметры входа ──"
 input ENUM_TIMEFRAMES TradingTimeframe = PERIOD_M1;
 
 input group "── Stop Loss ──"
-// Все расстояния ниже — в ПУНКТАХ (не пипсах): на золоте с 3 знаками 1000 пт = 1.00 USD цены.
-input double BufferPips = 200;   // Отступ от экстремума, пункты (200 = 0.20 USD)
-input double MinSLPips  = 1525;  // Мин. SL, пункты (1525 = 1.525 USD)
-input double MaxSLPips  = 3175;  // Макс. SL, пункты (3175 = 3.175 USD)
+// Все расстояния ниже — в пунктах: на золоте 1000 пт = 1.00 USD цены.
+input double BufferPoints = 200;   // Отступ от экстремума, пункты (200 = 0.20 USD)
+input double MinSLPoints  = 1525;  // Мин. SL, пункты (1525 = 1.525 USD)
+input double MaxSLPoints  = 3175;  // Макс. SL, пункты (3175 = 3.175 USD)
 
 input group "── Трейлинг ──"
 input ENUM_TRAILING_MODE_EX TrailingMode          = TRAILING_OFF_EX;
@@ -427,7 +427,7 @@ void CalcCRTLevels(const MqlRates &imb, const MqlRates &doji,
                    double &sl_out, double &tp_out)
 {
    double point  = g_broker.adjustedPoint;
-   double buffer = BufferPips * point;
+   double buffer = BufferPoints * point;
    double entry  = CalcEntryPrice(imb, doji, imbDir, patternName);
 
    double imbBodyHi = MathMax(imb.open, imb.close);
@@ -442,8 +442,8 @@ void CalcCRTLevels(const MqlRates &imb, const MqlRates &doji,
    if(imbDir == 1)   // Bull IMB → SELL
    {
       double slRaw = MathMax(imb.high, doji.high) + buffer;
-      slRaw = MathMax(slRaw, entry + MinSLPips * point);
-      slRaw = MathMin(slRaw, entry + MaxSLPips * point);
+      slRaw = MathMax(slRaw, entry + MinSLPoints * point);
+      slRaw = MathMin(slRaw, entry + MaxSLPoints * point);
       sl_out = slRaw;
 
       double tpCandidate;
@@ -461,8 +461,8 @@ void CalcCRTLevels(const MqlRates &imb, const MqlRates &doji,
    else   // Bear IMB → BUY
    {
       double slRaw = MathMin(imb.low, doji.low) - buffer;
-      slRaw = MathMin(slRaw, entry - MinSLPips * point);
-      slRaw = MathMax(slRaw, entry - MaxSLPips * point);
+      slRaw = MathMin(slRaw, entry - MinSLPoints * point);
+      slRaw = MathMax(slRaw, entry - MaxSLPoints * point);
       sl_out = slRaw;
 
       double tpCandidate;

@@ -17,8 +17,8 @@
     "TrailingMode": 0,
     "TradingTimeframe": 1,
     "EntryMode": 0,
-    "MinSLPips": 1525,
-    "MaxSLPips": 3175
+    "MinSLPoints": 1525,
+    "MaxSLPoints": 3175
   },
   "variants": [
     {
@@ -40,8 +40,8 @@
       "inputs": {
         "TradingTimeframe": 5,
         "EntryMode": 0,
-        "MinSLPips": 2500,
-        "MaxSLPips": 8000
+        "MinSLPoints": 2500,
+        "MaxSLPoints": 8000
       }
     },
     {
@@ -49,8 +49,8 @@
       "inputs": {
         "TradingTimeframe": 5,
         "EntryMode": 2,
-        "MinSLPips": 2500,
-        "MaxSLPips": 8000
+        "MinSLPoints": 2500,
+        "MaxSLPoints": 8000
       }
     },
     {
@@ -58,8 +58,8 @@
       "inputs": {
         "TradingTimeframe": 15,
         "EntryMode": 0,
-        "MinSLPips": 4000,
-        "MaxSLPips": 15000
+        "MinSLPoints": 4000,
+        "MaxSLPoints": 15000
       }
     },
     {
@@ -67,8 +67,8 @@
       "inputs": {
         "TradingTimeframe": 15,
         "EntryMode": 2,
-        "MinSLPips": 4000,
-        "MaxSLPips": 15000
+        "MinSLPoints": 4000,
+        "MaxSLPoints": 15000
       }
     }
   ]
