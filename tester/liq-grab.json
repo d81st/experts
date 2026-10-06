@@ -6,7 +6,7 @@
   "to": "2026.10.05",
   "model": 4,
   "delay": 0,
-  "deposit": 1000,
+  "deposit": 200,
   "currency": "USD",
-  "leverage": 200
+  "leverage": 2000
 }
