@@ -206,4 +206,10 @@ jobs:
           git -C $repo config user.email "github-actions@users.noreply.github.com"
           git -C $repo add -A
           git -C $repo commit -m "Backtest results for run $env:GITHUB_RUN_ID ($env:GITHUB_SHA)"
-          git -C $repo push origin tester-results
+          # Параллельные прогоны пишут в разные папки: при отказе подтягиваем чужой коммит и повторяем
+          for ($i = 1; $i -le 5; $i++) {
+            git -C $repo push origin tester-results
+            if ($LASTEXITCODE -eq 0) { break }
+            Start-Sleep -Seconds (5 * $i)
+            git -C $repo pull --rebase origin tester-results
+          }
