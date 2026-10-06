@@ -135,7 +135,7 @@ jobs:
                 "ReplaceReport=1",
                 "ShutdownTerminal=1") | Out-File $ini -Encoding Unicode
               if ($inputLines) { (@("[TesterInputs]") + $inputLines) | Out-File $ini -Encoding Unicode -Append }
-              Write-Host "=== $($cfgFile.Name)$suffix: $($cfg.expert) on $sym $($cfg.period) $($cfg.from)-$($cfg.to), model $($cfg.model), delay $($cfg.delay) | inputs: $($inputLines -join '; ') ==="
+              Write-Host "=== $($cfgFile.Name)${suffix}: $($cfg.expert) on $sym $($cfg.period) $($cfg.from)-$($cfg.to), model $($cfg.model), delay $($cfg.delay) | inputs: $($inputLines -join '; ') ==="
               $t = Start-Process -FilePath "$env:MT5_ROOT\terminal64.exe" -ArgumentList "/portable", "/config:`"$ini`"" -PassThru
               if (-not $t.WaitForExit(60 * 60 * 1000)) {
                 Write-Host "Tester did not finish in time, killing terminal"
