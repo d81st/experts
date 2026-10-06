@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       only:
-        description: 'Имя файла настроек без .json (пусто — все боты)'
+        description: 'Имена файлов настроек без .json через запятую (пусто — все)'
         required: false
         default: ''
 
@@ -92,7 +92,10 @@ jobs:
           $reports = "$env:MT5_ROOT\reports"
           New-Item -ItemType Directory -Force $reports | Out-Null
           $configs = Get-ChildItem "$env:GITHUB_WORKSPACE\tester" -Filter *.json
-          if ($env:ONLY) { $configs = $configs | Where-Object { $_.BaseName -eq $env:ONLY } }
+          if ($env:ONLY) {
+            $names = $env:ONLY -split ',' | ForEach-Object { $_.Trim() }
+            $configs = $configs | Where-Object { $names -contains $_.BaseName }
+          }
           $failed = @()
           foreach ($cfgFile in $configs) {
             $cfg = Get-Content $cfgFile.FullName -Raw | ConvertFrom-Json
