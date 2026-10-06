@@ -4,20 +4,20 @@
     "XAUUSD"
   ],
   "period": "M1",
-  "from": "2026.01.05",
-  "to": "2026.05.29",
+  "from": "2026.06.01",
+  "to": "2026.10.05",
   "model": 4,
   "delay": 200,
   "deposit": 10000,
   "currency": "USD",
   "leverage": 2000,
-  "expert": "crt-bot_v4.2",
+  "expert": "engulfing-bot_v2.1",
   "inputs": {
     "RiskPercent": 1.0,
     "TrailingMode": 0,
     "TradingTimeframe": 1,
     "EntryMode": 0,
-    "MinSLPips": 1525,
+    "MinSLPips": 1500,
     "MaxSLPips": 3175
   },
   "variants": [
@@ -29,10 +29,10 @@
       }
     },
     {
-      "name": "m1-limit",
+      "name": "m1-market",
       "inputs": {
         "TradingTimeframe": 1,
-        "EntryMode": 2
+        "EntryMode": 1
       }
     },
     {
@@ -45,10 +45,10 @@
       }
     },
     {
-      "name": "m5-limit",
+      "name": "m5-market",
       "inputs": {
         "TradingTimeframe": 5,
-        "EntryMode": 2,
+        "EntryMode": 1,
         "MinSLPips": 2500,
         "MaxSLPips": 8000
       }
@@ -63,10 +63,10 @@
       }
     },
     {
-      "name": "m15-limit",
+      "name": "m15-market",
       "inputs": {
         "TradingTimeframe": 15,
-        "EntryMode": 2,
+        "EntryMode": 1,
         "MinSLPips": 4000,
         "MaxSLPips": 15000
       }
