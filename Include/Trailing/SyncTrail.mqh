@@ -4,7 +4,6 @@
 //|  Synchronized SL/TP Trailing — common types and pure helpers     |
 //|                                                                  |
 //|  This header declares:                                           |
-//|   - ENUM_TRAILING_MODE  — режим трейлинга                        |
 //|   - SyncTrailState      — per-ticket состояние                   |
 //|   - прототипы pure-хелперов трейлинга                            |
 //|                                                                  |
@@ -15,20 +14,6 @@
 #ifndef SYNCTRAIL_MQH
 #define SYNCTRAIL_MQH
 
-//+------------------------------------------------------------------+
-//| Режим трейлинга (входной параметр TrailingMode).                 |
-//|                                                                  |
-//|   TRAILING_OFF       — без трейлинга                             |
-//|   TRAILING_BREAKEVEN — однократный перевод в безубыток           |
-//|                        (текущая логика ManageStopLoss)           |
-//|   TRAILING_SYNC      — синхронный трейлинг блока SL/TP           |
-//+------------------------------------------------------------------+
-enum ENUM_TRAILING_MODE
-  {
-   TRAILING_OFF       = 0,   // Без трейлинга
-   TRAILING_BREAKEVEN = 1,   // Перевод SL в безубыток (legacy)
-   TRAILING_SYNC      = 2    // Синхронный трейлинг SL и TP
-  };
 
 //+------------------------------------------------------------------+
 //| Per-ticket состояние SyncTrailing.                               |

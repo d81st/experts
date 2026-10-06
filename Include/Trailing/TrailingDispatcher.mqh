@@ -8,9 +8,10 @@
 //|  TrailingManage. Реализация делегирует в подмодули:              |
 //|   - OFF       → no-op                                            |
 //|   - BREAKEVEN → BreakevenTrailManage                             |
-//|   - SYNC      → менеджер из SyncTrail.mqh (см. ниже — пока no-op)|
+//|   - SYNC      → SyncTrailManage (SyncTrailManager.mqh)           |
 //|                                                                  |
-//|  Модуль НЕ объявляет input-переменных и НЕ держит состояния.     |
+//|  Модуль НЕ объявляет input-переменных; состояние SYNC по тикетам |
+//|  хранит SyncTrailManager.                                        |
 //|  Cross-magic фильтрация — в подмодулях.                          |
 //+------------------------------------------------------------------+
 #ifndef TRAILINGDISPATCHER_MQH
@@ -18,26 +19,23 @@
 
 #include "../TradeAdapter.mqh"
 #include "../BrokerAdapter.mqh"
-#include "SyncTrail.mqh"
+#include "SyncTrailManager.mqh"
 #include "BreakevenTrail.mqh"
 
 //+------------------------------------------------------------------+
-//| ENUM_TRAILING_MODE_EX — расширенный режим трейлинга.             |
-//|                                                                  |
-//| `_EX`-суффикс намеренно отличается от ENUM_TRAILING_MODE в       |
-//| SyncTrail.mqh для избежания конфликта при одновременном include. |
+//| ENUM_TRAILING_MODE_EX — режим трейлинга (входной параметр ботов).|
 //|                                                                  |
 //|   TRAILING_OFF_EX       — без трейлинга                          |
 //|   TRAILING_BREAKEVEN_EX — однократный breakeven + offset         |
 //|                          (делегирует BreakevenTrail)             |
 //|   TRAILING_SYNC_EX      — синхронный трейлинг блока SL/TP        |
-//|                          (делегирует SyncTrail)                  |
+//|                          (делегирует SyncTrailManage)            |
 //+------------------------------------------------------------------+
 enum ENUM_TRAILING_MODE_EX
   {
-   TRAILING_OFF_EX       = 0,
-   TRAILING_BREAKEVEN_EX = 1,
-   TRAILING_SYNC_EX      = 2
+   TRAILING_OFF_EX       = 0,   // Без трейлинга
+   TRAILING_BREAKEVEN_EX = 1,   // Перевод SL в безубыток
+   TRAILING_SYNC_EX      = 2    // Синхронный трейлинг SL и TP
   };
 
 //+------------------------------------------------------------------+
@@ -74,7 +72,8 @@ struct TrailingConfig
 //|   OFF                  → no-op                                   |
 //|   BREAKEVEN            → BreakevenTrailManage(adapter, broker,   |
 //|                          magic, startFactor, breakevenOffset)    |
-//|   SYNC                 → see implementation (currently no-op)    |
+//|   SYNC                 → SyncTrailManage(adapter, broker, magic, |
+//|                          startFactor, trailStep)                 |
 //|   unknown / magic<=0   → no-op                                   |
 //|                                                                  |
 //| Cross-magic фильтрация — в подмодулях.                           |
@@ -113,12 +112,11 @@ void TrailingManage(ITradeAdapter      *adapter,
          return;
 
       case TRAILING_SYNC_EX:
-         // Известное ограничение: SyncTrail.mqh пока экспортирует только pure-хелперы,
-         // а per-ticket state-машина SYNC-трейлинга живёт в EA (crt-bot::ManageSyncTrailing).
-         // До экспорта SyncTrailManage(magic, startFactor, trailStep) диспетчер
-         // физически не может делегировать SYNC сюда — попытка приведёт к потере
-         // per-ticket контекста. Поэтому здесь no-op, а SYNC обслуживается EA напрямую.
-         // Cross-magic фильтрация для SYNC обеспечивается EA-side фильтром по POSITION_MAGIC.
+         SyncTrailManage(adapter,
+                         broker,
+                         magic,
+                         cfg.startFactor,
+                         cfg.trailStep);
          return;
 
       default:

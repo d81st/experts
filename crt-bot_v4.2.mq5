@@ -19,9 +19,7 @@
 #include "Include/CrtDetector.mqh"
 CTrade trade;
 ITradeAdapter *g_trade_adapter = NULL;
-
-// Per-ticket состояние SyncTrailing (ключ — state.ticket, поиск линейный).
-SyncTrailState g_sync_states[];
+TrailingConfig g_trail_cfg;   // заполняется в OnInit, используется TrailingManage
 
 //+------------------------------------------------------------------+
 //| Enum: режим входа                                                |
@@ -88,10 +86,10 @@ input double MinSLPips  = 1525;
 input double MaxSLPips  = 3175;
 
 input group "── Трейлинг ──"
-input ENUM_TRAILING_MODE TrailingMode          = TRAILING_OFF;
-input double             TrailingStartFactor   = 0.5;
-input double             BreakevenOffsetPoints = 175;
-input double             SyncTrailStepPoints   = 0;
+input ENUM_TRAILING_MODE_EX TrailingMode          = TRAILING_OFF_EX;
+input double                TrailingStartFactor   = 0.5;
+input double                BreakevenOffsetPoints = 175;
+input double                SyncTrailStepPoints   = 0;
 
 // Параметры сессий — общие для всех ботов; у crt-bot окно у стыка сессий 1 мин.
 #define SESSION_DEFAULT_WINDOW_MINUTES 1
@@ -395,204 +393,6 @@ void PlaceCRTLimitOrder(ENUM_ORDER_TYPE orderType, double price,
       PrintFormat("❌ Ошибка %s [%s]: %u | %s",
                   dir, label, result.retcode, result.description);
       g_pending.Reset();
-   }
-}
-
-//+------------------------------------------------------------------+
-//| ТРЕЙЛИНГ — диспетчер по TrailingMode                             |
-//| OFF/BREAKEVEN через модульный TrailingManage; SYNC пока в EA     |
-//| (модуль SyncTrail не экспортирует state-машину).                 |
-//+------------------------------------------------------------------+
-
-void ManageTrailing()
-{
-   switch(TrailingMode)
-   {
-      case TRAILING_OFF:
-      {
-         TrailingConfig cfg;
-         cfg.mode            = TRAILING_OFF_EX;
-         cfg.startFactor     = 0.0;
-         cfg.breakevenOffset = 0.0;
-         cfg.trailStep       = 0.0;
-         TrailingManage(g_trade_adapter, g_broker, MagicNumber, cfg);
-         return;
-      }
-      case TRAILING_BREAKEVEN:
-      {
-         TrailingConfig cfg;
-         cfg.mode            = TRAILING_BREAKEVEN_EX;
-         cfg.startFactor     = TrailingStartFactor;
-         cfg.breakevenOffset = BreakevenOffsetPoints;
-         cfg.trailStep       = 0.0;
-         TrailingManage(g_trade_adapter, g_broker, MagicNumber, cfg);
-         return;
-      }
-      case TRAILING_SYNC:
-         ManageSyncTrailing();
-         return;
-   }
-}
-
-//+------------------------------------------------------------------+
-//| ТРЕЙЛИНГ — синхронный блок SL/TP                                 |
-//+------------------------------------------------------------------+
-
-// Удалить осиротевшие записи (тикет закрыт или не принадлежит боту).
-// Вызывается в начале каждого ManageSyncTrailing.
-void GcSyncState()
-{
-   const int n = ArraySize(g_sync_states);
-   // Идём с конца, чтобы удаление через ArrayRemove не сбило индексы.
-   for(int i = n - 1; i >= 0; i--)
-   {
-      const ulong ticket = g_sync_states[i].ticket;
-      bool alive = PositionSelectByTicket(ticket);
-      if(alive && PositionGetInteger(POSITION_MAGIC) != MagicNumber)
-         alive = false;
-      if(!alive)
-         ArrayRemove(g_sync_states, i, 1);
-   }
-}
-
-//+------------------------------------------------------------------+
-//| Найти/создать состояние SyncTrail по тикету. Возвращает индекс   |
-//| в g_sync_states[]. Поля initialSL/openPrice/dir фиксируются      |
-//| только при создании (block invariants).                          |
-//+------------------------------------------------------------------+
-int FindOrCreateState(const ulong  ticket,
-                      const int    dir,
-                      const double openPrice,
-                      const double currentSL)
-{
-   const int n = ArraySize(g_sync_states);
-   for(int i = 0; i < n; i++)
-      if(g_sync_states[i].ticket == ticket)
-         return i;
-
-   const int newIdx = n;
-   ArrayResize(g_sync_states, n + 1);
-   g_sync_states[newIdx].ticket              = ticket;
-   g_sync_states[newIdx].dir                 = dir;
-   g_sync_states[newIdx].openPrice           = openPrice;
-   g_sync_states[newIdx].initialSL           = currentSL;
-   g_sync_states[newIdx].activated           = false;
-   g_sync_states[newIdx].blockSize           = 0.0;
-   g_sync_states[newIdx].lastSL              = 0.0;
-   g_sync_states[newIdx].modificationSkipped = false;
-   g_sync_states[newIdx].warnedNoStops       = false;
-   return newIdx;
-}
-
-void ManageSyncTrailing()
-{
-   GcSyncState();
-
-   const double point             = g_broker.adjustedPoint;
-   const double minBrokerDistance = g_broker.minBrokerDistance;
-
-   for(int i = PositionsTotal() - 1; i >= 0; i--)
-   {
-      const ulong ticket = PositionGetTicket(i);
-      if(!PositionSelectByTicket(ticket))                    continue;
-      if(PositionGetString(POSITION_SYMBOL)  != _Symbol)     continue;
-      if(PositionGetInteger(POSITION_MAGIC)  != MagicNumber) continue;
-
-      const ENUM_POSITION_TYPE ptype = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
-      const int    dir       = (ptype == POSITION_TYPE_BUY) ? 1 : -1;
-      const double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
-      const double currentSL = PositionGetDouble(POSITION_SL);
-      const double currentTP = PositionGetDouble(POSITION_TP);
-      const double bid       = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-      const double ask       = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-
-      const int sIdx = FindOrCreateState(ticket, dir, openPrice, currentSL);
-
-      // Позиция без стопов — активация невозможна; лог один раз.
-      if(currentSL == 0.0 || currentTP == 0.0)
-      {
-         if(!g_sync_states[sIdx].warnedNoStops)
-         {
-            PrintFormat("⚠️  SyncTrail #%I64u: нет SL/TP, активация пропущена", ticket);
-            g_sync_states[sIdx].warnedNoStops = true;
-         }
-         continue;
-      }
-
-      // Активация трейлинга по достижении порога TrailingStartFactor.
-      if(!g_sync_states[sIdx].activated)
-      {
-         const double profitPts = (dir == 1)
-                                  ? (bid - openPrice) / point
-                                  : (openPrice - ask) / point;
-         const double slDistPts = MathAbs(openPrice - g_sync_states[sIdx].initialSL) / point;
-         const double threshold = slDistPts * TrailingStartFactor;
-
-         if(profitPts < threshold)
-            continue;
-
-         g_sync_states[sIdx].activated = true;
-         g_sync_states[sIdx].blockSize = MathAbs(currentTP - currentSL);
-
-         const double blockPts = g_sync_states[sIdx].blockSize / point;
-         PrintFormat("🟢 SyncTrail #%I64u %s: активирован | open=%.5f initSL=%.5f initTP=%.5f "
-                     "block=%.1f profit=%.1f thr=%.1f",
-                     ticket, (dir == 1 ? "BUY" : "SELL"),
-                     openPrice, g_sync_states[sIdx].initialSL, currentTP,
-                     blockPts, profitPts, threshold);
-      }
-
-      double cand = ComputeCandidateSL(dir, bid, ask, openPrice, g_sync_states[sIdx].initialSL);
-      cand = ClampToBreakeven(dir, cand, openPrice);
-
-      // Строгое улучшение SL
-      if(!IsStrictImprovement(dir, cand, currentSL))
-      {
-         g_sync_states[sIdx].modificationSkipped = false;
-         continue;
-      }
-
-      // Шаговый порог (при SyncTrailStepPoints==0 всегда true)
-      if(!ImprovementMeetsStep(dir, cand, currentSL, point, SyncTrailStepPoints))
-      {
-         g_sync_states[sIdx].modificationSkipped = false;
-         continue;
-      }
-
-      const double newSL = NormalizeDouble(cand, _Digits);
-      const double newTP = NormalizeDouble(ComputeNewTP(dir, newSL, g_sync_states[sIdx].blockSize), _Digits);
-
-      // Проверка брокерской дистанции с анти-спамом
-      if(!BrokerDistanceOk(dir, bid, ask, newSL, newTP, minBrokerDistance))
-      {
-         if(!g_sync_states[sIdx].modificationSkipped)
-         {
-            PrintFormat("⏸️ SyncTrail #%I64u: отложено (MinBrokerDistance) | candSL=%.5f newTP=%.5f bid=%.5f ask=%.5f minDist=%.5f",
-                        ticket, newSL, newTP, bid, ask, minBrokerDistance);
-            g_sync_states[sIdx].modificationSkipped = true;
-         }
-         continue;
-      }
-
-      if(!g_trade_adapter.PositionModify(ticket, newSL, newTP))
-      {
-         // Гонка: позиция могла закрыться между селектом и модификацией.
-         if(!PositionSelectByTicket(ticket))
-            continue;
-         PrintFormat("❌ SyncTrail #%I64u: PositionModify rc=%u (%s) newSL=%.5f newTP=%.5f",
-                     ticket, g_trade_adapter.ResultRetcode(),
-                     g_trade_adapter.ResultComment(), newSL, newTP);
-         continue;
-      }
-
-      const double prevSL  = (g_sync_states[sIdx].lastSL == 0.0)
-                             ? g_sync_states[sIdx].initialSL
-                             : g_sync_states[sIdx].lastSL;
-      const double deltaPts = MathAbs(newSL - prevSL) / point;
-      PrintFormat("📈 SyncTrail #%I64u %s: SL→%.5f TP→%.5f Δ=%.1f pts",
-                  ticket, (dir == 1 ? "BUY" : "SELL"), newSL, newTP, deltaPts);
-      g_sync_states[sIdx].lastSL              = newSL;
-      g_sync_states[sIdx].modificationSkipped = false;
    }
 }
 
@@ -931,6 +731,10 @@ int OnInit()
                   SyncTrailStepPoints);
       return INIT_PARAMETERS_INCORRECT;
    }
+   g_trail_cfg.mode            = TrailingMode;
+   g_trail_cfg.startFactor     = TrailingStartFactor;
+   g_trail_cfg.breakevenOffset = BreakevenOffsetPoints;
+   g_trail_cfg.trailStep       = SyncTrailStepPoints;
 
    ArraySetAsSeries(g_rates, true);
    g_last_bar_time = 0;
@@ -974,12 +778,12 @@ int OnInit()
    string trailModeStr;
    switch(TrailingMode)
    {
-      case TRAILING_OFF:       trailModeStr = "OFF";       break;
-      case TRAILING_BREAKEVEN: trailModeStr = "BREAKEVEN"; break;
-      case TRAILING_SYNC:      trailModeStr = "SYNC";      break;
+      case TRAILING_OFF_EX:       trailModeStr = "OFF";       break;
+      case TRAILING_BREAKEVEN_EX: trailModeStr = "BREAKEVEN"; break;
+      case TRAILING_SYNC_EX:      trailModeStr = "SYNC";      break;
       default:                 trailModeStr = "?";
    }
-   if(TrailingMode == TRAILING_SYNC)
+   if(TrailingMode == TRAILING_SYNC_EX)
       PrintFormat("🔁 Трейлинг: %s | StartFactor=%.2f | StepPoints=%.2f",
                   trailModeStr, TrailingStartFactor, SyncTrailStepPoints);
    else
@@ -1047,7 +851,7 @@ void OnTick()
    }
 
    CheckPendingEntry();
-   ManageTrailing();
+   TrailingManage(g_trade_adapter, g_broker, MagicNumber, g_trail_cfg);
 
    //── Баровая ветка ──
    if(IsNewBar())
