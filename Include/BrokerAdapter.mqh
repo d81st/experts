@@ -6,9 +6,8 @@
 //+------------------------------------------------------------------+
 //
 // Кратко:
-//   - Lot sizing: две стратегии через ENUM_LOT_STRATEGY.
-//     LOT_BY_TICK_VALUE (liq-grab, engulfing) — точнее по риску;
-//     LOT_BY_MARGIN (crt-bot) — лот не зависит от SL.
+//   - Lot sizing: LOT_BY_TICK_VALUE — лот от расстояния до SL, риск
+//     сделки = riskPercent от баланса (все боты).
 //   - Min-SL-distance: TP модулем не модифицируется
 //     (ответственность caller'а).
 //   - crt-bot caller-side TP recalc: при подтяжке SL к min_dist TP
@@ -55,15 +54,11 @@ struct BrokerContext
 //|                       пропорционален SL-дистанции, реальный      |
 //|                       риск-в-деньгах ≈ riskPercent от баланса    |
 //|                       вне зависимости от SL.                     |
-//|                       Используется в liq-grab / engulfing.       |
-//|   LOT_BY_MARGIN     — margin-сайзинг: лот не зависит от SL,      |
-//|                       рассчитывается из `OrderCalcMargin`.       |
-//|                       Используется в crt-bot.                    |
+//|                       Используется во всех ботах.                |
 //+------------------------------------------------------------------+
 enum ENUM_LOT_STRATEGY
   {
-   LOT_BY_TICK_VALUE = 0,
-   LOT_BY_MARGIN     = 1
+   LOT_BY_TICK_VALUE = 0
   };
 
 //+------------------------------------------------------------------+
@@ -100,21 +95,19 @@ ENUM_ORDER_TYPE_FILLING BrokerGetFillType(void);
 //        riskMoney / ((slPoints * ctx.adjustedPoint / tickSize) * tickValue),
 //    где riskMoney = AccountInfoDouble(ACCOUNT_BALANCE) *
 //                    riskPercent / 100.0.
-//    При `strategy == LOT_BY_MARGIN` и `OrderCalcMargin` → true,
-//    marginPerLot > 0: лот считается как riskMoney / marginPerLot
-//    (slPoints игнорируется).
 //    Возвращаемое значение ограничивается диапазоном
 //    [SYMBOL_VOLUME_MIN, SYMBOL_VOLUME_MAX] и округляется вниз до
 //    кратности SYMBOL_VOLUME_STEP.
-//    Защита от деления на 0 и невалидной маржи: если slPoints <= 0
-//    при TICK_VALUE, tickValue == 0 или tickSize == 0 —
-//    возвращается SYMBOL_VOLUME_MIN без обращения к
-//    OrderCalcMargin. Если OrderCalcMargin → false или
-//    marginPerLot <= 0 при MARGIN — возвращается SYMBOL_VOLUME_MIN.
+//    Защита от деления на 0: если slPoints <= 0, tickValue == 0
+//    или tickSize == 0 — возвращается SYMBOL_VOLUME_MIN.
+//    maxRiskOvershoot > 0: если даже минимальный
+//    лот рискует больше riskMoney * maxRiskOvershoot — возвращается 0,
+//    и вызывающий EA должен пропустить сделку. 0 — проверка выключена.
 double BrokerCalcLot(const BrokerContext     &ctx,
                      const double             riskPercent,
                      const double             slPoints,
-                     const ENUM_LOT_STRATEGY  strategy);
+                     const ENUM_LOT_STRATEGY  strategy,
+                     const double             maxRiskOvershoot = 0.0);
 
 //--- Принуждение минимальной SL-дистанции.
 //    Если |entry - sl| < ctx.minBrokerDistance — модифицирует
@@ -167,7 +160,8 @@ ENUM_ORDER_TYPE_FILLING BrokerGetFillType(void)
 //|     digits ∈ {3,5} → _Point                                      |
 //|     digits ∈ {2,4} → _Point / 10.0                               |
 //|     иначе         → _Point (fallback)                            |
-//|   ctx.minBrokerDistance = (SYMBOL_TRADE_STOPS_LEVEL + 3) * _Point|
+//|   ctx.minBrokerDistance = (max(STOPS_LEVEL, FREEZE_LEVEL) + 3)   |
+//|                           * _Point                               |
 //|                                                                  |
 //| Идемпотентность гарантирована тем, что все поля заполняются      |
 //| детерминированно из свойств _Symbol — повторный вызов при        |
@@ -187,25 +181,22 @@ void BrokerInit(BrokerContext &ctx)
    else
       ctx.adjustedPoint = _Point;                 // fallback
 
-   //--- 3. Min broker distance
-   const long stops_level = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
-   ctx.minBrokerDistance  = (stops_level + 3) * _Point;
+   //--- 3. Min broker distance: больший из уровней стопов и заморозки
+   const long stops_level  = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
+   const long freeze_level = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_FREEZE_LEVEL);
+   ctx.minBrokerDistance   = (MathMax(stops_level, freeze_level) + 3) * _Point;
   }
 
 //+------------------------------------------------------------------+
 //| BrokerCalcLot                                                    |
 //|                                                                  |
-//| LOT_BY_TICK_VALUE (liq-grab, engulfing):                         |
+//| LOT_BY_TICK_VALUE:                                               |
 //|   moneyPerLot = (slPoints * adjustedPoint / tickSize) * tickValue|
 //|   lot = riskMoney / moneyPerLot                                  |
 //|   Защита: slPoints<=0 / tickValue==0 / tickSize==0               |
-//|   → volMin без вызова OrderCalcMargin.                           |
-//|                                                                  |
-//| LOT_BY_MARGIN (crt-bot):                                         |
-//|   marginPerLot через OrderCalcMargin(ORDER_TYPE_BUY,_Symbol,1.0, |
-//|                                       SYMBOL_ASK, marginPerLot)  |
-//|   lot = riskMoney / marginPerLot (slPoints игнорируется).        |
-//|   Защита: false или marginPerLot<=0 → volMin.                    |
+//|   → volMin.                                                      |
+//|   maxRiskOvershoot > 0: риск минимального лота                   |
+//|   > riskMoney * maxRiskOvershoot → 0 (сделку пропустить).        |
 //|                                                                  |
 //| Клампинг: сначала floor до volStep, затем clamp в                |
 //| [volMin, volMax]. Порядок важен: floor может дать значение       |
@@ -214,7 +205,8 @@ void BrokerInit(BrokerContext &ctx)
 double BrokerCalcLot(const BrokerContext     &ctx,
                      const double             riskPercent,
                      const double             slPoints,
-                     const ENUM_LOT_STRATEGY  strategy)
+                     const ENUM_LOT_STRATEGY  strategy,
+                     const double             maxRiskOvershoot)
   {
    const double balance   = AccountInfoDouble(ACCOUNT_BALANCE);
    const double riskMoney = balance * riskPercent / 100.0;
@@ -229,24 +221,26 @@ double BrokerCalcLot(const BrokerContext     &ctx,
       const double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
       const double tickSize  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
       //--- защита от деления на 0 / невалидного SL.
-      //    Возврат volMin БЕЗ обращения к OrderCalcMargin.
+      //    Возврат volMin.
       if(slPoints <= 0.0 || tickValue == 0.0 || tickSize == 0.0)
          return volMin;
       const double moneyPerLot = (slPoints * ctx.adjustedPoint / tickSize) * tickValue;
       if(moneyPerLot <= 0.0)
          return volMin;
       lot = riskMoney / moneyPerLot;
-     }
-   else if(strategy == LOT_BY_MARGIN)
-     {
-      double marginPerLot = 0.0;
-      //--- Цена для расчёта маржи — SYMBOL_ASK,
-      //    направление — ORDER_TYPE_BUY, объём — 1.0.
-      const double price = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-      if(!OrderCalcMargin(ORDER_TYPE_BUY, _Symbol, 1.0, price, marginPerLot) ||
-         marginPerLot <= 0.0)
-         return volMin;
-      lot = riskMoney / marginPerLot;
+
+      //--- минимальный лот рискует слишком много — сделку пропускаем.
+      const double minLotRisk = moneyPerLot * volMin;
+      if(maxRiskOvershoot > 0.0 && minLotRisk > riskMoney * maxRiskOvershoot)
+        {
+         static double s_lastBalance = -1.0;   // печатаем один раз на каждый новый баланс
+         if(balance != s_lastBalance)
+         PrintFormat("🚫 Лот %.2f рискует %.2f %s > %.2f (%.1f%% × %.1f) — сделка пропущена",
+                     volMin, minLotRisk, AccountInfoString(ACCOUNT_CURRENCY),
+                     riskMoney * maxRiskOvershoot, riskPercent, maxRiskOvershoot);
+         s_lastBalance = balance;
+         return 0.0;
+        }
      }
 
    //--- округление ВНИЗ до volStep, затем клампинг в

@@ -6,6 +6,11 @@ on:
       - 'tester/*.json'
       - '.github/workflows/backtest.yml'
   workflow_dispatch:
+    inputs:
+      only:
+        description: 'Имена файлов настроек без .json через запятую (пусто — все)'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -82,48 +87,82 @@ jobs:
           MT5_LOGIN: ${{ secrets.MT5_LOGIN }}
           MT5_PASSWORD: ${{ secrets.MT5_PASSWORD }}
           MT5_SERVER: ${{ secrets.MT5_SERVER }}
+          ONLY: ${{ github.event.inputs.only }}
         run: |
-          $cfg = Get-Content "$env:GITHUB_WORKSPACE\tester\liq-grab.json" -Raw | ConvertFrom-Json
           $reports = "$env:MT5_ROOT\reports"
           New-Item -ItemType Directory -Force $reports | Out-Null
-          $done = $false
-          foreach ($sym in $cfg.symbols) {
-            $name = "$($cfg.expert)_$($sym)_$($cfg.period)"
-            $ini = "$env:RUNNER_TEMP\tester.ini"
-            @("[Common]", "Login=$env:MT5_LOGIN", "Password=$env:MT5_PASSWORD", "Server=$env:MT5_SERVER",
-              "ProxyEnable=0", "NewsEnable=0",
-              "[Tester]",
-              "Expert=experts\$($cfg.expert).ex5",
-              "Symbol=$sym",
-              "Period=$($cfg.period)",
-              "Model=$($cfg.model)",
-              "ExecutionMode=$($cfg.delay)",
-              "Optimization=0",
-              "FromDate=$($cfg.from)",
-              "ToDate=$($cfg.to)",
-              "ForwardMode=0",
-              "Deposit=$($cfg.deposit)",
-              "Currency=$($cfg.currency)",
-              "Leverage=1:$($cfg.leverage)",
-              "Visual=0",
-              "Report=reports\$name",
-              "ReplaceReport=1",
-              "ShutdownTerminal=1") | Out-File $ini -Encoding Unicode
-            Write-Host "=== Testing $($cfg.expert) on $sym $($cfg.period) $($cfg.from)-$($cfg.to), model $($cfg.model) ==="
-            $t = Start-Process -FilePath "$env:MT5_ROOT\terminal64.exe" -ArgumentList "/portable", "/config:`"$ini`"" -PassThru
-            if (-not $t.WaitForExit(200 * 60 * 1000)) {
-              Write-Host "Tester did not finish in time, killing terminal"
-              Get-Process terminal64, metatester64 -ErrorAction SilentlyContinue | Stop-Process -Force
+          $configs = Get-ChildItem "$env:GITHUB_WORKSPACE\tester" -Filter *.json
+          if ($env:ONLY) {
+            $names = $env:ONLY -split ',' | ForEach-Object { $_.Trim() }
+            $configs = $configs | Where-Object { $names -contains $_.BaseName }
+          }
+          $failed = @()
+          foreach ($cfgFile in $configs) {
+            $cfg = Get-Content $cfgFile.FullName -Raw | ConvertFrom-Json
+            # Варианты параметров бота: "variants": [{"name": "be-off", "inputs": {"TrailingMode": 0}}].
+            # Без "variants" — один прогон с параметрами по умолчанию (или общими "inputs").
+            $variants = @($cfg.variants)
+            if (-not $cfg.variants) { $variants = @([pscustomobject]@{ name = ""; inputs = $cfg.inputs }) }
+            foreach ($var in $variants) {
+            # Параметры варианта = общие "inputs" конфига, поверх — "inputs" варианта.
+            $merged = [ordered]@{}
+            foreach ($src in @($cfg.inputs, $var.inputs)) {
+              if ($src) { foreach ($prop in $src.PSObject.Properties) { $merged[$prop.Name] = $prop.Value } }
             }
-            Remove-Item $ini -Force
-            $rep = Get-ChildItem $reports -Filter "$name*.htm*" -ErrorAction SilentlyContinue
-            if ($rep) { Write-Host "Report created: $($rep.Name -join ', ')"; $done = $true; break }
-            Write-Host "No report for $sym, trying next symbol"
+            $inputLines = @()
+            foreach ($k in $merged.Keys) {
+              $v = "$($merged[$k])"
+              if ($merged[$k] -is [bool]) { $v = $v.ToLower() }
+              $inputLines += "$k=$v||$v||0||$v||N"
+            }
+            # Тестер запоминает параметры прошлого прогона — стираем, чтобы не наследовать.
+            Get-ChildItem "$env:MT5_ROOT\MQL5\Profiles\Tester", "$env:MT5_ROOT\Tester" -Filter *.set -ErrorAction SilentlyContinue |
+              ForEach-Object { Write-Host "removing saved tester inputs: $($_.FullName)"; Remove-Item $_.FullName -Force }
+            $suffix = ""
+            if ($var.name) { $suffix = "_$($var.name)" }
+            $done = $false
+            foreach ($sym in $cfg.symbols) {
+              # Имя файла настроек в имени отчёта: прогоны разных конфигов не перезаписывают друг друга.
+              $name = "$($cfgFile.BaseName)_$($sym)_$($cfg.period)$suffix"
+              $ini = "$env:RUNNER_TEMP\tester.ini"
+              @("[Common]", "Login=$env:MT5_LOGIN", "Password=$env:MT5_PASSWORD", "Server=$env:MT5_SERVER",
+                "ProxyEnable=0", "NewsEnable=0",
+                "[Tester]",
+                "Expert=experts\$($cfg.expert).ex5",
+                "Symbol=$sym",
+                "Period=$($cfg.period)",
+                "Model=$($cfg.model)",
+                "ExecutionMode=$($cfg.delay)",
+                "Optimization=0",
+                "FromDate=$($cfg.from)",
+                "ToDate=$($cfg.to)",
+                "ForwardMode=0",
+                "Deposit=$($cfg.deposit)",
+                "Currency=$($cfg.currency)",
+                "Leverage=1:$($cfg.leverage)",
+                "Visual=0",
+                "Report=reports\$name",
+                "ReplaceReport=1",
+                "ShutdownTerminal=1") | Out-File $ini -Encoding Unicode
+              if ($inputLines) { (@("[TesterInputs]") + $inputLines) | Out-File $ini -Encoding Unicode -Append }
+              Write-Host "=== $($cfgFile.Name)${suffix}: $($cfg.expert) on $sym $($cfg.period) $($cfg.from)-$($cfg.to), model $($cfg.model), delay $($cfg.delay) | inputs: $($inputLines -join '; ') ==="
+              $t = Start-Process -FilePath "$env:MT5_ROOT\terminal64.exe" -ArgumentList "/portable", "/config:`"$ini`"" -PassThru
+              if (-not $t.WaitForExit(60 * 60 * 1000)) {
+                Write-Host "Tester did not finish in time, killing terminal"
+                Get-Process terminal64, metatester64 -ErrorAction SilentlyContinue | Stop-Process -Force
+              }
+              Remove-Item $ini -Force
+              $rep = Get-ChildItem $reports -Filter "$name.htm" -ErrorAction SilentlyContinue
+              if ($rep) { Write-Host "Report created: $($rep.Name -join ', ')"; $done = $true; break }
+              Write-Host "No report for $sym, trying next symbol"
+            }
+            if (-not $done) { $failed += "$($cfgFile.Name)$suffix" }
+            }
           }
           Write-Host "--- tester journal (tail) ---"
           Get-ChildItem "$env:MT5_ROOT\Tester\logs" -Filter *.log -ErrorAction SilentlyContinue |
-            ForEach-Object { Get-Content $_.FullName -Encoding Unicode | Select-Object -Last 80 }
-          if (-not $done) { throw "Strategy Tester produced no report" }
+            ForEach-Object { Get-Content $_.FullName -Encoding Unicode | Select-Object -Last 40 }
+          if ($failed) { throw "No report for: $($failed -join ', ')" }
 
       - name: Collect results
         if: always()
@@ -131,7 +170,7 @@ jobs:
         run: |
           $out = "$env:RUNNER_TEMP\results\run-$env:GITHUB_RUN_ID"
           New-Item -ItemType Directory -Force "$out\logs" | Out-Null
-          Copy-Item "$env:GITHUB_WORKSPACE\tester\liq-grab.json" $out
+          Copy-Item "$env:GITHUB_WORKSPACE\tester\*.json" $out
           Copy-Item "$env:MT5_ROOT\reports\*" $out -ErrorAction SilentlyContinue
           Copy-Item "$env:MT5_ROOT\logs\*.log" "$out\logs" -ErrorAction SilentlyContinue
           Get-ChildItem "$env:MT5_ROOT\Tester" -Recurse -Filter *.log -ErrorAction SilentlyContinue |

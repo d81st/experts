@@ -9,17 +9,19 @@
 //|   - Формат success-лога:                                         |
 //|     "✅ %s [%s] | Lot:%.2f | SL:%.0f pts | TP:%.0f pts | RR:%.2f" |
 //|   - Fallback limit→market при пересечённой цене.                 |
+//|   - Market: фильтр спреда относительно SL, повтор при временных  |
+//|     ошибках брокера, лимит проскальзывания, OrderCheck.          |
+//|   - Пауза отправки после серии отказов брокера.                  |
 //|                                                                  |
 //|  Остаётся в EA (guard перед вызовом):                            |
 //|   - Trade-lock (g_last_trade_request_time) — EA-specific.        |
-//|   - Spread-check — разная семантика между EA (MaxSpreadPips vs   |
-//|     MaxSpread).                                                  |
 //+------------------------------------------------------------------+
 #ifndef TRADEEXECUTOR_MQH
 #define TRADEEXECUTOR_MQH
 
 #include <Trade\Trade.mqh>
 #include "BrokerAdapter.mqh"
+#include "TradeJournal.mqh"
 
 //+------------------------------------------------------------------+
 //| TradeOrderRequest — параметры одного торгового запроса.          |
@@ -50,6 +52,11 @@
 //|               после клампа SL — ответственность caller'а.        |
 //|   lot       — объём в лотах. Должен быть > 0.                    |
 //|   comment   — комментарий к ордеру для журнала брокера.          |
+//|   maxSpreadToSL   — market: макс. спред как доля расстояния до SL |
+//|                     (0.10 = 10%); 0 — фильтр выключен.            |
+//|   maxSlippageToSL — market: макс. отклонение цены исполнения от   |
+//|                     запрошенной как доля расстояния до SL;        |
+//|                     0 — без ограничения.                          |
 //+------------------------------------------------------------------+
 struct TradeOrderRequest
   {
@@ -59,6 +66,20 @@ struct TradeOrderRequest
    double            tp;
    double            lot;
    string            comment;
+   double            maxSpreadToSL;
+   double            maxSlippageToSL;
+
+                     TradeOrderRequest(void)
+     {
+      orderType       = ORDER_TYPE_BUY;
+      price           = 0.0;
+      sl              = 0.0;
+      tp              = 0.0;
+      lot             = 0.0;
+      comment         = "";
+      maxSpreadToSL   = 0.0;
+      maxSlippageToSL = 0.0;
+     }
   };
 
 //+------------------------------------------------------------------+
@@ -85,6 +106,10 @@ struct TradeOrderRequest
 //|   description — `trade.ResultRetcodeDescription()` либо текст,   |
 //|                 идентифицирующий нарушенный инвариант (например, |
 //|                 «SL violates min broker distance»).              |
+//|   skipped     — true: запрос не отправлялся из-за фильтра        |
+//|                 (спред, закрытый рынок, пауза после отказов).    |
+//|                 Модуль уже записал причину в журнал; EA может     |
+//|                 не печатать ошибку повторно и подождать.          |
 //+------------------------------------------------------------------+
 struct TradeResult
   {
@@ -92,6 +117,7 @@ struct TradeResult
    ulong             ticket;
    uint              retcode;
    string            description;
+   bool              skipped;
   };
 
 //+------------------------------------------------------------------+
@@ -111,12 +137,16 @@ struct TradeResult
 //      6. Fallback limit→market:
 //         BUY_LIMIT + Ask<=price → BUY; SELL_LIMIT + Bid>=price → SELL.
 //         Переключение видимо caller'у (req — не-const ref).
-//      7. Dispatch по итоговому orderType: trade.Buy/Sell/BuyLimit/SellLimit.
-//      8. Чтение результата: DONE → ticket, иначе retcode/desc.
-//      9. При success — Print формата crt-bot.
+//      7. Market: торговля разрешена, спред ≤ maxSpreadToSL × SL,
+//         OrderCheck (маржа, объём). Пауза после серии отказов.
+//      8. Dispatch по итоговому orderType: trade.Buy/Sell/BuyLimit/SellLimit.
+//         Market: до 2 повторов при временных ошибках с новой ценой,
+//         если она не ушла дальше maxSlippageToSL × SL.
+//      9. Чтение результата: DONE → ticket, иначе retcode/desc.
+//     10. При success — Print с фактическим проскальзыванием.
 //
-//    Изоляция: модуль не трогает глобалов EA;
-//    spread-check и trade-lock — на стороне EA как guard перед вызовом.
+//    Изоляция: модуль не трогает глобалов EA; trade-lock — на стороне EA.
+//    Единственное состояние модуля — счётчик отказов брокера для паузы.
 //
 //    Параметры:
 //      tr     — CTrade EA (ссылка, т.к. tr.* меняет result-state).
@@ -126,6 +156,107 @@ struct TradeResult
 TradeResult TradeExecutorSend(CTrade              &tr,
                               const BrokerContext &broker,
                               TradeOrderRequest   &req);
+
+//--- Пауза после серии отказов брокера.
+#define TRADE_EXECUTOR_FAIL_STREAK   5
+#define TRADE_EXECUTOR_PAUSE_SEC     900
+
+int      g_tradeExecutorFailStreak  = 0;
+datetime g_tradeExecutorPausedUntil = 0;
+
+//+------------------------------------------------------------------+
+//| TradeExecutor_IsRetryable — временная ошибка, повтор имеет смысл. |
+//+------------------------------------------------------------------+
+bool TradeExecutor_IsRetryable(const uint rc)
+  {
+   return (rc == TRADE_RETCODE_REQUOTE       ||
+           rc == TRADE_RETCODE_PRICE_CHANGED ||
+           rc == TRADE_RETCODE_PRICE_OFF     ||
+           rc == TRADE_RETCODE_TIMEOUT       ||
+           rc == TRADE_RETCODE_CONNECTION    ||
+           rc == TRADE_RETCODE_TOO_MANY_REQUESTS);
+  }
+
+//+------------------------------------------------------------------+
+//| TradeExecutor_Skip — запрос не отправлен из-за фильтра.          |
+//| Одна и та же причина (rc) печатается не чаще раза в минуту.      |
+//+------------------------------------------------------------------+
+TradeResult TradeExecutor_Skip(const uint rc, const string why)
+  {
+   static uint     s_lastRc   = 0;
+   static datetime s_lastTime = 0;
+   if(rc != s_lastRc || TimeCurrent() - s_lastTime >= 60)
+     {
+      PrintFormat("⏸️ Ордер не отправлен: %s", why);
+      TradeJournalWrite(StringFormat("SKIP;;;;;;;;;;;;;;%u;%s", rc, why));
+      s_lastRc   = rc;
+      s_lastTime = TimeCurrent();
+     }
+
+   TradeResult result;
+   result.success     = false;
+   result.ticket      = 0;
+   result.retcode     = rc;
+   result.description = why;
+   result.skipped     = true;
+   return result;
+  }
+
+//+------------------------------------------------------------------+
+//| TradeExecutor_PreflightMarket — проверки перед market-ордером.   |
+//| Возвращает "" если можно отправлять, иначе причину отказа.       |
+//+------------------------------------------------------------------+
+string TradeExecutor_PreflightMarket(const TradeOrderRequest &req, uint &rc)
+  {
+   const bool isBuy = (req.orderType == ORDER_TYPE_BUY);
+
+   //--- торговля по символу разрешена в нужную сторону
+   const ENUM_SYMBOL_TRADE_MODE mode =
+      (ENUM_SYMBOL_TRADE_MODE)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_MODE);
+   if(mode == SYMBOL_TRADE_MODE_DISABLED || mode == SYMBOL_TRADE_MODE_CLOSEONLY ||
+      (isBuy  && mode == SYMBOL_TRADE_MODE_SHORTONLY) ||
+      (!isBuy && mode == SYMBOL_TRADE_MODE_LONGONLY))
+     {
+      rc = TRADE_RETCODE_TRADE_DISABLED;
+      return "торговля по символу запрещена брокером";
+     }
+
+   //--- спред относительно расстояния до SL
+   const double slDist = MathAbs(req.price - req.sl);
+   if(req.maxSpreadToSL > 0.0 && req.sl > 0.0 && slDist > 0.0)
+     {
+      const double spread = SymbolInfoDouble(_Symbol, SYMBOL_ASK) - SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      if(spread > req.maxSpreadToSL * slDist)
+        {
+         rc = TRADE_RETCODE_PRICE_OFF;
+         return StringFormat("спред %s > %.0f%% от SL %s",
+                             DoubleToString(spread, _Digits), req.maxSpreadToSL * 100.0,
+                             DoubleToString(slDist, _Digits));
+        }
+     }
+
+   //--- маржа и объём (остальные замечания OrderCheck не блокируют отправку)
+   MqlTradeRequest     chk = {};
+   MqlTradeCheckResult res = {};
+   chk.action = TRADE_ACTION_DEAL;
+   chk.symbol = _Symbol;
+   chk.volume = req.lot;
+   chk.type   = req.orderType;
+   chk.price  = req.price;
+   chk.sl     = req.sl;
+   chk.tp     = req.tp;
+   if(!OrderCheck(chk, res) &&
+      (res.retcode == TRADE_RETCODE_NO_MONEY       ||
+       res.retcode == TRADE_RETCODE_MARKET_CLOSED  ||
+       res.retcode == TRADE_RETCODE_TRADE_DISABLED ||
+       res.retcode == TRADE_RETCODE_INVALID_VOLUME ||
+       res.retcode == TRADE_RETCODE_LIMIT_VOLUME))
+     {
+      rc = res.retcode;
+      return StringFormat("OrderCheck: %u %s", res.retcode, res.comment);
+     }
+   return "";
+  }
 
 //+------------------------------------------------------------------+
 //| TradeExecutorSend — реализация. См. doc-comment над прототипом.  |
@@ -139,6 +270,7 @@ TradeResult TradeExecutorSend(CTrade              &tr,
    result.ticket      = 0;
    result.retcode     = TRADE_RETCODE_ERROR;
    result.description = "";
+   result.skipped     = false;
 
    //--- === STEP 1: input validation / pre-flight === ---
    //    Ранний выход БЕЗ вызова tr.* и БЕЗ success-лога.
@@ -235,44 +367,103 @@ TradeResult TradeExecutorSend(CTrade              &tr,
       if(bidN >= priceN) req.orderType = ORDER_TYPE_SELL;
      }
 
-   //--- STEP 7: Dispatch
-   bool sent = false;
-   switch(req.orderType)
+   const bool isMarket = (req.orderType == ORDER_TYPE_BUY || req.orderType == ORDER_TYPE_SELL);
+
+   //--- STEP 7: Пауза после серии отказов + проверки market-ордера
+   if(TimeCurrent() < g_tradeExecutorPausedUntil)
+      return TradeExecutor_Skip(TRADE_RETCODE_REJECT,
+                                StringFormat("пауза после %d отказов брокера до %s",
+                                             TRADE_EXECUTOR_FAIL_STREAK,
+                                             TimeToString(g_tradeExecutorPausedUntil, TIME_MINUTES)));
+   if(isMarket)
      {
-      case ORDER_TYPE_BUY:
-         sent = tr.Buy(req.lot, _Symbol, req.price, req.sl, req.tp, req.comment);
-         break;
-      case ORDER_TYPE_SELL:
-         sent = tr.Sell(req.lot, _Symbol, req.price, req.sl, req.tp, req.comment);
-         break;
-      case ORDER_TYPE_BUY_LIMIT:
-         sent = tr.BuyLimit(req.lot, req.price, _Symbol, req.sl, req.tp,
-                            ORDER_TIME_GTC, 0, req.comment);
-         break;
-      case ORDER_TYPE_SELL_LIMIT:
-         sent = tr.SellLimit(req.lot, req.price, _Symbol, req.sl, req.tp,
-                             ORDER_TIME_GTC, 0, req.comment);
-         break;
-      default:
-         // unreachable (STEP 1 validates), but be defensive
-         result.success     = false;
-         result.ticket      = 0;
-         result.retcode     = TRADE_RETCODE_INVALID;
-         result.description = "Unsupported order type after fallback";
-         return result;
+      uint pre_rc = 0;
+      const string why = TradeExecutor_PreflightMarket(req, pre_rc);
+      if(why != "")
+         return TradeExecutor_Skip(pre_rc, why);
      }
 
-   //--- STEP 8: Read result
-   const uint   rc = tr.ResultRetcode();
-   const string rd = tr.ResultRetcodeDescription();
+   //--- STEP 8: Dispatch (market: до 2 повторов при временных ошибках)
+   const double requested = req.price;
+   const double slDist    = MathAbs(req.price - req.sl);
+   const double maxSlip   = (req.maxSlippageToSL > 0.0 && slDist > 0.0)
+                            ? req.maxSlippageToSL * slDist : 0.0;
+   if(isMarket && maxSlip > 0.0)
+      tr.SetDeviationInPoints((ulong)MathCeil(maxSlip / _Point));
+
+   const int attempts = isMarket ? 3 : 1;
+   bool sent = false;
+   uint rc   = 0;
+   int  used = 0;   // сколько раз реально отправляли
+   const double spreadAtSend = SymbolInfoDouble(_Symbol, SYMBOL_ASK) - SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   const ulong  t0           = GetMicrosecondCount();
+   for(int attempt = 0; attempt < attempts; attempt++)
+     {
+      if(attempt > 0)
+        {
+         //--- новая цена; если ушла дальше допустимого — вход отменяем
+         const double fresh = NormalizeDouble(SymbolInfoDouble(_Symbol,
+                              req.orderType == ORDER_TYPE_BUY ? SYMBOL_ASK : SYMBOL_BID), _Digits);
+         if(maxSlip > 0.0 && MathAbs(fresh - requested) > maxSlip)
+           {
+            PrintFormat("⚠️ Повтор отменён: цена %s ушла от %s дальше допустимого",
+                        DoubleToString(fresh, _Digits), DoubleToString(requested, _Digits));
+            break;
+           }
+         if((req.sl > 0.0 && MathAbs(fresh - req.sl) < broker.minBrokerDistance) ||
+            (req.tp > 0.0 && MathAbs(fresh - req.tp) < broker.minBrokerDistance))
+            break;
+         req.price = fresh;
+         PrintFormat("🔁 Повтор %d/%d после %u (%s) по цене %s",
+                     attempt, attempts - 1, rc, tr.ResultRetcodeDescription(),
+                     DoubleToString(fresh, _Digits));
+         Sleep(100 * attempt);
+        }
+
+      switch(req.orderType)
+        {
+         case ORDER_TYPE_BUY:
+            sent = tr.Buy(req.lot, _Symbol, req.price, req.sl, req.tp, req.comment);
+            break;
+         case ORDER_TYPE_SELL:
+            sent = tr.Sell(req.lot, _Symbol, req.price, req.sl, req.tp, req.comment);
+            break;
+         case ORDER_TYPE_BUY_LIMIT:
+            sent = tr.BuyLimit(req.lot, req.price, _Symbol, req.sl, req.tp,
+                               ORDER_TIME_GTC, 0, req.comment);
+            break;
+         case ORDER_TYPE_SELL_LIMIT:
+            sent = tr.SellLimit(req.lot, req.price, _Symbol, req.sl, req.tp,
+                                ORDER_TIME_GTC, 0, req.comment);
+            break;
+         default:
+            // unreachable (STEP 1 validates), but be defensive
+            result.success     = false;
+            result.ticket      = 0;
+            result.retcode     = TRADE_RETCODE_INVALID;
+            result.description = "Unsupported order type after fallback";
+            return result;
+        }
+      used++;
+      rc = tr.ResultRetcode();
+      if(sent && rc == TRADE_RETCODE_DONE)
+         break;
+      if(!TradeExecutor_IsRetryable(rc))
+         break;
+     }
+
+   //--- STEP 9: Read result
+   const string rd        = tr.ResultRetcodeDescription();
+   const double latencyMs = (double)(GetMicrosecondCount() - t0) / 1000.0;
    if(sent && rc == TRADE_RETCODE_DONE)
      {
+      g_tradeExecutorFailStreak = 0;
       result.success     = true;
       result.ticket      = tr.ResultOrder();
       result.retcode     = rc;
       result.description = rd;
 
-      //--- STEP 9: Success log in crt-bot format
+      //--- STEP 10: Success log (market: с фактическим проскальзыванием)
       // Direction label string
       string dirLabel;
       switch(req.orderType)
@@ -293,8 +484,26 @@ TradeResult TradeExecutorSend(CTrade              &tr,
       const double rr       = (slDist > 0.0)
                               ? MathAbs(req.tp - req.price) / slDist
                               : 0.0;
-      PrintFormat("✅ %s [%s] | Lot:%.2f | SL:%.0f pts | TP:%.0f pts | RR:%.2f",
-                  dirLabel, _Symbol, req.lot, slPoints, tpPoints, rr);
+      string slipStr = "";
+      if(isMarket && tr.ResultPrice() > 0.0)
+        {
+         // > 0 — исполнение хуже запрошенной цены
+         const double slip = (req.orderType == ORDER_TYPE_BUY)
+                             ? tr.ResultPrice() - requested
+                             : requested - tr.ResultPrice();
+         slipStr = " | Slip:" + DoubleToString(slip, _Digits);
+        }
+      PrintFormat("✅ %s [%s] | Lot:%.2f | SL:%.0f pts | TP:%.0f pts | RR:%.2f%s",
+                  dirLabel, _Symbol, req.lot, slPoints, tpPoints, rr, slipStr);
+
+      const double fill = (isMarket && tr.ResultPrice() > 0.0) ? tr.ResultPrice() : req.price;
+      const double slip = (req.orderType == ORDER_TYPE_BUY || req.orderType == ORDER_TYPE_BUY_LIMIT)
+                          ? fill - requested : requested - fill;
+      TradeJournalWrite(StringFormat("ENTRY;%I64d;%I64d;%s;%.2f;%s;%s;%s;%s;%s;%s;%.1f;%d;;%u;%s",
+                                     (long)tr.RequestMagic(), (long)result.ticket, dirLabel, req.lot,
+                                     TradeJournal_D(requested), TradeJournal_D(fill), TradeJournal_D(slip),
+                                     TradeJournal_D(spreadAtSend), TradeJournal_D(req.sl), TradeJournal_D(req.tp),
+                                     latencyMs, used, rc, req.comment));
      }
    else
      {
@@ -302,6 +511,21 @@ TradeResult TradeExecutorSend(CTrade              &tr,
       result.ticket      = 0;
       result.retcode     = rc;
       result.description = rd;
+      TradeJournalWrite(StringFormat("REJECT;%I64d;;%s;%.2f;%s;;;%s;%s;%s;%.1f;%d;;%u;%s",
+                                     (long)tr.RequestMagic(), EnumToString(req.orderType), req.lot,
+                                     TradeJournal_D(requested), TradeJournal_D(spreadAtSend),
+                                     TradeJournal_D(req.sl), TradeJournal_D(req.tp), latencyMs, used, rc, rd));
+
+      //--- серия отказов брокера → пауза отправки
+      g_tradeExecutorFailStreak++;
+      if(g_tradeExecutorFailStreak >= TRADE_EXECUTOR_FAIL_STREAK)
+        {
+         g_tradeExecutorPausedUntil = TimeCurrent() + TRADE_EXECUTOR_PAUSE_SEC;
+         g_tradeExecutorFailStreak  = 0;
+         PrintFormat("⛔ %d отказов брокера подряд (последний: %u %s) — пауза до %s",
+                     TRADE_EXECUTOR_FAIL_STREAK, rc, rd,
+                     TimeToString(g_tradeExecutorPausedUntil, TIME_MINUTES));
+        }
      }
    return result;
   }

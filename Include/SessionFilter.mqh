@@ -775,7 +775,8 @@ bool SelectedSessionsInit(SelectedSessionsConfig &cfg,
    if(cfg.dstMode == DST_AUTO)
      {
       const long rawGmt = (long)TimeGMT();
-      if(rawGmt == 0)
+      // В тестере TimeGMT() равен времени сервера — смещение берём из параметра.
+      if(rawGmt == 0 || MQLInfoInteger(MQL_TESTER))
         {
          // TimeGMT()==0 → invalid system time. Safe fallback to manual
          // offset; warning will be emitted by the first IsInside tick.
@@ -897,7 +898,8 @@ bool SelectedSessionsIsInside(const SelectedSessionsConfig &cfg,
    if(cfg.dstMode == DST_AUTO)
      {
       const long rawGmt = (long)TimeGMT();
-      if(rawGmt == 0)
+      // В тестере TimeGMT() равен времени сервера — смещение берём из параметра.
+      if(rawGmt == 0 || MQLInfoInteger(MQL_TESTER))
         {
          // TimeGMT()==0 → invalid system time. Safe fallback to
          // manual offset; one warning Print per advisor lifetime
@@ -905,9 +907,10 @@ bool SelectedSessionsIsInside(const SelectedSessionsConfig &cfg,
          state.effectiveGmtOffsetSec = cfg.gmtOffsetSeconds;
          if(!state.timeGmtFallbackLogged)
            {
-            Print("⚠️ SelectedSessions DST_AUTO: TimeGMT() returned 0; ",
-                  "falling back to manual gmtOffsetSeconds=",
-                  IntegerToString(cfg.gmtOffsetSeconds), "s");
+            Print("⚠️ SelectedSessions DST_AUTO: ",
+                  (rawGmt == 0 ? "TimeGMT() returned 0" : "в тестере TimeGMT() = время сервера"),
+                  "; используется SessionGmtOffsetHours = ",
+                  IntegerToString(cfg.gmtOffsetSeconds / 3600), " ч");
             state.timeGmtFallbackLogged = true;
            }
         }

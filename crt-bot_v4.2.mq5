@@ -17,22 +17,17 @@
 #include "Include/Trailing/BreakevenTrail.mqh"
 #include "Include/Trailing/TrailingDispatcher.mqh"
 #include "Include/CrtDetector.mqh"
+#include "Include/EntryTrigger.mqh"
+#include "Include/TesterMetric.mqh"
 CTrade trade;
 ITradeAdapter *g_trade_adapter = NULL;
-
-// Per-ticket состояние SyncTrailing (ключ — state.ticket, поиск линейный).
-SyncTrailState g_sync_states[];
+TrailingConfig g_trail_cfg;   // заполняется в OnInit, используется TrailingManage
 
 //+------------------------------------------------------------------+
 //| Enum: режим входа                                                |
 //+------------------------------------------------------------------+
 
-enum ENUM_ENTRY_MODE
-{
-   ENTRY_SWEEP_RECLAIM = 0,  // Sweep + Reclaim   (двухфазное подтверждение)
-   ENTRY_MARKET        = 1,  // Рыночный вход      (касание уровня → сразу открыть)
-   ENTRY_LIMIT         = 2   // Лимитный ордер     (BUY/SELL LIMIT на уровне)
-};
+// ENUM_ENTRY_MODE — в Include/EntryTrigger.mqh
 
 //+------------------------------------------------------------------+
 //| Входные параметры                                                |
@@ -73,60 +68,30 @@ input group "── Ожидание входа ──"
 input int MaxBarsToWait = 2;   // Макс. баров до отмены сигнала/ордера (0 = без ограничения)
 
 input group "── Управление капиталом ──"
-input int    MagicNumber  = 77777;
+input int    MagicNumber  = 71002;   // Магический номер (уникальный для каждого бота)
 input double RiskPercent  = 3.0;
+input double MaxRiskOvershoot = 1.5;  // Пропуск сделки, если мин. лот рискует > RiskPercent × N (0 = выкл)
+input double MaxSpreadToSL   = 0.10; // Макс. спред как доля расстояния до SL (0.10 = 10%; 0 = выкл)
+input double MaxSlippageToSL = 0.10; // Макс. проскальзывание как доля расстояния до SL (0 = без ограничения)
 
 input group "── Параметры входа ──"
 input ENUM_TIMEFRAMES TradingTimeframe = PERIOD_M1;
 
 input group "── Stop Loss ──"
-input double BufferPips = 200;
-input double MinSLPips  = 1525;
-input double MaxSLPips  = 3175;
+// Все расстояния ниже — в ПУНКТАХ (не пипсах): на золоте с 3 знаками 1000 пт = 1.00 USD цены.
+input double BufferPips = 200;   // Отступ от экстремума, пункты (200 = 0.20 USD)
+input double MinSLPips  = 1525;  // Мин. SL, пункты (1525 = 1.525 USD)
+input double MaxSLPips  = 3175;  // Макс. SL, пункты (3175 = 3.175 USD)
 
 input group "── Трейлинг ──"
-input ENUM_TRAILING_MODE TrailingMode          = TRAILING_OFF;
-input double             TrailingStartFactor   = 0.5;
-input double             BreakevenOffsetPoints = 175;
-input double             SyncTrailStepPoints   = 0;
+input ENUM_TRAILING_MODE_EX TrailingMode          = TRAILING_OFF_EX;
+input double                TrailingStartFactor   = 0.5;
+input double                BreakevenOffsetPoints = 175;
+input double                SyncTrailStepPoints   = 0;
 
-input group "── Сессионный фильтр ──"
-input bool UseSessionFilter     = true;
-input int  AmericanCloseHour    = 21;
-input int  AmericanCloseMinute  = 0;
-input int  AsianOpenHour        = 0;
-input int  AsianOpenMinute      = 0;
-input int  SessionWindowMinutes = 1;
-
-input group "── Selected Sessions Filter ──"
-// Опциональный фильтр выбора торговых сессий (Asian/London/NewYork) в
-// UTC-координатах. При UseSelectedSessions=false работает только
-// legacy Session Filter.
-input bool          UseSelectedSessions         = true; // Включить выбор сессий
-input bool          UseAsianSession             = false; // Торговать в Asian
-input bool          UseLondonSession            = true; // Торговать в London
-input bool          UseNewYorkSession           = false; // Торговать в NewYork
-
-input int           AsianStartHour              = 0;   // Asian start UTC [0,23]
-input int           AsianStartMinute            = 0;   // Asian start UTC [0,59]
-input int           AsianEndHour                = 9;   // Asian end   UTC [0,23]
-input int           AsianEndMinute              = 0;   // Asian end   UTC [0,59]
-
-input int           LondonStartHour             = 7;   // London start UTC [0,23]
-input int           LondonStartMinute           = 0;   // London start UTC [0,59]
-input int           LondonEndHour               = 16;  // London end   UTC [0,23]
-input int           LondonEndMinute             = 0;   // London end   UTC [0,59]
-
-input int           NYStartHour                 = 12;  // NewYork start UTC [0,23]
-input int           NYStartMinute               = 0;   // NewYork start UTC [0,59]
-input int           NYEndHour                   = 21;  // NewYork end   UTC [0,23]
-input int           NYEndMinute                 = 0;   // NewYork end   UTC [0,59]
-
-input int           SessionGmtOffsetHours       = 0;        // GMT offset, ч [-12,14]
-input ENUM_DST_MODE SessionDstMode              = DST_AUTO; // Режим DST
-
-input bool          CloseOnSessionExit          = true; // Закрывать позиции на выходе
-input bool          UseBrokerSessionsAsFallback = false; // Брокерские сессии как fallback
+// Параметры сессий — общие для всех ботов; у crt-bot окно у стыка сессий 1 мин.
+#define SESSION_DEFAULT_WINDOW_MINUTES 1
+#include "Include/Inputs/SessionInputs.mqh"
 
 input group "── Фильтр тренда (HTF) ──"
 input bool            UseTrendFilter = true;
@@ -176,12 +141,6 @@ struct PendingSignal
 //+------------------------------------------------------------------+
 
 BrokerContext g_broker;
-SessionConfig g_session_cfg;
-SessionState  g_session_state;
-
-//── Selected Sessions Filter (новый API, ортогонален legacy SessionFilter) ──
-SelectedSessionsConfig g_selected_cfg;
-SelectedSessionsState  g_selected_state;
 
 datetime      g_last_signal_doji = 0;
 PendingSignal g_pending;
@@ -311,8 +270,11 @@ void OpenCRTTrade(ENUM_ORDER_TYPE orderType, double entry, double sl, double tp,
       PrintFormat("⚠️ SL→min: %.5f | TP→RR=%.2f: %.5f", sl, rr_old, tp);
    }
 
-   // margin-based сайзинг
-   const double lot = BrokerCalcLot(g_broker, RiskPercent, /*slPoints*/ 0.0, LOT_BY_MARGIN);
+   // Лот от расстояния до SL: риск сделки = RiskPercent от баланса.
+   const double lot = BrokerCalcLot(g_broker, RiskPercent,
+                                    MathAbs(entry - sl) / g_broker.adjustedPoint,
+                                    LOT_BY_TICK_VALUE, MaxRiskOvershoot);
+   if(lot <= 0.0) return;   // минимальный лот слишком рискованный — причина уже в журнале
 
    const string dir = (orderType == ORDER_TYPE_BUY) ? "BUY" : "SELL";
 
@@ -323,6 +285,8 @@ void OpenCRTTrade(ENUM_ORDER_TYPE orderType, double entry, double sl, double tp,
    req.tp        = tp;
    req.lot       = lot;
    req.comment   = StringFormat("CRT_%s_%s TF:%s", label, dir, EnumToString(TradingTimeframe));
+   req.maxSpreadToSL   = MaxSpreadToSL;
+   req.maxSlippageToSL = MaxSlippageToSL;
 
    TradeResult result = TradeExecutorSend(trade, g_broker, req);
 
@@ -339,7 +303,7 @@ void OpenCRTTrade(ENUM_ORDER_TYPE orderType, double entry, double sl, double tp,
       Comment(StringFormat("CRT Bot | %s %s | SL: %.0f pts | TP: %.0f pts | RR: %.2f",
                            label, dir, sl_pts, tp_pts, rr));
    }
-   else
+   else if(!result.skipped)   // пропуск по фильтру модуль уже записал в журнал
    {
       PrintFormat("❌ Ошибка открытия [%s]: %u | %s",
                   label, result.retcode, result.description);
@@ -369,7 +333,15 @@ void PlaceCRTLimitOrder(ENUM_ORDER_TYPE orderType, double price,
    }
 
    // Fallback limit→market выполняется внутри TradeExecutorSend; детектируем по сравнению originalType ↔ req.orderType.
-   const double lot = BrokerCalcLot(g_broker, RiskPercent, /*slPoints*/ 0.0, LOT_BY_MARGIN);
+   // Лот от расстояния до SL: риск сделки = RiskPercent от баланса.
+   const double lot = BrokerCalcLot(g_broker, RiskPercent,
+                                    MathAbs(price - sl) / g_broker.adjustedPoint,
+                                    LOT_BY_TICK_VALUE, MaxRiskOvershoot);
+   if(lot <= 0.0)
+   {
+      g_pending.Reset();   // минимальный лот слишком рискованный — сигнал отбрасываем
+      return;
+   }
 
    const ENUM_ORDER_TYPE originalType = orderType;
    const string dir = (orderType == ORDER_TYPE_BUY_LIMIT ? "BUY LIMIT" : "SELL LIMIT");
@@ -419,205 +391,6 @@ void PlaceCRTLimitOrder(ENUM_ORDER_TYPE orderType, double price,
       PrintFormat("❌ Ошибка %s [%s]: %u | %s",
                   dir, label, result.retcode, result.description);
       g_pending.Reset();
-   }
-}
-
-//+------------------------------------------------------------------+
-//| ТРЕЙЛИНГ — диспетчер по TrailingMode                             |
-//| OFF/BREAKEVEN через модульный TrailingManage; SYNC пока в EA     |
-//| (модуль SyncTrail не экспортирует state-машину).                 |
-//+------------------------------------------------------------------+
-
-void ManageTrailing()
-{
-   switch(TrailingMode)
-   {
-      case TRAILING_OFF:
-      {
-         TrailingConfig cfg;
-         cfg.mode            = TRAILING_OFF_EX;
-         cfg.startFactor     = 0.0;
-         cfg.breakevenOffset = 0.0;
-         cfg.trailStep       = 0.0;
-         TrailingManage(g_trade_adapter, g_broker, MagicNumber, cfg);
-         return;
-      }
-      case TRAILING_BREAKEVEN:
-      {
-         TrailingConfig cfg;
-         cfg.mode            = TRAILING_BREAKEVEN_EX;
-         cfg.startFactor     = TrailingStartFactor;
-         cfg.breakevenOffset = BreakevenOffsetPoints;
-         cfg.trailStep       = 0.0;
-         TrailingManage(g_trade_adapter, g_broker, MagicNumber, cfg);
-         return;
-      }
-      case TRAILING_SYNC:
-         ManageSyncTrailing();
-         return;
-   }
-}
-
-//+------------------------------------------------------------------+
-//| ТРЕЙЛИНГ — синхронный блок SL/TP                                 |
-//+------------------------------------------------------------------+
-
-// Удалить осиротевшие записи (тикет закрыт или не принадлежит боту).
-// Вызывается в начале каждого ManageSyncTrailing.
-void GcSyncState()
-{
-   const int n = ArraySize(g_sync_states);
-   // Идём с конца, чтобы удаление через ArrayRemove не сбило индексы.
-   for(int i = n - 1; i >= 0; i--)
-   {
-      const ulong ticket = g_sync_states[i].ticket;
-      bool alive = PositionSelectByTicket(ticket);
-      if(alive && PositionGetInteger(POSITION_MAGIC) != MagicNumber)
-         alive = false;
-      if(!alive)
-         ArrayRemove(g_sync_states, i, 1);
-   }
-}
-
-//+------------------------------------------------------------------+
-//| Найти/создать состояние SyncTrail по тикету. Возвращает индекс   |
-//| в g_sync_states[]. Поля initialSL/openPrice/dir фиксируются      |
-//| только при создании (block invariants).                          |
-//+------------------------------------------------------------------+
-int FindOrCreateState(const ulong  ticket,
-                      const int    dir,
-                      const double openPrice,
-                      const double currentSL)
-{
-   const int n = ArraySize(g_sync_states);
-   for(int i = 0; i < n; i++)
-      if(g_sync_states[i].ticket == ticket)
-         return i;
-
-   const int newIdx = n;
-   ArrayResize(g_sync_states, n + 1);
-   g_sync_states[newIdx].ticket              = ticket;
-   g_sync_states[newIdx].dir                 = dir;
-   g_sync_states[newIdx].openPrice           = openPrice;
-   g_sync_states[newIdx].initialSL           = currentSL;
-   g_sync_states[newIdx].activated           = false;
-   g_sync_states[newIdx].blockSize           = 0.0;
-   g_sync_states[newIdx].lastSL              = 0.0;
-   g_sync_states[newIdx].modificationSkipped = false;
-   g_sync_states[newIdx].warnedNoStops       = false;
-   return newIdx;
-}
-
-void ManageSyncTrailing()
-{
-   GcSyncState();
-
-   const double point             = g_broker.adjustedPoint;
-   const long   stops_level       = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
-   const double minBrokerDistance = (stops_level + 3) * _Point;
-
-   for(int i = PositionsTotal() - 1; i >= 0; i--)
-   {
-      const ulong ticket = PositionGetTicket(i);
-      if(!PositionSelectByTicket(ticket))                    continue;
-      if(PositionGetString(POSITION_SYMBOL)  != _Symbol)     continue;
-      if(PositionGetInteger(POSITION_MAGIC)  != MagicNumber) continue;
-
-      const ENUM_POSITION_TYPE ptype = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
-      const int    dir       = (ptype == POSITION_TYPE_BUY) ? 1 : -1;
-      const double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
-      const double currentSL = PositionGetDouble(POSITION_SL);
-      const double currentTP = PositionGetDouble(POSITION_TP);
-      const double bid       = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-      const double ask       = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-
-      const int sIdx = FindOrCreateState(ticket, dir, openPrice, currentSL);
-
-      // Позиция без стопов — активация невозможна; лог один раз.
-      if(currentSL == 0.0 || currentTP == 0.0)
-      {
-         if(!g_sync_states[sIdx].warnedNoStops)
-         {
-            PrintFormat("⚠️  SyncTrail #%I64u: нет SL/TP, активация пропущена", ticket);
-            g_sync_states[sIdx].warnedNoStops = true;
-         }
-         continue;
-      }
-
-      // Активация трейлинга по достижении порога TrailingStartFactor.
-      if(!g_sync_states[sIdx].activated)
-      {
-         const double profitPts = (dir == 1)
-                                  ? (bid - openPrice) / point
-                                  : (openPrice - ask) / point;
-         const double slDistPts = MathAbs(openPrice - g_sync_states[sIdx].initialSL) / point;
-         const double threshold = slDistPts * TrailingStartFactor;
-
-         if(profitPts < threshold)
-            continue;
-
-         g_sync_states[sIdx].activated = true;
-         g_sync_states[sIdx].blockSize = MathAbs(currentTP - currentSL);
-
-         const double blockPts = g_sync_states[sIdx].blockSize / point;
-         PrintFormat("🟢 SyncTrail #%I64u %s: активирован | open=%.5f initSL=%.5f initTP=%.5f "
-                     "block=%.1f profit=%.1f thr=%.1f",
-                     ticket, (dir == 1 ? "BUY" : "SELL"),
-                     openPrice, g_sync_states[sIdx].initialSL, currentTP,
-                     blockPts, profitPts, threshold);
-      }
-
-      double cand = ComputeCandidateSL(dir, bid, ask, openPrice, g_sync_states[sIdx].initialSL);
-      cand = ClampToBreakeven(dir, cand, openPrice);
-
-      // Строгое улучшение SL
-      if(!IsStrictImprovement(dir, cand, currentSL))
-      {
-         g_sync_states[sIdx].modificationSkipped = false;
-         continue;
-      }
-
-      // Шаговый порог (при SyncTrailStepPoints==0 всегда true)
-      if(!ImprovementMeetsStep(dir, cand, currentSL, point, SyncTrailStepPoints))
-      {
-         g_sync_states[sIdx].modificationSkipped = false;
-         continue;
-      }
-
-      const double newSL = NormalizeDouble(cand, _Digits);
-      const double newTP = NormalizeDouble(ComputeNewTP(dir, newSL, g_sync_states[sIdx].blockSize), _Digits);
-
-      // Проверка брокерской дистанции с анти-спамом
-      if(!BrokerDistanceOk(dir, bid, ask, newSL, newTP, minBrokerDistance))
-      {
-         if(!g_sync_states[sIdx].modificationSkipped)
-         {
-            PrintFormat("⏸️ SyncTrail #%I64u: отложено (MinBrokerDistance) | candSL=%.5f newTP=%.5f bid=%.5f ask=%.5f minDist=%.5f",
-                        ticket, newSL, newTP, bid, ask, minBrokerDistance);
-            g_sync_states[sIdx].modificationSkipped = true;
-         }
-         continue;
-      }
-
-      if(!g_trade_adapter.PositionModify(ticket, newSL, newTP))
-      {
-         // Гонка: позиция могла закрыться между селектом и модификацией.
-         if(!PositionSelectByTicket(ticket))
-            continue;
-         PrintFormat("❌ SyncTrail #%I64u: PositionModify rc=%u (%s) newSL=%.5f newTP=%.5f",
-                     ticket, g_trade_adapter.ResultRetcode(),
-                     g_trade_adapter.ResultComment(), newSL, newTP);
-         continue;
-      }
-
-      const double prevSL  = (g_sync_states[sIdx].lastSL == 0.0)
-                             ? g_sync_states[sIdx].initialSL
-                             : g_sync_states[sIdx].lastSL;
-      const double deltaPts = MathAbs(newSL - prevSL) / point;
-      PrintFormat("📈 SyncTrail #%I64u %s: SL→%.5f TP→%.5f Δ=%.1f pts",
-                  ticket, (dir == 1 ? "BUY" : "SELL"), newSL, newTP, deltaPts);
-      g_sync_states[sIdx].lastSL              = newSL;
-      g_sync_states[sIdx].modificationSkipped = false;
    }
 }
 
@@ -793,7 +566,7 @@ void CheckPendingEntry()
       return;
    }
 
-   if(SessionIsBoundary(g_session_cfg, g_session_state))
+   if(SessionsIsBoundary())
    {
       PrintFormat("🚫 Pending [%s] отменён: граница сессии", g_pending.patternName);
       if(EntryMode == ENTRY_LIMIT) CancelLimitOrder();
@@ -812,73 +585,13 @@ void CheckPendingEntry()
 
    if(EntryMode == ENTRY_LIMIT) return;
 
-   double ask   = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-   double bid   = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   double level = g_pending.entryLevel;
-   string label = g_pending.patternName + (g_pending.isFVG ? "+FVG" : "");
-
-   if(EntryMode == ENTRY_MARKET)
+   const int    dir   = -g_pending.imbDir;   // бычья IMB → SELL, медвежья → BUY
+   const string label = g_pending.patternName + (g_pending.isFVG ? "+FVG" : "");
+   double price = 0.0;
+   if(EntryTriggerPoll(EntryMode, dir, g_pending.entryLevel, g_pending.swept, label, price))
    {
-      if(g_pending.imbDir == 1)
-      {
-         if(bid >= level)
-         {
-            PrintFormat("✅ MARKET SELL: Bid=%.5f ≥ Level=%.5f → открываем [%s]", bid, level, label);
-            OpenCRTTrade(ORDER_TYPE_SELL, bid, g_pending.sl, g_pending.tp, label);
-            g_pending.Reset();
-         }
-      }
-      else
-      {
-         if(ask <= level)
-         {
-            PrintFormat("✅ MARKET BUY: Ask=%.5f ≤ Level=%.5f → открываем [%s]", ask, level, label);
-            OpenCRTTrade(ORDER_TYPE_BUY, ask, g_pending.sl, g_pending.tp, label);
-            g_pending.Reset();
-         }
-      }
-      return;
-   }
-
-   if(g_pending.imbDir == 1)
-   {
-      if(!g_pending.swept)
-      {
-         if(ask > level)
-         {
-            g_pending.swept = true;
-            PrintFormat("📈 Sweep (SELL): Ask=%.5f > Level=%.5f [%s]", ask, level, label);
-         }
-      }
-      else
-      {
-         if(bid < level)
-         {
-            PrintFormat("✅ Reclaim (SELL): Bid=%.5f < Level=%.5f → открываем [%s]", bid, level, label);
-            OpenCRTTrade(ORDER_TYPE_SELL, bid, g_pending.sl, g_pending.tp, label);
-            g_pending.Reset();
-         }
-      }
-   }
-   else
-   {
-      if(!g_pending.swept)
-      {
-         if(bid < level)
-         {
-            g_pending.swept = true;
-            PrintFormat("📉 Sweep (BUY): Bid=%.5f < Level=%.5f [%s]", bid, level, label);
-         }
-      }
-      else
-      {
-         if(ask > level)
-         {
-            PrintFormat("✅ Reclaim (BUY): Ask=%.5f > Level=%.5f → открываем [%s]", ask, level, label);
-            OpenCRTTrade(ORDER_TYPE_BUY, ask, g_pending.sl, g_pending.tp, label);
-            g_pending.Reset();
-         }
-      }
+      OpenCRTTrade(dir == 1 ? ORDER_TYPE_BUY : ORDER_TYPE_SELL, price, g_pending.sl, g_pending.tp, label);
+      g_pending.Reset();
    }
 }
 
@@ -890,7 +603,7 @@ void CheckCRTEntry()
 {
    ENUM_POSITION_TYPE dummy;
    if(PositionGuardHasOpen(MagicNumber, dummy)) return;
-   if(SessionIsBoundary(g_session_cfg, g_session_state)) return;
+   if(SessionsIsBoundary()) return;
 
    MqlRates prev = g_rates[3];
    MqlRates imb  = g_rates[2];
@@ -956,6 +669,10 @@ int OnInit()
                   SyncTrailStepPoints);
       return INIT_PARAMETERS_INCORRECT;
    }
+   g_trail_cfg.mode            = TrailingMode;
+   g_trail_cfg.startFactor     = TrailingStartFactor;
+   g_trail_cfg.breakevenOffset = BreakevenOffsetPoints;
+   g_trail_cfg.trailStep       = SyncTrailStepPoints;
 
    ArraySetAsSeries(g_rates, true);
    g_last_bar_time = 0;
@@ -974,107 +691,7 @@ int OnInit()
       return INIT_FAILED;
      }
 
-   MqlDateTime srv;
-   TimeToStruct(TimeTradeServer(), srv);
-   PrintFormat("🕐 Серверное время: %04d.%02d.%02d %02d:%02d:%02d",
-               srv.year, srv.mon, srv.day, srv.hour, srv.min, srv.sec);
-
-   if(UseSessionFilter)
-   {
-      g_session_cfg.enabled             = UseSessionFilter;
-      g_session_cfg.americanCloseHour   = AmericanCloseHour;
-      g_session_cfg.americanCloseMinute = AmericanCloseMinute;
-      g_session_cfg.asianOpenHour       = AsianOpenHour;
-      g_session_cfg.asianOpenMinute     = AsianOpenMinute;
-      g_session_cfg.windowMinutes       = SessionWindowMinutes;
-
-      const bool auto_ok = SessionInit(g_session_cfg, g_session_state);
-
-      long eff_am = 0, eff_as = 0;
-      SessionGetEffective(g_session_cfg, g_session_state, eff_am, eff_as);
-
-      if(auto_ok)
-         PrintFormat("✅ Сессии: АВТО | Закр. Амер: %02d:%02d | Откр. Азия: %02d:%02d | Окно: ±%d мин",
-                     (int)(eff_am / 3600), (int)((eff_am % 3600) / 60),
-                     (int)(eff_as / 3600), (int)((eff_as % 3600) / 60),
-                     SessionWindowMinutes);
-      else
-      {
-         PrintFormat("⚠️  Сессии: РУЧНОЙ | Закр. Амер: %02d:%02d | Откр. Азия: %02d:%02d | Окно: ±%d мин",
-                     AmericanCloseHour, AmericanCloseMinute,
-                     AsianOpenHour, AsianOpenMinute, SessionWindowMinutes);
-         Print("⚠️  Укажите часы в СЕРВЕРНОМ времени брокера.");
-      }
-   }
-   else
-   {
-      // Фильтр выключен — Session* вернут false благодаря enabled=false.
-      g_session_cfg.enabled             = false;
-      g_session_cfg.americanCloseHour   = AmericanCloseHour;
-      g_session_cfg.americanCloseMinute = AmericanCloseMinute;
-      g_session_cfg.asianOpenHour       = AsianOpenHour;
-      g_session_cfg.asianOpenMinute     = AsianOpenMinute;
-      g_session_cfg.windowMinutes       = SessionWindowMinutes;
-      SessionInit(g_session_cfg, g_session_state);
-      Print("⏰ Сессионный фильтр выключен");
-   }
-
-   //── Selected Sessions Filter (новый API) ──
-   g_selected_cfg.enabled                     = UseSelectedSessions;
-   g_selected_cfg.useAsian                    = UseAsianSession;
-   g_selected_cfg.useLondon                   = UseLondonSession;
-   g_selected_cfg.useNewYork                  = UseNewYorkSession;
-   g_selected_cfg.asianStartSec               = (long)AsianStartHour  * 3600 + (long)AsianStartMinute  * 60;
-   g_selected_cfg.asianEndSec                 = (long)AsianEndHour    * 3600 + (long)AsianEndMinute    * 60;
-   g_selected_cfg.londonStartSec              = (long)LondonStartHour * 3600 + (long)LondonStartMinute * 60;
-   g_selected_cfg.londonEndSec                = (long)LondonEndHour   * 3600 + (long)LondonEndMinute   * 60;
-   g_selected_cfg.nyStartSec                  = (long)NYStartHour     * 3600 + (long)NYStartMinute     * 60;
-   g_selected_cfg.nyEndSec                    = (long)NYEndHour       * 3600 + (long)NYEndMinute       * 60;
-   g_selected_cfg.gmtOffsetSeconds            = (long)SessionGmtOffsetHours * 3600;
-   g_selected_cfg.dstMode                     = SessionDstMode;
-   g_selected_cfg.closeOnSessionExit          = CloseOnSessionExit;
-   g_selected_cfg.useBrokerSessionsAsFallback = UseBrokerSessionsAsFallback;
-
-   const bool selected_ok = SelectedSessionsInit(g_selected_cfg, g_selected_state);
-
-   if(!UseSelectedSessions)
-   {
-      Print("⏰ Selected sessions filter OFF");
-   }
-   else if(selected_ok)
-   {
-      // Список выбранных сессий через запятую.
-      string sessions = "";
-      if(UseAsianSession)   sessions += (StringLen(sessions) > 0 ? "," : "") + "Asian";
-      if(UseLondonSession)  sessions += (StringLen(sessions) > 0 ? "," : "") + "London";
-      if(UseNewYorkSession) sessions += (StringLen(sessions) > 0 ? "," : "") + "NewYork";
-      if(StringLen(sessions) == 0) sessions = "(none)";
-
-      long aS = 0, aE = 0, lS = 0, lE = 0, nS = 0, nE = 0;
-      SelectedSessionsGetEffective(g_selected_cfg, g_selected_state,
-                                   aS, aE, lS, lE, nS, nE);
-
-      const double eff_hours = (double)g_selected_state.effectiveGmtOffsetSec / 3600.0;
-
-      PrintFormat("⏰ Selected sessions ON | %s | GMT%+.2fh | "
-                  "Asian %02d:%02d-%02d:%02d UTC | "
-                  "London %02d:%02d-%02d:%02d UTC | "
-                  "NY %02d:%02d-%02d:%02d UTC",
-                  sessions, eff_hours,
-                  (int)(aS / 3600), (int)((aS % 3600) / 60),
-                  (int)(aE / 3600), (int)((aE % 3600) / 60),
-                  (int)(lS / 3600), (int)((lS % 3600) / 60),
-                  (int)(lE / 3600), (int)((lE % 3600) / 60),
-                  (int)(nS / 3600), (int)((nS % 3600) / 60),
-                  (int)(nE / 3600), (int)((nE % 3600) / 60));
-   }
-   else
-   {
-      // Init вернул false — детальная диагностика уже выведена внутри
-      // SelectedSessionsInit (errorMessage из ValidateConfig). Добавляем
-      // один summary-лог о факте отключения фильтра.
-      Print("❌ Selected sessions filter: невалидная конфигурация — фильтр отключён");
-   }
+   SessionsSetup();
 
    string modeStr;
    switch(EntryMode)
@@ -1099,12 +716,12 @@ int OnInit()
    string trailModeStr;
    switch(TrailingMode)
    {
-      case TRAILING_OFF:       trailModeStr = "OFF";       break;
-      case TRAILING_BREAKEVEN: trailModeStr = "BREAKEVEN"; break;
-      case TRAILING_SYNC:      trailModeStr = "SYNC";      break;
+      case TRAILING_OFF_EX:       trailModeStr = "OFF";       break;
+      case TRAILING_BREAKEVEN_EX: trailModeStr = "BREAKEVEN"; break;
+      case TRAILING_SYNC_EX:      trailModeStr = "SYNC";      break;
       default:                 trailModeStr = "?";
    }
-   if(TrailingMode == TRAILING_SYNC)
+   if(TrailingMode == TRAILING_SYNC_EX)
       PrintFormat("🔁 Трейлинг: %s | StartFactor=%.2f | StepPoints=%.2f",
                   trailModeStr, TrailingStartFactor, SyncTrailStepPoints);
    else
@@ -1144,37 +761,38 @@ void OnDeinit(const int reason)
 
 void OnTick()
 {
-   //── Selected Sessions Filter prelude ──
-   // Применяется ДО legacy SessionIsAmericanPreClose / SessionIsBoundary.
-   // При UseSelectedSessions = false prelude полностью
-   // пропускается и legacy путь работает без изменений.
-   if(UseSelectedSessions)
-   {
-      // Edge-trigger: ровно один раз на переход inside→outside.
-      // DetectExit внутри обновляет state.wasInsideOnPreviousTick.
-      if(SelectedSessionsDetectExit(g_selected_cfg, g_selected_state))
-      {
-         if(CloseOnSessionExit)
-            HandleSessionExitClose();
-         return;                              // пропуск legacy и логики входа
-      }
-      // Вне Selected_Union_Interval — никакой работы с рынком.
-      if(!SelectedSessionsIsInside(g_selected_cfg, g_selected_state))
-         return;
-      // Inside: продолжаем в legacy путь.
-   }
+   const ENUM_SESSION_STATE session = SessionsOnTick();
+   if(session == SESSION_JUST_EXITED && CloseOnSessionExit)
+      HandleSessionExitClose();
+   if(session != SESSION_TRADING)
+      return;
 
    //── Тиковая ветка ──
-   if(SessionIsAmericanPreClose(g_session_cfg, g_session_state))
+   if(SessionsIsPreClose())
    {
       CloseAllOpenPositions();
       return;
    }
 
    CheckPendingEntry();
-   ManageTrailing();
+   TrailingManage(g_trade_adapter, g_broker, MagicNumber, g_trail_cfg);
 
    //── Баровая ветка ──
    if(IsNewBar())
       CheckCRTEntry();
+}
+
+//+------------------------------------------------------------------+
+//| Журнал выходов (CSV) и критерий оптимизатора.                     |
+//+------------------------------------------------------------------+
+void OnTradeTransaction(const MqlTradeTransaction &trans,
+                        const MqlTradeRequest     &request,
+                        const MqlTradeResult      &result)
+{
+   TradeJournalOnTransaction(trans, MagicNumber);
+}
+
+double OnTester()
+{
+   return TesterMetric();
 }
