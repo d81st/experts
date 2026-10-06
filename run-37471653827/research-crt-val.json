@@ -1,0 +1,110 @@
+{
+  "expert": "crt-bot_v4.2",
+  "symbols": [
+    "XAUUSDm",
+    "XAUUSD"
+  ],
+  "period": "M1",
+  "from": "2026.01.05",
+  "to": "2026.10.05",
+  "model": 4,
+  "delay": 200,
+  "deposit": 10000,
+  "currency": "USD",
+  "leverage": 2000,
+  "inputs": {
+    "RiskPercent": 1.0,
+    "TrailingMode": 0,
+    "UseSessionFilter": false,
+    "CloseOnSessionExit": false,
+    "UseAsianSession": false,
+    "UseSelectedSessions": false,
+    "UseLondonSession": false,
+    "UseNewYorkSession": false,
+    "TradingTimeframe": 15,
+    "TrendTimeframe": 16385,
+    "EntryMode": 0,
+    "MinSLPoints": 2000,
+    "MaxSLPoints": 20000
+  },
+  "variants": [
+    {
+      "name": "m15-ny-market",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "TrendTimeframe": 16385,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000,
+        "EntryMode": 1,
+        "UseSelectedSessions": true,
+        "UseLondonSession": false,
+        "UseNewYorkSession": true
+      }
+    },
+    {
+      "name": "m15-lonny-market",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "TrendTimeframe": 16385,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000,
+        "EntryMode": 1,
+        "UseSelectedSessions": true,
+        "UseLondonSession": true,
+        "UseNewYorkSession": true
+      }
+    },
+    {
+      "name": "m15-all-market",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "TrendTimeframe": 16385,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000,
+        "EntryMode": 1,
+        "UseSelectedSessions": false,
+        "UseLondonSession": false,
+        "UseNewYorkSession": false
+      }
+    },
+    {
+      "name": "h4-lonny-limit",
+      "inputs": {
+        "TradingTimeframe": 16388,
+        "TrendTimeframe": 16408,
+        "MinSLPoints": 8000,
+        "MaxSLPoints": 80000,
+        "EntryMode": 2,
+        "UseSelectedSessions": true,
+        "UseLondonSession": true,
+        "UseNewYorkSession": true
+      }
+    },
+    {
+      "name": "h4-all-market",
+      "inputs": {
+        "TradingTimeframe": 16388,
+        "TrendTimeframe": 16408,
+        "MinSLPoints": 8000,
+        "MaxSLPoints": 80000,
+        "EntryMode": 1,
+        "UseSelectedSessions": false,
+        "UseLondonSession": false,
+        "UseNewYorkSession": false
+      }
+    },
+    {
+      "name": "h4-all-limit",
+      "inputs": {
+        "TradingTimeframe": 16388,
+        "TrendTimeframe": 16408,
+        "MinSLPoints": 8000,
+        "MaxSLPoints": 80000,
+        "EntryMode": 2,
+        "UseSelectedSessions": false,
+        "UseLondonSession": false,
+        "UseNewYorkSession": false
+      }
+    }
+  ]
+}
