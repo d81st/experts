@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
-//|                         crt-push_v8.1.mq5                        |
+//|                                                crt-push_v8.1.mq5 |
 //|   RB+CRT Notification Bot v8.1                                   |
-//|   Multi-TF | модульная архитектура                                |
+//|   Multi-TF | модульная архитектура                               |
 //+------------------------------------------------------------------+
 //
 //  ─── АРХИТЕКТУРА ──────────────────────────────────────────────────
@@ -78,7 +78,7 @@ CrtPatternFlags       g_detector_flags;
 MultiTfSchedulerState g_sched_state;
 
 //+------------------------------------------------------------------+
-//| OnInit — инициализация модулей и проверка конфигурации            |
+//| OnInit — инициализация модулей и проверка конфигурации           |
 //+------------------------------------------------------------------+
 int OnInit()
 {
@@ -148,28 +148,28 @@ void OnTick()
 
       MqlRates rates[];
       ArraySetAsSeries(rates, true);
-      if(CopyRates(_Symbol, tf, 0, 4, rates) < 4) continue;                                 // Req 11.2, 11.3
+      if(CopyRates(_Symbol, tf, 0, 4, rates) < 4) continue;
 
-      if(!MultiTfSchedulerIsNewBar(g_sched_state, tfIdx, rates[0].time)) continue;          // Req 11.4
+      if(!MultiTfSchedulerIsNewBar(g_sched_state, tfIdx, rates[0].time)) continue;
 
       const datetime lastSignalBar = MultiTfSchedulerLoadLastSignalBar(g_sched_state, tfIdx);
-      if(rates[1].time == lastSignalBar) continue;                                          // Req 11.5
+      if(rates[1].time == lastSignalBar) continue;
 
       CrtSignal signal;
       CrtDetectorDetect(rates[3], rates[2], rates[1],
-                        g_detector_cfg, g_detector_flags, signal);                          // Req 11.6
+                        g_detector_cfg, g_detector_flags, signal);
       if(!signal.detected) continue;
 
       const string direction = (signal.imbDir == +1) ? "SELL" : "BUY";
       const string tfStr     = MultiTfSchedulerTFToString(tf);
       PushNotifierSendCrt(signal.patternName, direction, _Symbol, tfStr,
-                          rates[1].time, signal.isFVG, rates[2], rates[1]);                 // Req 11.7
+                          rates[1].time, signal.isFVG, rates[2], rates[1]);
       MultiTfSchedulerSaveLastSignalBar(g_sched_state, tfIdx, rates[1].time);
    }
 }
 
 //+------------------------------------------------------------------+
-//| OnDeinit — очистка HUD при выгрузке (паттерн v7.2)               |
+//| OnDeinit — очистка HUD при выгрузке                              |
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
