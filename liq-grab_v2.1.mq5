@@ -28,6 +28,14 @@ enum ENUM_LIQ_SL_MODE
    SL_ATR          = 2   // AtrSLMultiplier × ATR(AtrPeriod) от цены входа
 };
 
+// Какой уровень ликвидности «снимается».
+enum ENUM_LIQ_LEVEL_MODE
+{
+   LEVEL_STREAK     = 0,  // Экстремум свечи из цепочки по тренду (исходная логика)
+   LEVEL_PREV_DAY   = 1,  // Максимум/минимум предыдущего дня
+   LEVEL_ASIA_RANGE = 2   // Максимум/минимум Азиатской сессии (AsiaStartHour..AsiaEndHour)
+};
+
 // Где ставить тейк-профит.
 enum ENUM_LIQ_TP_MODE
 {
@@ -58,6 +66,9 @@ input int    PauseAfterLosses   = 0;  // Пауза после N стопов п
 input int    LossPauseMinutes   = 60; // Длительность паузы, мин
 input ENUM_TIMEFRAMES TradingTimeframe = PERIOD_M3;
 input bool UseClosedBarSignal = true; // Сигнал по закрытой свече (false — внутри формирующейся, как раньше)
+input ENUM_LIQ_LEVEL_MODE LevelMode = LEVEL_STREAK; // Уровень ликвидности
+input int AsiaStartHour = 0;  // Начало Азиатской сессии, час (серверное время)
+input int AsiaEndHour   = 7;  // Конец Азиатской сессии, час (серверное время)
 
 input group "Trend Analysis"
 input int HistoryDepth = 30;
@@ -451,28 +462,12 @@ string TradeFrequencyBlock()
 }
 
 //+------------------------------------------------------------------+
-//| Проверка сигналов на открытие                                    |
+//| StreakSignal — исходная логика: тренд по цепочке экстремумов,    |
+//| уровень — экстремум свечи из цепочки, снятие на свече `sig`.     |
 //+------------------------------------------------------------------+
-void CheckEntrySignals()
+bool StreakSignal(const MqlRates &rates[], const int sig,
+                  ENUM_ORDER_TYPE &order_type, string &signal_msg)
 {
-   ENUM_POSITION_TYPE dummy;
-   if(PositionGuardHasOpen(MagicNumber, dummy)) return;
-   if(SessionIsBoundary(g_session_cfg, g_session_state)) return;
-
-   MqlRates rates[];
-   ArraySetAsSeries(rates, true);
-   if(CopyRates(_Symbol, TradingTimeframe, 0, HistoryDepth, rates) < HistoryDepth) return;
-
-   // Свеча, на которой ищем снятие ликвидности: 1 — последняя закрытая
-   // (одна проверка на бар, вход на открытии следующей), 0 — формирующаяся.
-   const int sig = UseClosedBarSignal ? 1 : 0;
-   static datetime s_lastClosedCheck = 0;
-   if(UseClosedBarSignal)
-   {
-      if(rates[0].time == s_lastClosedCheck) return;
-      s_lastClosedCheck = rates[0].time;
-   }
-
    int non_ghost_idx[];
    ArrayResize(non_ghost_idx, TrendLookback);
    int count = 0;
@@ -484,8 +479,8 @@ void CheckEntrySignals()
          count++;
       }
    }
-   if(count < MinStreak) return;
-   if(SignalCandleShift < 0 || SignalCandleShift >= count) return;
+   if(count < MinStreak) return false;
+   if(SignalCandleShift < 0 || SignalCandleShift >= count) return false;
 
    int streak_high = 1;
    for(int k = 1; k < count; k++)
@@ -516,12 +511,9 @@ void CheckEntrySignals()
    {
       current_trend = 0;   // тренд устарел
    }
-   if(current_trend == 0) return;
+   if(current_trend == 0) return false;
 
    int last_sig_idx = non_ghost_idx[SignalCandleShift];
-   ENUM_ORDER_TYPE order_type = WRONG_VALUE;
-   string signal_msg = "";
-   bool signal_found = false;
 
    if(current_trend == 1)
    {
@@ -532,7 +524,7 @@ void CheckEntrySignals()
       {
          order_type   = ORDER_TYPE_BUY;
          signal_msg   = "📈 Сигнал: BUY после снятия ликвидности Low в бычьем тренде (TF: " + EnumToString(TradingTimeframe) + ")";
-         signal_found = true;
+         return true;
       }
    }
    else if(current_trend == 2)
@@ -544,11 +536,104 @@ void CheckEntrySignals()
       {
          order_type   = ORDER_TYPE_SELL;
          signal_msg   = "📉 Сигнал: SELL после снятия ликвидности High в медвежьем тренде (TF: " + EnumToString(TradingTimeframe) + ")";
-         signal_found = true;
+         return true;
       }
    }
 
-   if(!signal_found) return;
+   return false;
+}
+
+//+------------------------------------------------------------------+
+//| KeyLevelSignal — снятие значимого уровня на закрытой свече [1]:  |
+//| максимум/минимум предыдущего дня или Азиатской сессии.           |
+//| Пробой максимума с закрытием ниже → SELL, минимума → BUY.        |
+//| Один вход на каждую сторону уровня в день. `opposite` — другая   |
+//| граница (цель для TP_LIQUIDITY).                                 |
+//+------------------------------------------------------------------+
+bool KeyLevelSignal(const MqlRates &rates[], ENUM_ORDER_TYPE &order_type,
+                    string &signal_msg, double &opposite)
+{
+   const datetime barTime  = rates[1].time;
+   const datetime dayStart = barTime - (barTime % 86400);
+   double levelHigh = 0.0, levelLow = 0.0;
+   string levelName = "";
+
+   if(LevelMode == LEVEL_PREV_DAY)
+   {
+      const int shift = iBarShift(_Symbol, PERIOD_D1, barTime) + 1;   // день перед свечой сигнала
+      levelHigh = iHigh(_Symbol, PERIOD_D1, shift);
+      levelLow  = iLow(_Symbol, PERIOD_D1, shift);
+      levelName = "пред. дня";
+   }
+   else
+   {
+      const datetime asiaFrom = dayStart + AsiaStartHour * 3600;
+      const datetime asiaTo   = dayStart + AsiaEndHour * 3600 - 1;
+      if(barTime < asiaTo) return false;   // диапазон Азии ещё не сформирован
+      double hi[], lo[];
+      if(CopyHigh(_Symbol, PERIOD_M1, asiaFrom, asiaTo, hi) <= 0) return false;
+      if(CopyLow(_Symbol, PERIOD_M1, asiaFrom, asiaTo, lo) <= 0) return false;
+      levelHigh = hi[ArrayMaximum(hi)];
+      levelLow  = lo[ArrayMinimum(lo)];
+      levelName = "Азии";
+   }
+   if(levelHigh <= 0.0 || levelLow <= 0.0) return false;
+
+   static datetime s_highDay = 0, s_lowDay = 0;   // одна сделка на сторону уровня в день
+   const string tf = EnumToString(TradingTimeframe);
+
+   if(rates[1].high > levelHigh && rates[1].close < levelHigh && s_highDay != dayStart)
+   {
+      s_highDay  = dayStart;
+      order_type = ORDER_TYPE_SELL;
+      opposite   = levelLow;
+      signal_msg = StringFormat("📉 Сигнал: SELL после снятия максимума %s %s (TF: %s)",
+                                levelName, DoubleToString(levelHigh, _Digits), tf);
+      return true;
+   }
+   if(rates[1].low < levelLow && rates[1].close > levelLow && s_lowDay != dayStart)
+   {
+      s_lowDay   = dayStart;
+      order_type = ORDER_TYPE_BUY;
+      opposite   = levelHigh;
+      signal_msg = StringFormat("📈 Сигнал: BUY после снятия минимума %s %s (TF: %s)",
+                                levelName, DoubleToString(levelLow, _Digits), tf);
+      return true;
+   }
+   return false;
+}
+
+//+------------------------------------------------------------------+
+//| Проверка сигналов на открытие                                    |
+//+------------------------------------------------------------------+
+void CheckEntrySignals()
+{
+   ENUM_POSITION_TYPE dummy;
+   if(PositionGuardHasOpen(MagicNumber, dummy)) return;
+   if(SessionIsBoundary(g_session_cfg, g_session_state)) return;
+
+   MqlRates rates[];
+   ArraySetAsSeries(rates, true);
+   if(CopyRates(_Symbol, TradingTimeframe, 0, HistoryDepth, rates) < HistoryDepth) return;
+
+   // Свеча, на которой ищем снятие ликвидности: 1 — последняя закрытая
+   // (одна проверка на бар, вход на открытии следующей), 0 — формирующаяся.
+   const bool closedBar = UseClosedBarSignal || LevelMode != LEVEL_STREAK;
+   const int  sig       = closedBar ? 1 : 0;
+   static datetime s_lastClosedCheck = 0;
+   if(closedBar)
+   {
+      if(rates[0].time == s_lastClosedCheck) return;
+      s_lastClosedCheck = rates[0].time;
+   }
+
+   ENUM_ORDER_TYPE order_type = WRONG_VALUE;
+   string signal_msg = "";
+   double opposite   = 0.0;   // противоположный уровень (только для значимых уровней)
+   const bool found = (LevelMode == LEVEL_STREAK)
+                      ? StreakSignal(rates, sig, order_type, signal_msg)
+                      : KeyLevelSignal(rates, order_type, signal_msg, opposite);
+   if(!found) return;
 
    static datetime last_entry_bar = 0;
    if(last_entry_bar == rates[0].time) return;
@@ -606,10 +691,14 @@ void CheckEntrySignals()
    double rr = RiskRewardRatio;
    if(TPMode == TP_LIQUIDITY)
    {
-      double target = (order_type == ORDER_TYPE_BUY) ? rates[sig + 1].high : rates[sig + 1].low;
-      for(int i = sig + 2; i < HistoryDepth; i++)
-         target = (order_type == ORDER_TYPE_BUY) ? MathMax(target, rates[i].high)
-                                                 : MathMin(target, rates[i].low);
+      double target = opposite;
+      if(target <= 0.0)
+      {
+         target = (order_type == ORDER_TYPE_BUY) ? rates[sig + 1].high : rates[sig + 1].low;
+         for(int i = sig + 2; i < HistoryDepth; i++)
+            target = (order_type == ORDER_TYPE_BUY) ? MathMax(target, rates[i].high)
+                                                    : MathMin(target, rates[i].low);
+      }
       const double liqRR = MathAbs(target - entry) / (slPoints * g_broker.adjustedPoint);
       const bool   ahead = (order_type == ORDER_TYPE_BUY) ? (target > entry) : (target < entry);
       if(ahead && liqRR >= MinLiquidityRR) rr = liqRR;
