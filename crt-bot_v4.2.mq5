@@ -75,6 +75,7 @@ input int MaxBarsToWait = 2;   // Макс. баров до отмены сиг�
 input group "── Управление капиталом ──"
 input int    MagicNumber  = 71002;   // Магический номер (уникальный для каждого бота)
 input double RiskPercent  = 3.0;
+input double MaxRiskOvershoot = 1.5;  // Пропуск сделки, если мин. лот рискует > RiskPercent × N (0 = выкл)
 
 input group "── Параметры входа ──"
 input ENUM_TIMEFRAMES TradingTimeframe = PERIOD_M1;
@@ -311,8 +312,11 @@ void OpenCRTTrade(ENUM_ORDER_TYPE orderType, double entry, double sl, double tp,
       PrintFormat("⚠️ SL→min: %.5f | TP→RR=%.2f: %.5f", sl, rr_old, tp);
    }
 
-   // margin-based сайзинг
-   const double lot = BrokerCalcLot(g_broker, RiskPercent, /*slPoints*/ 0.0, LOT_BY_MARGIN);
+   // Лот от расстояния до SL: риск сделки = RiskPercent от баланса.
+   const double lot = BrokerCalcLot(g_broker, RiskPercent,
+                                    MathAbs(entry - sl) / g_broker.adjustedPoint,
+                                    LOT_BY_TICK_VALUE, MaxRiskOvershoot);
+   if(lot <= 0.0) return;   // минимальный лот слишком рискованный — причина уже в журнале
 
    const string dir = (orderType == ORDER_TYPE_BUY) ? "BUY" : "SELL";
 
@@ -369,7 +373,15 @@ void PlaceCRTLimitOrder(ENUM_ORDER_TYPE orderType, double price,
    }
 
    // Fallback limit→market выполняется внутри TradeExecutorSend; детектируем по сравнению originalType ↔ req.orderType.
-   const double lot = BrokerCalcLot(g_broker, RiskPercent, /*slPoints*/ 0.0, LOT_BY_MARGIN);
+   // Лот от расстояния до SL: риск сделки = RiskPercent от баланса.
+   const double lot = BrokerCalcLot(g_broker, RiskPercent,
+                                    MathAbs(price - sl) / g_broker.adjustedPoint,
+                                    LOT_BY_TICK_VALUE, MaxRiskOvershoot);
+   if(lot <= 0.0)
+   {
+      g_pending.Reset();   // минимальный лот слишком рискованный — сигнал отбрасываем
+      return;
+   }
 
    const ENUM_ORDER_TYPE originalType = orderType;
    const string dir = (orderType == ORDER_TYPE_BUY_LIMIT ? "BUY LIMIT" : "SELL LIMIT");

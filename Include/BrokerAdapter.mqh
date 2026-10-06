@@ -6,9 +6,8 @@
 //+------------------------------------------------------------------+
 //
 // Кратко:
-//   - Lot sizing: две стратегии через ENUM_LOT_STRATEGY.
-//     LOT_BY_TICK_VALUE (liq-grab, engulfing) — точнее по риску;
-//     LOT_BY_MARGIN (crt-bot) — лот не зависит от SL.
+//   - Lot sizing: LOT_BY_TICK_VALUE — лот от расстояния до SL, риск
+//     сделки = riskPercent от баланса (все боты).
 //   - Min-SL-distance: TP модулем не модифицируется
 //     (ответственность caller'а).
 //   - crt-bot caller-side TP recalc: при подтяжке SL к min_dist TP
@@ -55,15 +54,11 @@ struct BrokerContext
 //|                       пропорционален SL-дистанции, реальный      |
 //|                       риск-в-деньгах ≈ riskPercent от баланса    |
 //|                       вне зависимости от SL.                     |
-//|                       Используется в liq-grab / engulfing.       |
-//|   LOT_BY_MARGIN     — margin-сайзинг: лот не зависит от SL,      |
-//|                       рассчитывается из `OrderCalcMargin`.       |
-//|                       Используется в crt-bot.                    |
+//|                       Используется во всех ботах.                |
 //+------------------------------------------------------------------+
 enum ENUM_LOT_STRATEGY
   {
-   LOT_BY_TICK_VALUE = 0,
-   LOT_BY_MARGIN     = 1
+   LOT_BY_TICK_VALUE = 0
   };
 
 //+------------------------------------------------------------------+
@@ -100,18 +95,12 @@ ENUM_ORDER_TYPE_FILLING BrokerGetFillType(void);
 //        riskMoney / ((slPoints * ctx.adjustedPoint / tickSize) * tickValue),
 //    где riskMoney = AccountInfoDouble(ACCOUNT_BALANCE) *
 //                    riskPercent / 100.0.
-//    При `strategy == LOT_BY_MARGIN` и `OrderCalcMargin` → true,
-//    marginPerLot > 0: лот считается как riskMoney / marginPerLot
-//    (slPoints игнорируется).
 //    Возвращаемое значение ограничивается диапазоном
 //    [SYMBOL_VOLUME_MIN, SYMBOL_VOLUME_MAX] и округляется вниз до
 //    кратности SYMBOL_VOLUME_STEP.
-//    Защита от деления на 0 и невалидной маржи: если slPoints <= 0
-//    при TICK_VALUE, tickValue == 0 или tickSize == 0 —
-//    возвращается SYMBOL_VOLUME_MIN без обращения к
-//    OrderCalcMargin. Если OrderCalcMargin → false или
-//    marginPerLot <= 0 при MARGIN — возвращается SYMBOL_VOLUME_MIN.
-//    maxRiskOvershoot > 0 (только TICK_VALUE): если даже минимальный
+//    Защита от деления на 0: если slPoints <= 0, tickValue == 0
+//    или tickSize == 0 — возвращается SYMBOL_VOLUME_MIN.
+//    maxRiskOvershoot > 0: если даже минимальный
 //    лот рискует больше riskMoney * maxRiskOvershoot — возвращается 0,
 //    и вызывающий EA должен пропустить сделку. 0 — проверка выключена.
 double BrokerCalcLot(const BrokerContext     &ctx,
@@ -199,19 +188,13 @@ void BrokerInit(BrokerContext &ctx)
 //+------------------------------------------------------------------+
 //| BrokerCalcLot                                                    |
 //|                                                                  |
-//| LOT_BY_TICK_VALUE (liq-grab, engulfing):                         |
+//| LOT_BY_TICK_VALUE:                                               |
 //|   moneyPerLot = (slPoints * adjustedPoint / tickSize) * tickValue|
 //|   lot = riskMoney / moneyPerLot                                  |
 //|   Защита: slPoints<=0 / tickValue==0 / tickSize==0               |
-//|   → volMin без вызова OrderCalcMargin.                           |
+//|   → volMin.                                                      |
 //|   maxRiskOvershoot > 0: риск минимального лота                   |
 //|   > riskMoney * maxRiskOvershoot → 0 (сделку пропустить).        |
-//|                                                                  |
-//| LOT_BY_MARGIN (crt-bot):                                         |
-//|   marginPerLot через OrderCalcMargin(ORDER_TYPE_BUY,_Symbol,1.0, |
-//|                                       SYMBOL_ASK, marginPerLot)  |
-//|   lot = riskMoney / marginPerLot (slPoints игнорируется).        |
-//|   Защита: false или marginPerLot<=0 → volMin.                    |
 //|                                                                  |
 //| Клампинг: сначала floor до volStep, затем clamp в                |
 //| [volMin, volMax]. Порядок важен: floor может дать значение       |
@@ -236,7 +219,7 @@ double BrokerCalcLot(const BrokerContext     &ctx,
       const double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
       const double tickSize  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
       //--- защита от деления на 0 / невалидного SL.
-      //    Возврат volMin БЕЗ обращения к OrderCalcMargin.
+      //    Возврат volMin.
       if(slPoints <= 0.0 || tickValue == 0.0 || tickSize == 0.0)
          return volMin;
       const double moneyPerLot = (slPoints * ctx.adjustedPoint / tickSize) * tickValue;
@@ -253,17 +236,6 @@ double BrokerCalcLot(const BrokerContext     &ctx,
                      riskMoney * maxRiskOvershoot, riskPercent, maxRiskOvershoot);
          return 0.0;
         }
-     }
-   else if(strategy == LOT_BY_MARGIN)
-     {
-      double marginPerLot = 0.0;
-      //--- Цена для расчёта маржи — SYMBOL_ASK,
-      //    направление — ORDER_TYPE_BUY, объём — 1.0.
-      const double price = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-      if(!OrderCalcMargin(ORDER_TYPE_BUY, _Symbol, 1.0, price, marginPerLot) ||
-         marginPerLot <= 0.0)
-         return volMin;
-      lot = riskMoney / marginPerLot;
      }
 
    //--- округление ВНИЗ до volStep, затем клампинг в
