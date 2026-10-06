@@ -160,7 +160,8 @@ ENUM_ORDER_TYPE_FILLING BrokerGetFillType(void)
 //|     digits ∈ {3,5} → _Point                                      |
 //|     digits ∈ {2,4} → _Point / 10.0                               |
 //|     иначе         → _Point (fallback)                            |
-//|   ctx.minBrokerDistance = (SYMBOL_TRADE_STOPS_LEVEL + 3) * _Point|
+//|   ctx.minBrokerDistance = (max(STOPS_LEVEL, FREEZE_LEVEL) + 3)   |
+//|                           * _Point                               |
 //|                                                                  |
 //| Идемпотентность гарантирована тем, что все поля заполняются      |
 //| детерминированно из свойств _Symbol — повторный вызов при        |
@@ -180,9 +181,10 @@ void BrokerInit(BrokerContext &ctx)
    else
       ctx.adjustedPoint = _Point;                 // fallback
 
-   //--- 3. Min broker distance
-   const long stops_level = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
-   ctx.minBrokerDistance  = (stops_level + 3) * _Point;
+   //--- 3. Min broker distance: больший из уровней стопов и заморозки
+   const long stops_level  = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
+   const long freeze_level = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_FREEZE_LEVEL);
+   ctx.minBrokerDistance   = (MathMax(stops_level, freeze_level) + 3) * _Point;
   }
 
 //+------------------------------------------------------------------+
@@ -231,9 +233,12 @@ double BrokerCalcLot(const BrokerContext     &ctx,
       const double minLotRisk = moneyPerLot * volMin;
       if(maxRiskOvershoot > 0.0 && minLotRisk > riskMoney * maxRiskOvershoot)
         {
+         static double s_lastBalance = -1.0;   // печатаем один раз на каждый новый баланс
+         if(balance != s_lastBalance)
          PrintFormat("🚫 Лот %.2f рискует %.2f %s > %.2f (%.1f%% × %.1f) — сделка пропущена",
                      volMin, minLotRisk, AccountInfoString(ACCOUNT_CURRENCY),
                      riskMoney * maxRiskOvershoot, riskPercent, maxRiskOvershoot);
+         s_lastBalance = balance;
          return 0.0;
         }
      }

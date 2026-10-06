@@ -24,7 +24,8 @@ input group "Money Management"
 input int MagicNumber = 71001; // Магический номер (уникальный для каждого бота)
 input double RiskPercent = 3.0; // Риск на сделку в %
 input double MaxRiskOvershoot = 1.5; // Пропуск сделки, если мин. лот рискует > RiskPercent × N (0 = выкл)
-input int MaxSpread = 1000; // Максимальный спред (в пунктах)
+input double MaxSpreadToSL   = 0.10; // Макс. спред как доля расстояния до SL (0.10 = 10%; 0 = выкл)
+input double MaxSlippageToSL = 0.10; // Макс. проскальзывание как доля расстояния до SL (0 = без ограничения)
 
 input group "Trade Parameters"
 input double StopLossPoints = 3175; // SL в пунктах
@@ -307,9 +308,7 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 //| Открытие сделки                                                  |
 //+------------------------------------------------------------------+
-// Spread-check вынесен в caller (`CheckEntrySignals`). Семантика MaxSpread
-// (raw points через _Point/adjustedPoint) специфична для liq-grab —
-// trade-executor не унифицирует.
+// Спред и проскальзывание проверяет TradeExecutorSend (MaxSpreadToSL, MaxSlippageToSL).
 // BrokerEnforceMinSLDist здесь же для caller-side пересчёта slPoints
 // (TP = slPoints * rrRatio автоматически сохраняет RR при подтяжке SL).
 void OpenTrade(ENUM_ORDER_TYPE orderType, double slPoints, double rrRatio)
@@ -347,9 +346,11 @@ void OpenTrade(ENUM_ORDER_TYPE orderType, double slPoints, double rrRatio)
    req.tp        = tp;
    req.lot       = lot;
    req.comment   = StringFormat("LiqGrab TF:%s RR:%.1f", EnumToString(TradingTimeframe), rrRatio);
+   req.maxSpreadToSL   = MaxSpreadToSL;
+   req.maxSlippageToSL = MaxSlippageToSL;
 
    TradeResult result = TradeExecutorSend(trade, g_broker, req);
-   if(!result.success)
+   if(!result.success && !result.skipped)   // пропуск по фильтру модуль уже записал в журнал
       PrintFormat("❌ Ошибка открытия: %u | %s", result.retcode, result.description);
    // Success-лог эмитит TradeExecutorSend в crt-bot-формате.
 }
@@ -452,15 +453,6 @@ void CheckEntrySignals()
    }
 
    Print(signal_msg);
-
-   // Spread-check (EA-specific guard, не унифицируется в TradeExecutor).
-   int spread_raw = (int)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
-   double adapted_spread = spread_raw * (_Point / g_broker.adjustedPoint);
-   if(adapted_spread > MaxSpread)
-   {
-      PrintFormat("⚠️ Спред %.0f (адаптировано) > %d пунктов, вход отменён", adapted_spread, MaxSpread);
-      return;
-   }
 
    OpenTrade(order_type, StopLossPoints, RiskRewardRatio);
 }

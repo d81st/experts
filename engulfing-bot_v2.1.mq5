@@ -29,6 +29,8 @@ input group "── Управление капиталом ──"
 input int    MagicNumber = 71003;   // Магический номер (уникальный для каждого бота)
 input double RiskPercent = 3.0;    // Риск на сделку, %
 input double MaxRiskOvershoot = 1.5; // Пропуск сделки, если мин. лот рискует > RiskPercent × N (0 = выкл)
+input double MaxSpreadToSL   = 0.10; // Макс. спред как доля расстояния до SL (0.10 = 10%; 0 = выкл)
+input double MaxSlippageToSL = 0.10; // Макс. проскальзывание как доля расстояния до SL (0 = без ограничения)
 
 input group "── Параметры входа ──"
 input ENUM_TIMEFRAMES TradingTimeframe = PERIOD_M1;
@@ -381,6 +383,8 @@ bool OpenEngulfingTrade(ENUM_ORDER_TYPE orderType, double entry,
       return false;
    }
    req.comment   = StringFormat("ENG_%s TF:%s", dir, EnumToString(TradingTimeframe));
+   req.maxSpreadToSL   = MaxSpreadToSL;
+   req.maxSlippageToSL = MaxSlippageToSL;
 
    const TradeResult result = TradeExecutorSend(trade, g_broker, req);
    if(result.success)
@@ -390,8 +394,11 @@ bool OpenEngulfingTrade(ENUM_ORDER_TYPE orderType, double entry,
       return true;
    }
 
-   PrintFormat("❌ Ошибка открытия: %u | %s",
-               result.retcode, result.description);
+   // Пропуск по фильтру (спред, пауза) модуль уже записал в журнал;
+   // паттерн остаётся активным и ждёт нормализации до истечения срока.
+   if(!result.skipped)
+      PrintFormat("❌ Ошибка открытия: %u | %s",
+                  result.retcode, result.description);
    return false;
 }
 
@@ -436,6 +443,8 @@ void PlaceLimitOrder(ENUM_ORDER_TYPE orderType, double price,
       return;
    }
    req.comment   = StringFormat("ENG_%s TF:%s", dir, EnumToString(TradingTimeframe));
+   req.maxSpreadToSL   = MaxSpreadToSL;
+   req.maxSlippageToSL = MaxSlippageToSL;
 
    const TradeResult result = TradeExecutorSend(trade, g_broker, req);
 

@@ -76,6 +76,8 @@ input group "── Управление капиталом ──"
 input int    MagicNumber  = 71002;   // Магический номер (уникальный для каждого бота)
 input double RiskPercent  = 3.0;
 input double MaxRiskOvershoot = 1.5;  // Пропуск сделки, если мин. лот рискует > RiskPercent × N (0 = выкл)
+input double MaxSpreadToSL   = 0.10; // Макс. спред как доля расстояния до SL (0.10 = 10%; 0 = выкл)
+input double MaxSlippageToSL = 0.10; // Макс. проскальзывание как доля расстояния до SL (0 = без ограничения)
 
 input group "── Параметры входа ──"
 input ENUM_TIMEFRAMES TradingTimeframe = PERIOD_M1;
@@ -327,6 +329,8 @@ void OpenCRTTrade(ENUM_ORDER_TYPE orderType, double entry, double sl, double tp,
    req.tp        = tp;
    req.lot       = lot;
    req.comment   = StringFormat("CRT_%s_%s TF:%s", label, dir, EnumToString(TradingTimeframe));
+   req.maxSpreadToSL   = MaxSpreadToSL;
+   req.maxSlippageToSL = MaxSlippageToSL;
 
    TradeResult result = TradeExecutorSend(trade, g_broker, req);
 
@@ -343,7 +347,7 @@ void OpenCRTTrade(ENUM_ORDER_TYPE orderType, double entry, double sl, double tp,
       Comment(StringFormat("CRT Bot | %s %s | SL: %.0f pts | TP: %.0f pts | RR: %.2f",
                            label, dir, sl_pts, tp_pts, rr));
    }
-   else
+   else if(!result.skipped)   // пропуск по фильтру модуль уже записал в журнал
    {
       PrintFormat("❌ Ошибка открытия [%s]: %u | %s",
                   label, result.retcode, result.description);
@@ -525,8 +529,7 @@ void ManageSyncTrailing()
    GcSyncState();
 
    const double point             = g_broker.adjustedPoint;
-   const long   stops_level       = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
-   const double minBrokerDistance = (stops_level + 3) * _Point;
+   const double minBrokerDistance = g_broker.minBrokerDistance;
 
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
