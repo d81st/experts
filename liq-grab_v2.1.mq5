@@ -31,6 +31,7 @@ input group "Trade Parameters"
 input double StopLossPoints = 3175; // SL в пунктах
 input double RiskRewardRatio = 2.0; // RR
 input ENUM_TIMEFRAMES TradingTimeframe = PERIOD_M3;
+input bool UseClosedBarSignal = true; // Сигнал по закрытой свече (false — внутри формирующейся, как раньше)
 
 input group "Trend Analysis"
 input int HistoryDepth = 30;
@@ -368,10 +369,20 @@ void CheckEntrySignals()
    ArraySetAsSeries(rates, true);
    if(CopyRates(_Symbol, TradingTimeframe, 0, HistoryDepth, rates) < HistoryDepth) return;
 
+   // Свеча, на которой ищем снятие ликвидности: 1 — последняя закрытая
+   // (одна проверка на бар, вход на открытии следующей), 0 — формирующаяся.
+   const int sig = UseClosedBarSignal ? 1 : 0;
+   static datetime s_lastClosedCheck = 0;
+   if(UseClosedBarSignal)
+   {
+      if(rates[0].time == s_lastClosedCheck) return;
+      s_lastClosedCheck = rates[0].time;
+   }
+
    int non_ghost_idx[];
    ArrayResize(non_ghost_idx, TrendLookback);
    int count = 0;
-   for(int i = 1; i < HistoryDepth - 1 && count < TrendLookback; i++)
+   for(int i = 1 + sig; i < HistoryDepth - 1 && count < TrendLookback; i++)
    {
       if(rates[i].high > rates[i+1].high || rates[i].low < rates[i+1].low)
       {
@@ -411,8 +422,8 @@ void CheckEntrySignals()
    if(current_trend == 1)
    {
       double level = rates[last_sig_idx].low;
-      bool swept    = rates[0].low < level;
-      bool returned = rates[0].close > level;
+      bool swept    = rates[sig].low < level;
+      bool returned = rates[sig].close > level;
       if(swept && returned)
       {
          order_type   = ORDER_TYPE_BUY;
@@ -423,8 +434,8 @@ void CheckEntrySignals()
    else if(current_trend == 2)
    {
       double level = rates[last_sig_idx].high;
-      bool swept    = rates[0].high > level;
-      bool returned = rates[0].close < level;
+      bool swept    = rates[sig].high > level;
+      bool returned = rates[sig].close < level;
       if(swept && returned)
       {
          order_type   = ORDER_TYPE_SELL;
