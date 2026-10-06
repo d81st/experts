@@ -18,6 +18,7 @@
 #include "Include/Trailing/TrailingDispatcher.mqh"
 #include "Include/CrtDetector.mqh"
 #include "Include/EntryTrigger.mqh"
+#include "Include/TimeExit.mqh"
 #include "Include/TesterMetric.mqh"
 CTrade trade;
 ITradeAdapter *g_trade_adapter = NULL;
@@ -82,6 +83,10 @@ input group "── Stop Loss ──"
 input double BufferPoints = 200;   // Отступ от экстремума, пункты (200 = 0.20 USD)
 input double MinSLPoints  = 1525;  // Мин. SL, пункты (1525 = 1.525 USD)
 input double MaxSLPoints  = 3175;  // Макс. SL, пункты (3175 = 3.175 USD)
+
+input group "── Выход ──"
+input bool   UseTakeProfit = true;  // false — без тейка: выход по SL или по времени (проверка входа)
+input int    TimeExitBars  = 0;     // Закрыть позицию через N баров TradingTimeframe (0 = выкл)
 
 input group "── Трейлинг ──"
 input ENUM_TRAILING_MODE_EX TrailingMode          = TRAILING_OFF_EX;
@@ -282,7 +287,7 @@ void OpenCRTTrade(ENUM_ORDER_TYPE orderType, double entry, double sl, double tp,
    req.orderType = orderType;
    req.price     = entry;
    req.sl        = sl;
-   req.tp        = tp;
+   req.tp        = UseTakeProfit ? tp : 0.0;
    req.lot       = lot;
    req.comment   = StringFormat("CRT_%s_%s TF:%s", label, dir, EnumToString(TradingTimeframe));
    req.maxSpreadToSL   = MaxSpreadToSL;
@@ -296,7 +301,7 @@ void OpenCRTTrade(ENUM_ORDER_TYPE orderType, double entry, double sl, double tp,
       const double sl_pts = (g_broker.adjustedPoint > 0.0)
                             ? MathAbs(req.price - req.sl) / g_broker.adjustedPoint
                             : 0.0;
-      const double tp_pts = (g_broker.adjustedPoint > 0.0)
+      const double tp_pts = (g_broker.adjustedPoint > 0.0 && req.tp > 0.0)
                             ? MathAbs(req.tp - req.price) / g_broker.adjustedPoint
                             : 0.0;
       const double rr     = (sl_pts > 0.0) ? tp_pts / sl_pts : 0.0;
@@ -350,7 +355,7 @@ void PlaceCRTLimitOrder(ENUM_ORDER_TYPE orderType, double price,
    req.orderType = orderType;
    req.price     = price;
    req.sl        = sl;
-   req.tp        = tp;
+   req.tp        = UseTakeProfit ? tp : 0.0;
    req.lot       = lot;
    req.comment   = StringFormat("CRT_%s TF:%s", label, EnumToString(TradingTimeframe));
 
@@ -361,7 +366,7 @@ void PlaceCRTLimitOrder(ENUM_ORDER_TYPE orderType, double price,
       const double sl_pts = (g_broker.adjustedPoint > 0.0)
                             ? MathAbs(req.price - req.sl) / g_broker.adjustedPoint
                             : 0.0;
-      const double tp_pts = (g_broker.adjustedPoint > 0.0)
+      const double tp_pts = (g_broker.adjustedPoint > 0.0 && req.tp > 0.0)
                             ? MathAbs(req.tp - req.price) / g_broker.adjustedPoint
                             : 0.0;
       const double rr     = (sl_pts > 0.0) ? tp_pts / sl_pts : 0.0;
@@ -768,6 +773,9 @@ void OnDeinit(const int reason)
 
 void OnTick()
 {
+   // Выход по времени — и вне торговой сессии.
+   TimeExitManage(trade, MagicNumber, TradingTimeframe, TimeExitBars);
+
    const ENUM_SESSION_STATE session = SessionsOnTick();
    if(session == SESSION_JUST_EXITED && CloseOnSessionExit)
       HandleSessionExitClose();

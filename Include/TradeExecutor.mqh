@@ -477,11 +477,11 @@ TradeResult TradeExecutorSend(CTrade              &tr,
       const double slPoints = (broker.adjustedPoint > 0.0)
                               ? MathAbs(req.price - req.sl) / broker.adjustedPoint
                               : 0.0;
-      const double tpPoints = (broker.adjustedPoint > 0.0)
+      const double tpPoints = (broker.adjustedPoint > 0.0 && req.tp > 0.0)
                               ? MathAbs(req.tp - req.price) / broker.adjustedPoint
                               : 0.0;
       const double slDist   = MathAbs(req.price - req.sl);
-      const double rr       = (slDist > 0.0)
+      const double rr       = (slDist > 0.0 && req.tp > 0.0)
                               ? MathAbs(req.tp - req.price) / slDist
                               : 0.0;
       string slipStr = "";

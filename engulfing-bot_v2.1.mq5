@@ -14,6 +14,7 @@
 #include "Include/Trailing/BreakevenTrail.mqh"
 #include "Include/Trailing/TrailingDispatcher.mqh"
 #include "Include/EntryTrigger.mqh"
+#include "Include/TimeExit.mqh"
 #include "Include/TesterMetric.mqh"
 CTrade trade;
 
@@ -54,6 +55,8 @@ input double BufferPoints = 200;     // Отступ от экстремума �
 input double MinSLPoints  = 1500;    // Минимальный SL, пункты (1500 = 1.50 USD)
 input double MaxSLPoints  = 3175;    // Максимальный SL, пункты (3175 = 3.175 USD)
 input double RiskReward = 1.5;     // TP = SL distance * RiskReward
+input bool   UseTakeProfit = true;  // false — без тейка: выход по SL или по времени (проверка входа)
+input int    TimeExitBars  = 0;     // Закрыть позицию через N баров TradingTimeframe (0 = выкл)
 
 // Параметры сессий — общие для всех ботов; у engulfing выбор сессий по умолчанию выключен.
 #define SESSION_DEFAULT_SELECTED      false
@@ -329,7 +332,7 @@ bool OpenEngulfingTrade(ENUM_ORDER_TYPE orderType, double entry,
    req.orderType = orderType;
    req.price     = entry;
    req.sl        = sl;
-   req.tp        = tp;
+   req.tp        = UseTakeProfit ? tp : 0.0;
    req.lot       = BrokerCalcLot(g_broker, RiskPercent,
                                  sl_dist / g_broker.adjustedPoint,
                                  LOT_BY_TICK_VALUE, MaxRiskOvershoot);
@@ -389,7 +392,7 @@ void PlaceLimitOrder(ENUM_ORDER_TYPE orderType, double price,
    req.orderType = orderType;
    req.price     = price;
    req.sl        = sl;
-   req.tp        = tp;
+   req.tp        = UseTakeProfit ? tp : 0.0;
    req.lot       = BrokerCalcLot(g_broker, RiskPercent,
                                  sl_dist / g_broker.adjustedPoint,
                                  LOT_BY_TICK_VALUE, MaxRiskOvershoot);
@@ -721,6 +724,9 @@ void OnDeinit(const int reason)
 
 void OnTick()
 {
+   // Выход по времени — и вне торговой сессии.
+   TimeExitManage(trade, MagicNumber, TradingTimeframe, TimeExitBars);
+
    const ENUM_SESSION_STATE session = SessionsOnTick();
    if(session == SESSION_JUST_EXITED && CloseOnSessionExit)
       HandleSessionExitClose();
