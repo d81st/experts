@@ -1,0 +1,12 @@
+{
+  "expert": "engulfing-bot_v2.1",
+  "symbols": ["XAUUSDm", "XAUUSD"],
+  "period": "M1",
+  "from": "2026.07.06",
+  "to": "2026.10.05",
+  "model": 4,
+  "delay": 200,
+  "deposit": 200,
+  "currency": "USD",
+  "leverage": 2000
+}
