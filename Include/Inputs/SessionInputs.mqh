@@ -12,7 +12,9 @@
 //|    SESSION_DEFAULT_CLOSE_ON_EXIT   — закрывать при выходе        |
 //|                                                                  |
 //|  Объявляет глобальные g_session_cfg/state и                      |
-//|  g_selected_cfg/state; бот вызывает SessionsSetup() в OnInit.    |
+//|  g_selected_cfg/state; бот вызывает SessionsSetup() в OnInit     |
+//|  и SessionsOnTick()/SessionsIsPreClose()/SessionsIsBoundary()    |
+//|  в OnTick.                                                       |
 //+------------------------------------------------------------------+
 #ifndef SESSIONINPUTS_MQH
 #define SESSIONINPUTS_MQH
@@ -63,7 +65,7 @@ input int           NYStartMinute               = 0;   // NewYork start UTC [0,5
 input int           NYEndHour                   = 21;  // NewYork end   UTC [0,23]
 input int           NYEndMinute                 = 0;   // NewYork end   UTC [0,59]
 
-input int           SessionGmtOffsetHours       = 0;        // GMT offset, ч [-12,14]
+input int           SessionGmtOffsetHours       = 0;        // GMT-смещение сервера, ч [-12,14] (в тестере используется всегда; Exness = 0)
 input ENUM_DST_MODE SessionDstMode              = DST_AUTO; // Режим DST
 
 input bool          CloseOnSessionExit          = SESSION_DEFAULT_CLOSE_ON_EXIT; // Закрывать позиции на выходе
@@ -162,6 +164,41 @@ bool SessionsSetup()
                (int)(nyS / 3600), (int)((nyS % 3600) / 60), (int)(nyE / 3600), (int)((nyE % 3600) / 60));
    return true;
   }
+
+//+------------------------------------------------------------------+
+//| Единый API сессий для OnTick.                                    |
+//|                                                                  |
+//| SessionsOnTick() — вызывать один раз в начале каждого тика:      |
+//|   SESSION_TRADING     — внутри разрешённых сессий (или выбор     |
+//|                         сессий выключен);                        |
+//|   SESSION_JUST_EXITED — первый тик после выхода из сессии        |
+//|                         (закрыть позиции, если CloseOnSessionExit);|
+//|   SESSION_OUTSIDE     — вне сессий, ничего не делать.            |
+//| SessionsIsPreClose()  — окно перед закрытием Американской        |
+//|                         (legacy): закрыть позиции.               |
+//| SessionsIsBoundary()  — окно у стыка сессий (legacy): не входить.|
+//+------------------------------------------------------------------+
+enum ENUM_SESSION_STATE
+  {
+   SESSION_TRADING     = 0,
+   SESSION_JUST_EXITED = 1,
+   SESSION_OUTSIDE     = 2
+  };
+
+ENUM_SESSION_STATE SessionsOnTick()
+  {
+   if(!UseSelectedSessions)
+      return SESSION_TRADING;
+   // edge-trigger: ровно один раз на переход inside → outside
+   if(SelectedSessionsDetectExit(g_selected_cfg, g_selected_state))
+      return SESSION_JUST_EXITED;
+   if(!SelectedSessionsIsInside(g_selected_cfg, g_selected_state))
+      return SESSION_OUTSIDE;
+   return SESSION_TRADING;
+  }
+
+bool SessionsIsPreClose() { return SessionIsAmericanPreClose(g_session_cfg, g_session_state); }
+bool SessionsIsBoundary() { return SessionIsBoundary(g_session_cfg, g_session_state); }
 
 #endif // SESSIONINPUTS_MQH
 //+------------------------------------------------------------------+

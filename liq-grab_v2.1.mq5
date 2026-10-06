@@ -458,7 +458,7 @@ void CheckEntrySignals()
 {
    ENUM_POSITION_TYPE dummy;
    if(PositionGuardHasOpen(MagicNumber, dummy)) return;
-   if(SessionIsBoundary(g_session_cfg, g_session_state)) return;
+   if(SessionsIsBoundary()) return;
 
    MqlRates rates[];
    ArraySetAsSeries(rates, true);
@@ -602,18 +602,12 @@ void HandleSessionExitClose()
 //+------------------------------------------------------------------+
 void OnTick()
 {
-   if(UseSelectedSessions)
-     {
-      if(SelectedSessionsDetectExit(g_selected_cfg, g_selected_state))
-        {
-         if(CloseOnSessionExit)
-            HandleSessionExitClose();
-         return;
-        }
-      if(!SelectedSessionsIsInside(g_selected_cfg, g_selected_state))
-         return;
-     }
-   if(SessionIsAmericanPreClose(g_session_cfg, g_session_state)) CloseAllOpenPositions();
+   const ENUM_SESSION_STATE session = SessionsOnTick();
+   if(session == SESSION_JUST_EXITED && CloseOnSessionExit)
+      HandleSessionExitClose();
+   if(session != SESSION_TRADING)
+      return;
+   if(SessionsIsPreClose()) CloseAllOpenPositions();
    CheckEntrySignals();
    CheckExitConditions();
    TrailingManage(g_trade_adapter, g_broker, MagicNumber, g_trail_cfg);

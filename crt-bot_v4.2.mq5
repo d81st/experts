@@ -77,9 +77,10 @@ input group "── Параметры входа ──"
 input ENUM_TIMEFRAMES TradingTimeframe = PERIOD_M1;
 
 input group "── Stop Loss ──"
-input double BufferPips = 200;
-input double MinSLPips  = 1525;
-input double MaxSLPips  = 3175;
+// Все расстояния ниже — в ПУНКТАХ (не пипсах): на золоте с 3 знаками 1000 пт = 1.00 USD цены.
+input double BufferPips = 200;   // Отступ от экстремума, пункты (200 = 0.20 USD)
+input double MinSLPips  = 1525;  // Мин. SL, пункты (1525 = 1.525 USD)
+input double MaxSLPips  = 3175;  // Макс. SL, пункты (3175 = 3.175 USD)
 
 input group "── Трейлинг ──"
 input ENUM_TRAILING_MODE_EX TrailingMode          = TRAILING_OFF_EX;
@@ -564,7 +565,7 @@ void CheckPendingEntry()
       return;
    }
 
-   if(SessionIsBoundary(g_session_cfg, g_session_state))
+   if(SessionsIsBoundary())
    {
       PrintFormat("🚫 Pending [%s] отменён: граница сессии", g_pending.patternName);
       if(EntryMode == ENTRY_LIMIT) CancelLimitOrder();
@@ -601,7 +602,7 @@ void CheckCRTEntry()
 {
    ENUM_POSITION_TYPE dummy;
    if(PositionGuardHasOpen(MagicNumber, dummy)) return;
-   if(SessionIsBoundary(g_session_cfg, g_session_state)) return;
+   if(SessionsIsBoundary()) return;
 
    MqlRates prev = g_rates[3];
    MqlRates imb  = g_rates[2];
@@ -759,28 +760,14 @@ void OnDeinit(const int reason)
 
 void OnTick()
 {
-   //── Selected Sessions Filter prelude ──
-   // Применяется ДО legacy SessionIsAmericanPreClose / SessionIsBoundary.
-   // При UseSelectedSessions = false prelude полностью
-   // пропускается и legacy путь работает без изменений.
-   if(UseSelectedSessions)
-   {
-      // Edge-trigger: ровно один раз на переход inside→outside.
-      // DetectExit внутри обновляет state.wasInsideOnPreviousTick.
-      if(SelectedSessionsDetectExit(g_selected_cfg, g_selected_state))
-      {
-         if(CloseOnSessionExit)
-            HandleSessionExitClose();
-         return;                              // пропуск legacy и логики входа
-      }
-      // Вне Selected_Union_Interval — никакой работы с рынком.
-      if(!SelectedSessionsIsInside(g_selected_cfg, g_selected_state))
-         return;
-      // Inside: продолжаем в legacy путь.
-   }
+   const ENUM_SESSION_STATE session = SessionsOnTick();
+   if(session == SESSION_JUST_EXITED && CloseOnSessionExit)
+      HandleSessionExitClose();
+   if(session != SESSION_TRADING)
+      return;
 
    //── Тиковая ветка ──
-   if(SessionIsAmericanPreClose(g_session_cfg, g_session_state))
+   if(SessionsIsPreClose())
    {
       CloseAllOpenPositions();
       return;

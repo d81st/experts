@@ -33,24 +33,25 @@ input ENUM_TIMEFRAMES TradingTimeframe = PERIOD_M1;
 input ENUM_ENTRY_MODE EntryMode        = ENTRY_SWEEP_RECLAIM;
 input bool RequireOppositeCandle       = true;   // Свеча [2] должна быть противоположной
 input bool RequireFullBodyEngulf       = true;   // Тело [1] должно полностью поглотить тело [2]
-input double RBOpenCloseTolerancePips  = 100;    // Допуск |open[1] - close[2]|, 0 = выключено
+// Все расстояния ниже — в ПУНКТАХ (не пипсах): на золоте с 3 знаками 1000 пт = 1.00 USD цены.
+input double RBOpenCloseTolerancePips  = 100;    // Допуск |open[1] - close[2]|, пункты, 0 = выключено
 
-input double MinBodyPips               = 0;      // Мин. тело свечи [1], 0 = выключено
+input double MinBodyPips               = 0;      // Мин. тело свечи [1], пункты, 0 = выключено
 input double R1BodyRatio               = 0.4;    // Мин. доля тела от диапазона [1], 0 = выключено
 input double R2BodyRatio               = 0.2;    // Мин. доля тела от диапазона [2], 0 = выключено
 input double R2ToR1SizeRatio           = 0.3;    // Мин. отношение тела [2] к телу [1], 0 = выключено
 
 
-input double MaxSpreadPips             = 0;      // Макс. спред, 0 = выключено
+input double MaxSpreadPips             = 0;      // Макс. спред, пункты, 0 = выключено (см. также MaxSpreadToSL)
 input int    TradeLockSeconds          = 3;      // Пауза после market-входа, сек, 0 = выключено
 
 input group "── Ожидание входа ──"
 input int MaxBarsToWait = 2;   // Макс. баров до отмены сигнала/ордера (0 = без ограничения)
 
 input group "── Stop Loss / Take Profit ──"
-input double BufferPips = 200;     // Отступ от экстремума свечей, пунктов
-input double MinSLPips  = 1500;    // Минимальный SL, пунктов
-input double MaxSLPips  = 3175;    // Максимальный SL, пунктов
+input double BufferPips = 200;     // Отступ от экстремума свечей, пункты (200 = 0.20 USD)
+input double MinSLPips  = 1500;    // Минимальный SL, пункты (1500 = 1.50 USD)
+input double MaxSLPips  = 3175;    // Максимальный SL, пункты (3175 = 3.175 USD)
 input double RiskReward = 1.5;     // TP = SL distance * RiskReward
 
 // Параметры сессий — общие для всех ботов; у engulfing выбор сессий по умолчанию выключен.
@@ -528,7 +529,7 @@ void CheckEngulfingEntry()
    //── 4: Поиск нового паттерна ──
    if(!g_pattern_active)
    {
-      if(SessionIsBoundary(g_session_cfg, g_session_state)) return;
+      if(SessionsIsBoundary()) return;
       if(!IsSpreadAllowed()) return;
 
       double body1 = MathAbs(rates[1].close - rates[1].open);
@@ -597,7 +598,7 @@ void CheckEngulfingEntry()
    // ── Шаг 5: тиковая обработка активного паттерна ──────────────────
    if(g_pattern_active && EntryMode != ENTRY_LIMIT)
    {
-      if(SessionIsBoundary(g_session_cfg, g_session_state)) return;
+      if(SessionsIsBoundary()) return;
       if(!IsSpreadAllowed()) return;
 
       double price = 0.0;
@@ -713,39 +714,21 @@ void OnDeinit(const int reason)
 
 void OnTick()
 {
-   // SessionFilter использует TimeCurrent() (см. модуль) — детерминированно в тестере.
-
-   // ── Selected Sessions Filter prelude ─────────────────
-   // При UseSelectedSessions = true фильтр применяется ДО legacy
-   // SessionIsAmericanPreClose / SessionIsBoundary.
-   //   1. DetectExit (edge-trigger inside→outside):
-   //      при CloseOnSessionExit=true вызываем HandleSessionExitClose
-   // и выходим из тика.
-   //   2. IsInside=false вне Selected_Union_Interval ⇒ ранний return:
-   //      ни поиска паттернов, ни ордеров, ни трейлинга.
-   // При UseSelectedSessions = false prelude пропускается и legacy
-   // путь работает без изменений и в прежнем порядке.
-   if(UseSelectedSessions)
-   {
-      if(SelectedSessionsDetectExit(g_selected_cfg, g_selected_state))
-      {
-         if(CloseOnSessionExit)
-            HandleSessionExitClose();
-         return;
-      }
-      if(!SelectedSessionsIsInside(g_selected_cfg, g_selected_state))
-         return;
-   }
+   const ENUM_SESSION_STATE session = SessionsOnTick();
+   if(session == SESSION_JUST_EXITED && CloseOnSessionExit)
+      HandleSessionExitClose();
+   if(session != SESSION_TRADING)
+      return;
 
    // 1. Закрыть позиции перед концом Американской сессии
-   if(SessionIsAmericanPreClose(g_session_cfg, g_session_state))
+   if(SessionsIsPreClose())
    {
       CloseAllOpenPositions();
       return;
    }
 
    // 2. Не открывать новые сделки на границах сессий
-   if(SessionIsBoundary(g_session_cfg, g_session_state))
+   if(SessionsIsBoundary())
    {
       // EA-prelude (pending+pattern) — здесь; bulk-cancel — в модуле.
       if(EntryMode == ENTRY_LIMIT) PositionGuardCancelAllPending(trade, MagicNumber);
@@ -757,7 +740,7 @@ void OnTick()
       return;
    }
 
-   // 3. Трейлинг (при OFF — no-op; SYNC — no-op до экспорта SyncTrailManage).
+   // 3. Трейлинг (режим TrailingMode).
    TrailingManage(g_trade_adapter, g_broker, MagicNumber, g_trail_cfg);
 
    // 4. Поиск паттерна → вход
