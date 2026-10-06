@@ -12,6 +12,11 @@
   "deposit": 200,
   "currency": "USD",
   "leverage": 2000,
+  "inputs": {
+    "MaxTradesPerDay": 0,
+    "PauseAfterLosses": 0,
+    "LossPauseMinutes": 60
+  },
   "variants": [
     {
       "name": "freq-off",

@@ -12,6 +12,10 @@
   "deposit": 200,
   "currency": "USD",
   "leverage": 2000,
+  "inputs": {
+    "TrailingMode": 1,
+    "TrailingStartFactor": 0.5
+  },
   "variants": [
     {
       "name": "be-off",

@@ -101,14 +101,20 @@ jobs:
             $variants = @($cfg.variants)
             if (-not $cfg.variants) { $variants = @([pscustomobject]@{ name = ""; inputs = $cfg.inputs }) }
             foreach ($var in $variants) {
-            $inputLines = @()
-            if ($var.inputs) {
-              foreach ($prop in $var.inputs.PSObject.Properties) {
-                $v = "$($prop.Value)"
-                if ($prop.Value -is [bool]) { $v = $v.ToLower() }
-                $inputLines += "$($prop.Name)=$v||$v||0||$v||N"
-              }
+            # Параметры варианта = общие "inputs" конфига, поверх — "inputs" варианта.
+            $merged = [ordered]@{}
+            foreach ($src in @($cfg.inputs, $var.inputs)) {
+              if ($src) { foreach ($prop in $src.PSObject.Properties) { $merged[$prop.Name] = $prop.Value } }
             }
+            $inputLines = @()
+            foreach ($k in $merged.Keys) {
+              $v = "$($merged[$k])"
+              if ($merged[$k] -is [bool]) { $v = $v.ToLower() }
+              $inputLines += "$k=$v||$v||0||$v||N"
+            }
+            # Тестер запоминает параметры прошлого прогона — стираем, чтобы не наследовать.
+            Get-ChildItem "$env:MT5_ROOT\MQL5\Profiles\Tester", "$env:MT5_ROOT\Tester" -Filter *.set -ErrorAction SilentlyContinue |
+              ForEach-Object { Write-Host "removing saved tester inputs: $($_.FullName)"; Remove-Item $_.FullName -Force }
             $suffix = ""
             if ($var.name) { $suffix = "_$($var.name)" }
             $done = $false
