@@ -1,0 +1,23 @@
+{
+  "symbols": [
+    "XAUUSDm",
+    "XAUUSD"
+  ],
+  "period": "M1",
+  "from": "2026.09.01",
+  "to": "2026.10.01",
+  "model": 4,
+  "delay": 200,
+  "deposit": 1000,
+  "currency": "USD",
+  "leverage": 2000,
+  "expert": "random-entry-bench",
+  "variants": [
+    {
+      "name": "s1-t8",
+      "inputs": {
+        "RandomSeed": 1
+      }
+    }
+  ]
+}
