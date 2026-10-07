@@ -1,0 +1,33 @@
+{
+  "expert": "archive/liq-grab_v2.1",
+  "symbols": [
+    "XAUUSDm",
+    "XAUUSD"
+  ],
+  "period": "M3",
+  "from": "2026.07.06",
+  "to": "2026.09.05",
+  "model": 4,
+  "delay": 200,
+  "deposit": 200,
+  "currency": "USD",
+  "leverage": 2000,
+  "inputs": {
+    "StopMode": 2,
+    "TPMode": 1,
+    "AtrSLMultiplier": 2.0
+  },
+  "variants": [
+    {
+      "name": "base",
+      "inputs": {
+        "StopMode": 0,
+        "TPMode": 0
+      }
+    },
+    {
+      "name": "atr2.0-tpliq",
+      "inputs": {}
+    }
+  ]
+}
