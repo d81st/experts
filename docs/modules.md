@@ -74,6 +74,8 @@
 | engulfing | поглощение 50% (внутри бота) | `EntryTrigger` | RR, `TimeExit`, трейлинг | сессии, `TrendFilter` |
 | fibo-zones | `AtrZigZag` + `FiboZones` | `ZoneOrders` | стоп за зоной, цель — линия 0/1, трейлинг | сессии |
 | **hybrid-fibo-day** | `DayLevels` + `FiboZones` | `ZoneOrders` | стоп за зоной, цель — граница дня | сессии |
+| **hybrid-fibo-pattern** | `AtrZigZag` + `FiboZones` (`FiboWave`) | `EngulfingPattern` / `CrtDetector` в зоне, вход по рынку | стоп за зоной или паттерном, цель — линия 0/1 | сессии |
+| **hybrid-asia-breakout** | `DayLevels` (коробка Азии) | касание или закрытие бара за коробкой (внутри бота), одна сделка в день | стоп за противоположной границей или серединой, RR, закрытие в заданный час | окно входа после Азии |
 | random-entry-bench | случайно | — | `TimeExit` | `TrendFilter` |
 | crt-push | `CrtDetector` | — (уведомления) | — | `Notify/*` |
 
