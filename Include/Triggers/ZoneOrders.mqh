@@ -394,8 +394,21 @@ void ZoneOrdersConfirmSlot(ZoneOrders &s, CTrade &tr, const BrokerContext &b, co
       return;
      }
 
+   const double farP = (z.dir == -1) ? MathMax(z.farP, s.touchExt[slot]) : MathMin(z.farP, s.touchExt[slot]);
+   ZoneOrdersEnterMarket(s, tr, b, c, slot, z, farP, rangeId, "подтверждению");
+  }
+
+//+------------------------------------------------------------------+
+//| ZoneOrdersEnterMarket — вход по рынку от зоны: стоп за точкой    |
+//| farP (дальний край зоны или экстремум касания) + отступ, цель —  |
+//| z.tp. Зона помечается отработанной. reason — для журнала         |
+//| («подтверждению», «свече CRT» …).                                |
+//+------------------------------------------------------------------+
+void ZoneOrdersEnterMarket(ZoneOrders &s, CTrade &tr, const BrokerContext &b, const ZoneOrdersConfig &c,
+                           const int slot, const FiboZone &z, const double farP, const int rangeId,
+                           const string reason)
+  {
    const double entry = (z.dir == 1) ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   const double farP  = (z.dir == -1) ? MathMax(z.farP, s.touchExt[slot]) : MathMin(z.farP, s.touchExt[slot]);
    bool widened;
    const double sl    = ZoneOrdersSL(c, b, z, entry, farP, widened);
    const double lot   = ZoneOrdersLot(c, b, entry, sl);
@@ -423,8 +436,8 @@ void ZoneOrdersConfirmSlot(ZoneOrders &s, CTrade &tr, const BrokerContext &b, co
       s.cntFilled[slot]++;
       if(widened)
          s.cntWidened[slot]++;
-      PrintFormat("✅ %s по подтверждению, зона %s | SL %.3f (%.2f USD) TP %.3f | диапазон #%d",
-                  z.dir == 1 ? "BUY" : "SELL", z.name, sl, MathAbs(entry - sl), req.tp, rangeId);
+      PrintFormat("✅ %s по %s, зона %s | SL %.3f (%.2f USD) TP %.3f | диапазон #%d",
+                  z.dir == 1 ? "BUY" : "SELL", reason, z.name, sl, MathAbs(entry - sl), req.tp, rangeId);
      }
    else if(!res.skipped)
       PrintFormat("❌ Вход в зоне %s не удался: %u %s", z.name, res.retcode, res.description);
