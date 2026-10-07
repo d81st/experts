@@ -1,0 +1,75 @@
+{
+  "symbols": [
+    "XAUUSDm",
+    "XAUUSD"
+  ],
+  "period": "M1",
+  "from": "2026.06.01",
+  "to": "2026.10.05",
+  "model": 4,
+  "delay": 200,
+  "deposit": 10000,
+  "currency": "USD",
+  "leverage": 2000,
+  "expert": "crt-bot_v4.2",
+  "inputs": {
+    "RiskPercent": 1.0,
+    "TrailingMode": 0,
+    "TradingTimeframe": 1,
+    "EntryMode": 0,
+    "MinSLPoints": 1525,
+    "MaxSLPoints": 3175
+  },
+  "variants": [
+    {
+      "name": "m1-sweep",
+      "inputs": {
+        "TradingTimeframe": 1,
+        "EntryMode": 0
+      }
+    },
+    {
+      "name": "m1-limit",
+      "inputs": {
+        "TradingTimeframe": 1,
+        "EntryMode": 2
+      }
+    },
+    {
+      "name": "m5-sweep",
+      "inputs": {
+        "TradingTimeframe": 5,
+        "EntryMode": 0,
+        "MinSLPoints": 2500,
+        "MaxSLPoints": 8000
+      }
+    },
+    {
+      "name": "m5-limit",
+      "inputs": {
+        "TradingTimeframe": 5,
+        "EntryMode": 2,
+        "MinSLPoints": 2500,
+        "MaxSLPoints": 8000
+      }
+    },
+    {
+      "name": "m15-sweep",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "EntryMode": 0,
+        "MinSLPoints": 4000,
+        "MaxSLPoints": 15000
+      }
+    },
+    {
+      "name": "m15-limit",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "EntryMode": 2,
+        "MinSLPoints": 4000,
+        "MaxSLPoints": 15000
+      }
+    }
+  ]
+}

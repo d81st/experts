@@ -1,0 +1,62 @@
+{
+  "expert": "engulfing-bot_v2.1",
+  "symbols": [
+    "XAUUSDm",
+    "XAUUSD"
+  ],
+  "period": "M1",
+  "from": "2026.01.05",
+  "to": "2026.10.05",
+  "model": 1,
+  "delay": 200,
+  "deposit": 10000,
+  "currency": "USD",
+  "leverage": 2000,
+  "inputs": {
+    "RiskPercent": 1.0,
+    "TrailingMode": 0,
+    "RiskReward": 2.0,
+    "UseSessionFilter": false,
+    "CloseOnSessionExit": false,
+    "UseAsianSession": false,
+    "UseSelectedSessions": false,
+    "UseLondonSession": false,
+    "UseNewYorkSession": false,
+    "TradingTimeframe": 15,
+    "TrendTimeframe": 16385,
+    "EntryMode": 0,
+    "MinSLPoints": 2000,
+    "MaxSLPoints": 20000,
+    "NYStartHour": 12,
+    "NYEndHour": 21,
+    "MaxBarsToWait": 2
+  },
+  "variants": [
+    {
+      "name": "m15-ny-market",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "TrendTimeframe": 16385,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000,
+        "EntryMode": 1,
+        "UseSelectedSessions": true,
+        "UseLondonSession": false,
+        "UseNewYorkSession": true
+      }
+    },
+    {
+      "name": "m15-lonny-market",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "TrendTimeframe": 16385,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000,
+        "EntryMode": 1,
+        "UseSelectedSessions": true,
+        "UseLondonSession": true,
+        "UseNewYorkSession": true
+      }
+    }
+  ]
+}
