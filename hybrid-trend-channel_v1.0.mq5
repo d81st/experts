@@ -61,7 +61,7 @@ input double           FadeRiskReward  = 1.5;   // Сделка против п�
 
 input group "── Фильтр NFP (по умолчанию выключен) ──"
 input int    AvoidNfpMinutes = 0;                // Не входить за N минут до и после NFP (0 = выкл.)
-input string NfpTimes        = NEWS_NFP_DEFAULT; // Время выходов, сервер: "ГГГГ.ММ.ДД ЧЧ:ММ;…"
+input string NfpExtraTimes   = "";               // Добавить даты к встроенным: "ГГГГ.ММ.ДД ЧЧ:ММ;…"
 
 input group "── Управление капиталом ──"
 input int    MagicNumber      = 71010;
@@ -147,7 +147,7 @@ int OnInit()
    g_regime.period    = RegimePeriod;
    g_regime.threshold = RegimeThreshold;
    if(AvoidNfpMinutes > 0)
-      NewsParseTimes(NfpTimes, g_nfp);
+      NewsParseTimes(NEWS_NFP_DEFAULT + ";" + NfpExtraTimes, g_nfp);
 
    PrintFormat("✅ Hybrid Trend Channel v1.0 | Magic:%d TF:%s | вход %d, выход %d баров | стоп %.1f×ATR(%d) | режим рынка:%s | NFP ±%d мин",
                MagicNumber, EnumToString(TradingTimeframe), EntryPeriod, ExitPeriod, StopAtrMult, AtrPeriod,

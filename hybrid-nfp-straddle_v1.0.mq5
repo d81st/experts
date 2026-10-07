@@ -5,7 +5,7 @@
 //|  один — второй снимается. Стоп — SLPoints от входа, тейк — RR.   |
 //|  Неисполненные ордера снимаются через ExpireMinutes после выхода,|
 //|  позиция закрывается через HoldMinutes.                          |
-//|  Время выходов — Context/NewsTimes (список во входном параметре).|
+//|  Время выходов — Context/NewsTimes (встроенный список + свои даты).|
 //|  Модули: Context/NewsTimes, Core/*, Exits/Trailing.              |
 //+------------------------------------------------------------------+
 #property strict
@@ -29,7 +29,8 @@ TrailingConfig g_trail_cfg;
 // Все расстояния — в пунктах: на золоте 1000 пт = 1.00 USD цены. Время — серверное.
 
 input group "── Новости ──"
-input string NfpTimes      = NEWS_NFP_DEFAULT;  // Время выходов: "ГГГГ.ММ.ДД ЧЧ:ММ;…"
+input bool   UseNfpDefault = true;  // Встроенные даты NFP 2025–2026
+input string NfpExtraTimes = "";    // Добавить даты: "ГГГГ.ММ.ДД ЧЧ:ММ;…" (время сервера)
 input int    MinutesBefore = 2;     // Выставить ордера за N минут до выхода
 input int    ExpireMinutes = 5;     // Снять неисполненные через N минут после выхода
 input int    HoldMinutes   = 60;    // Закрыть позицию через N минут после выхода (0 = не закрывать)
@@ -119,7 +120,7 @@ int OnInit()
    g_trail_cfg.breakevenOffset = BreakevenOffsetPoints;
    g_trail_cfg.trailStep       = SyncTrailStepPoints;
 
-   const int n = NewsParseTimes(NfpTimes, g_nfp);
+   const int n = NewsParseTimes((UseNfpDefault ? NEWS_NFP_DEFAULT + ";" : "") + NfpExtraTimes, g_nfp);
    PrintFormat("✅ Hybrid NFP Straddle v1.0 | Magic:%d | выходов в списке: %d | за %d мин, ±%.2f USD, стоп %.2f USD, RR %.1f, держать %d мин",
                MagicNumber, n, MinutesBefore, DistancePoints / 1000.0, SLPoints / 1000.0, RiskReward, HoldMinutes);
    return (n > 0) ? INIT_SUCCEEDED : INIT_PARAMETERS_INCORRECT;
