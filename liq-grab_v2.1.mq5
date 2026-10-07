@@ -80,7 +80,8 @@ input int TrendMaxAgeBars = 0; // Забыть тренд, если не под�
 
 input group "── Трейлинг ──"
 // Унифицированный TrailingDispatcher (OFF / BREAKEVEN / SYNC). Default = BREAKEVEN.
-// SYNC сейчас задокументированный no-op до экспорта SyncTrailManage.
+// Трейлинг сопровождает открытые позиции и вне торговой сессии
+// (если CloseOnSessionExit = false, позиция переживает выход из сессии).
 input ENUM_TRAILING_MODE_EX TrailingMode          = TRAILING_BREAKEVEN_EX; // Режим трейлинга
 input double                TrailingStartFactor   = 0.5;   // Множитель активации (profitPts >= factor * slDistPts)
 input double                BreakevenOffsetPoints = 175;   // Оффсет для BREAKEVEN (пункты)
@@ -606,12 +607,13 @@ void OnTick()
    const ENUM_SESSION_STATE session = SessionsOnTick();
    if(session == SESSION_JUST_EXITED && CloseOnSessionExit)
       HandleSessionExitClose();
+   // Трейлинг — и вне сессии: позиция может пережить выход (CloseOnSessionExit = false).
+   TrailingManage(g_trade_adapter, g_broker, MagicNumber, g_trail_cfg);
    if(session != SESSION_TRADING)
       return;
    if(SessionsIsPreClose()) CloseAllOpenPositions();
    CheckEntrySignals();
    CheckExitConditions();
-   TrailingManage(g_trade_adapter, g_broker, MagicNumber, g_trail_cfg);
 }
 //+------------------------------------------------------------------+
 

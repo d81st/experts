@@ -291,5 +291,28 @@ void BrokerEnforceMinSLDist(const BrokerContext   &ctx,
    // изменений. TP не трогается ни в одной ветке.
   }
 
+//+------------------------------------------------------------------+
+//| BrokerIsTradeSessionOpen — открыта ли сейчас торговая сессия     |
+//| символа по расписанию брокера (SymbolInfoSessionTrade).          |
+//| Золото закрывается каждый день примерно на час (около 21:00      |
+//| сервера): ордера в это время отклоняются с «market closed».      |
+//| Нет данных о расписании — считаем рынок открытым.                |
+//+------------------------------------------------------------------+
+bool BrokerIsTradeSessionOpen(void)
+  {
+   MqlDateTime dt;
+   TimeToStruct(TimeTradeServer(), dt);
+   const long sec = dt.hour * 3600 + dt.min * 60 + dt.sec;
+   datetime from = 0, to = 0;
+   bool any = false;
+   for(uint i = 0; SymbolInfoSessionTrade(_Symbol, (ENUM_DAY_OF_WEEK)dt.day_of_week, i, from, to); i++)
+     {
+      any = true;
+      if(sec >= (long)from && sec < (long)to)
+         return true;
+     }
+   return !any;
+  }
+
 #endif // BROKERADAPTER_MQH
 //+------------------------------------------------------------------+

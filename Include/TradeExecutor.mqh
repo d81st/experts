@@ -369,7 +369,9 @@ TradeResult TradeExecutorSend(CTrade              &tr,
 
    const bool isMarket = (req.orderType == ORDER_TYPE_BUY || req.orderType == ORDER_TYPE_SELL);
 
-   //--- STEP 7: Пауза после серии отказов + проверки market-ордера
+   //--- STEP 7: Рынок закрыт по расписанию, пауза после серии отказов, проверки market-ордера
+   if(!BrokerIsTradeSessionOpen())
+      return TradeExecutor_Skip(TRADE_RETCODE_MARKET_CLOSED, "рынок закрыт по расписанию брокера");
    if(TimeCurrent() < g_tradeExecutorPausedUntil)
       return TradeExecutor_Skip(TRADE_RETCODE_REJECT,
                                 StringFormat("пауза после %d отказов брокера до %s",
@@ -516,8 +518,9 @@ TradeResult TradeExecutorSend(CTrade              &tr,
                                      TradeJournal_D(requested), TradeJournal_D(spreadAtSend),
                                      TradeJournal_D(req.sl), TradeJournal_D(req.tp), latencyMs, used, rc, rd));
 
-      //--- серия отказов брокера → пауза отправки
-      g_tradeExecutorFailStreak++;
+      //--- серия отказов брокера → пауза отправки («рынок закрыт» — не отказ, а расписание)
+      if(rc != TRADE_RETCODE_MARKET_CLOSED)
+         g_tradeExecutorFailStreak++;
       if(g_tradeExecutorFailStreak >= TRADE_EXECUTOR_FAIL_STREAK)
         {
          g_tradeExecutorPausedUntil = TimeCurrent() + TRADE_EXECUTOR_PAUSE_SEC;
