@@ -14,6 +14,7 @@
 #include "Include/Exits/Trailing/BreakevenTrail.mqh"
 #include "Include/Exits/Trailing/TrailingDispatcher.mqh"
 #include "Include/Triggers/EntryTrigger.mqh"
+#include "Include/Triggers/EngulfingPattern.mqh"
 #include "Include/Exits/TimeExit.mqh"
 #include "Include/Core/TesterMetric.mqh"
 CTrade trade;
@@ -161,60 +162,15 @@ bool IsTradeRequestLocked()
 // TrendIsAllowed возвращает чистое bool без Print при отказе — решение о трассировке за EA.
 bool IsEngulfingPattern(const MqlRates &r2, const MqlRates &r1, int &dir)
 {
-   double body1 = MathAbs(r1.close - r1.open);
-   double body2 = MathAbs(r2.close - r2.open);
-
-   if(body1 <= 0.0 || body2 <= 0.0) return false;
-   if(MinBodyPoints > 0.0 && body1 / g_broker.adjustedPoint < MinBodyPoints) return false;
-
-   if(R1BodyRatio > 0.0)
-   {
-      double range = r1.high - r1.low;
-      if(range <= 0.0) return false;
-      if(body1 / range < R1BodyRatio) return false;
-   }
-
-   if(R2BodyRatio > 0.0)
-   {
-      double range = r2.high - r2.low;
-      if(range <= 0.0) return false;
-      if(body2 / range < R2BodyRatio) return false;
-   }
-
-   // ── тело [2] не должно быть слишком маленьким относительно [1] ──
-   if(R2ToR1SizeRatio > 0.0 && body2 / body1 < R2ToR1SizeRatio) return false;
-
-   if(body1 <= body2) return false;
-
-   if(RBOpenCloseTolerancePoints > 0.0)
-   {
-      double rb_gap_pts = MathAbs(r1.open - r2.close) / g_broker.adjustedPoint;
-      if(rb_gap_pts > RBOpenCloseTolerancePoints) return false;
-   }
-
-   bool c1_bull = r1.close > r1.open;
-   bool c1_bear = r1.close < r1.open;
-   bool c2_bull = r2.close > r2.open;
-   bool c2_bear = r2.close < r2.open;
-   if(!c1_bull && !c1_bear) return false;
-
-   if(RequireOppositeCandle)
-   {
-      if(c1_bull && !c2_bear) return false;
-      if(c1_bear && !c2_bull) return false;
-   }
-
-   if(RequireFullBodyEngulf)
-   {
-      double r1_body_low  = MathMin(r1.open, r1.close);
-      double r1_body_high = MathMax(r1.open, r1.close);
-      double r2_body_low  = MathMin(r2.open, r2.close);
-      double r2_body_high = MathMax(r2.open, r2.close);
-      if(r1_body_low > r2_body_low || r1_body_high < r2_body_high) return false;
-   }
-
-   dir = c1_bull ? 1 : -1; // Вариант A: bullish → BUY, bearish → SELL
-   return true;
+   EngulfingConfig c;
+   c.requireOpposite = RequireOppositeCandle;
+   c.requireFullBody = RequireFullBodyEngulf;
+   c.openCloseTolPts = RBOpenCloseTolerancePoints;
+   c.minBodyPts      = MinBodyPoints;
+   c.r1BodyRatio     = R1BodyRatio;
+   c.r2BodyRatio     = R2BodyRatio;
+   c.r2ToR1SizeRatio = R2ToR1SizeRatio;
+   return EngulfingDetect(r2, r1, c, g_broker.adjustedPoint, dir);
 }
 
 //+------------------------------------------------------------------+
