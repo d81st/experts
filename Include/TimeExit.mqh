@@ -16,7 +16,7 @@
 //| TimeExitManage — закрыть позиции (_Symbol, magic) старше         |
 //| bars × PeriodSeconds(tf). bars <= 0 — выключено.                 |
 //+------------------------------------------------------------------+
-void TimeExitManage(CTrade &trade, const long magic,
+void TimeExitManage(CTrade &tr, const long magic,
                     const ENUM_TIMEFRAMES tf, const int bars)
   {
    if(bars <= 0)
@@ -36,13 +36,13 @@ void TimeExitManage(CTrade &trade, const long magic,
          continue;
       if((long)(now - (datetime)PositionGetInteger(POSITION_TIME)) < maxAge)
          continue;
-      if(trade.PositionClose(ticket))
+      if(tr.PositionClose(ticket))
          PrintFormat("⏱ Выход по времени: #%I64u через %d бар(ов)", ticket, bars);
       else
         {
          lastFail = now;
          PrintFormat("❌ Выход по времени #%I64u не удался: %u %s",
-                     ticket, trade.ResultRetcode(), trade.ResultRetcodeDescription());
+                     ticket, tr.ResultRetcode(), tr.ResultRetcodeDescription());
         }
      }
   }
