@@ -12,15 +12,17 @@
 #property description "Fibo Zones v1.2 | зоны Фибоначчи у последней волны ATR-зигзага | лимитка или подтверждение"
 
 #include <Trade\Trade.mqh>
-#include "Include/TradeAdapter.mqh"
-#include "Include/BrokerAdapter.mqh"
-#include "Include/SessionFilter.mqh"
-#include "Include/PositionGuard.mqh"
-#include "Include/TradeExecutor.mqh"
-#include "Include/Trailing/SyncTrail.mqh"
-#include "Include/Trailing/BreakevenTrail.mqh"
-#include "Include/Trailing/TrailingDispatcher.mqh"
-#include "Include/TesterMetric.mqh"
+#include "Include/Core/TradeAdapter.mqh"
+#include "Include/Core/BrokerAdapter.mqh"
+#include "Include/Context/SessionFilter.mqh"
+#include "Include/Core/PositionGuard.mqh"
+#include "Include/Core/TradeExecutor.mqh"
+#include "Include/Exits/Trailing/SyncTrail.mqh"
+#include "Include/Exits/Trailing/BreakevenTrail.mqh"
+#include "Include/Exits/Trailing/TrailingDispatcher.mqh"
+#include "Include/Core/TesterMetric.mqh"
+#include "Include/Levels/AtrZigZag.mqh"
+#include "Include/Levels/FiboZones.mqh"
 CTrade trade;
 ITradeAdapter *g_trade_adapter = NULL;
 TrailingConfig g_trail_cfg;
@@ -80,7 +82,7 @@ input double                SyncTrailStepPoints   = 0.0;
 #define SESSION_DEFAULT_SELECTED      false
 #define SESSION_DEFAULT_LONDON        false
 #define SESSION_DEFAULT_CLOSE_ON_EXIT false
-#include "Include/Inputs/SessionInputs.mqh"
+#include "Include/Context/SessionInputs.mqh"
 
 //── Состояние ─────────────────────────────────────────────────────────
 
@@ -92,12 +94,8 @@ int           g_atrHandle = INVALID_HANDLE;
 datetime      g_lastBar   = 0;
 bool          g_zzReady   = false;
 
-// ATR-зигзаг: 0 — направление не определено, +1 — после минимума ищем максимум, -1 — наоборот.
-int      g_zzDir    = 0;
-double   g_candHi   = 0.0, g_candLo = 0.0;
-datetime g_candHiT  = 0,   g_candLoT = 0;
-double   g_pivHi    = 0.0, g_pivLo = 0.0;
-datetime g_pivHiT   = 0,   g_pivLoT = 0;
+// ATR-зигзаг (Include/Levels/AtrZigZag.mqh): волны и подтверждённые точки разворота.
+AtrZigZag g_zz;
 
 // Диапазон — последняя подтверждённая волна.
 struct FiboRange
@@ -110,15 +108,7 @@ struct FiboRange
   };
 FiboRange g_range;
 
-// Сделка зоны: направление, вход, стоп, тейк.
-struct FiboZone
-  {
-   int    dir;      // +1 покупка, -1 продажа
-   double nearP;    // ближний край (вход лимиткой)
-   double farP;     // дальний край
-   double tp;
-   string name;
-  };
+// Сделка зоны (FiboZone) — в Include/Levels/FiboZones.mqh.
 
 bool     g_used[FIBO_SLOTS];      // зона уже торговалась в этом диапазоне
 ulong    g_ticket[FIBO_SLOTS];    // тикет лимитки
@@ -164,48 +154,37 @@ bool BuildZone(const int slot, FiboZone &z)
 
    if(slot == 7)
      {
-      if(!g_zzReady || g_zzDir == 0 || g_pivHiT == 0 || g_pivLoT == 0)
+      if(!g_zzReady || g_zz.dir == 0 || !AtrZigZagHasRange(g_zz))
          return false;
-      if(g_zzDir == 1)   // после минимума волна идёт вверх: покупка на откате
-        {
-         const double W = g_candHi - g_pivLo;
-         if(W <= 0.0 || W < MinRangePoints * g_broker.adjustedPoint)
-            return false;
-         z.dir = 1; z.nearP = g_candHi - nearR * W; z.farP = g_candHi - farR * W; z.tp = g_candHi;
-        }
-      else
-        {
-         const double W = g_pivHi - g_candLo;
-         if(W <= 0.0 || W < MinRangePoints * g_broker.adjustedPoint)
-            return false;
-         z.dir = -1; z.nearP = g_candLo + nearR * W; z.farP = g_candLo + farR * W; z.tp = g_candLo;
-        }
+      // После минимума волна идёт вверх (покупка на откате), после максимума — вниз.
+      const double start = (g_zz.dir == 1) ? g_zz.pivLo  : g_zz.pivHi;
+      const double end   = (g_zz.dir == 1) ? g_zz.candHi : g_zz.candLo;
+      const double W     = (g_zz.dir == 1) ? end - start : start - end;
+      if(W <= 0.0 || W < MinRangePoints * g_broker.adjustedPoint)
+         return false;
+      FiboRetraceZone(start, end, nearR, farR, z);
       z.name = "откат текущей " + z.name;
       return true;
      }
 
    if(!g_range.valid)
       return false;
-   const double R = g_range.hi - g_range.lo;
    if(slot == 0)
      {
-      z.dir = g_range.waveDir;
-      if(z.dir == 1)
-        { z.nearP = g_range.hi - nearR * R; z.farP = g_range.hi - farR * R; z.tp = g_range.hi; }
+      if(g_range.waveDir == 1)
+         FiboRetraceZone(g_range.lo, g_range.hi, nearR, farR, z);
       else
-        { z.nearP = g_range.lo + nearR * R; z.farP = g_range.lo + farR * R; z.tp = g_range.lo; }
+         FiboRetraceZone(g_range.hi, g_range.lo, nearR, farR, z);
       z.name = "откат подтв. " + z.name;
      }
    else if(slot % 2 == 1)   // сверху: продажа на разворот, тейк — максимум диапазона
      {
-      z.dir = -1;
-      z.nearP = g_range.lo + nearR * R; z.farP = g_range.lo + farR * R; z.tp = g_range.hi;
+      FiboExtZone(g_range.hi, g_range.lo, true, nearR, farR, z);
       z.name = "сверху " + z.name;
      }
    else                     // снизу: покупка на разворот, тейк — минимум диапазона
      {
-      z.dir = 1;
-      z.nearP = g_range.hi - nearR * R; z.farP = g_range.hi - farR * R; z.tp = g_range.lo;
+      FiboExtZone(g_range.hi, g_range.lo, false, nearR, farR, z);
       z.name = "снизу " + z.name;
      }
    return true;
@@ -238,7 +217,7 @@ void CountRiskSkip(const int slot, const FiboZone &z, const double entry, const 
 // Слот 7: экстремум текущей волны сменился — прежняя зона больше не актуальна.
 void SyncLiveSlot()
   {
-   const datetime key = (g_zzDir == 1) ? g_candHiT : (g_zzDir == -1 ? g_candLoT : 0);
+   const datetime key = (g_zz.dir == 1) ? g_zz.candHiT : (g_zz.dir == -1 ? g_zz.candLoT : 0);
    if(key == g_liveKey)
       return;
    g_liveKey = key;
@@ -348,18 +327,17 @@ void ResetSlots()
      }
   }
 
-void ConfirmPivot(const bool isHigh, const double price, const datetime t, const bool log)
+// Подтверждена новая точка разворота: диапазон — последняя подтверждённая волна.
+void OnPivot(const bool log)
   {
-   if(isHigh) { g_pivHi = price; g_pivHiT = t; }
-   else       { g_pivLo = price; g_pivLoT = t; }
-   if(g_pivHiT == 0 || g_pivLoT == 0)
+   if(!AtrZigZagHasRange(g_zz))
       return;
 
    g_range.id++;
-   g_range.hi      = g_pivHi;
-   g_range.lo      = g_pivLo;
-   g_range.waveDir = (g_pivLoT < g_pivHiT) ? 1 : -1;
-   g_range.valid   = (g_pivHi - g_pivLo) >= MinRangePoints * g_broker.adjustedPoint;
+   g_range.hi      = g_zz.pivHi;
+   g_range.lo      = g_zz.pivLo;
+   g_range.waveDir = AtrZigZagWaveDir(g_zz);
+   g_range.valid   = (g_zz.pivHi - g_zz.pivLo) >= MinRangePoints * g_broker.adjustedPoint;
    ResetSlots();
    if(!log)
       return;
@@ -379,29 +357,8 @@ void ZigZagStep(const int shift, const bool log)
    const double   l  = iLow(_Symbol, TradingTimeframe, shift);
    const datetime t  = iTime(_Symbol, TradingTimeframe, shift);
    const double   th = ZigZagAtrMult * atr[0];
-
-   if(g_zzDir == 0)
-     {
-      if(g_candHiT == 0 || h > g_candHi) { g_candHi = h; g_candHiT = t; }
-      if(g_candLoT == 0 || l < g_candLo) { g_candLo = l; g_candLoT = t; }
-      if(g_candHiT < t && g_candHi - l >= th)
-        { ConfirmPivot(true, g_candHi, g_candHiT, log); g_zzDir = -1; g_candLo = l; g_candLoT = t; }
-      else if(g_candLoT < t && h - g_candLo >= th)
-        { ConfirmPivot(false, g_candLo, g_candLoT, log); g_zzDir = 1; g_candHi = h; g_candHiT = t; }
-      return;
-     }
-   if(g_zzDir == 1)
-     {
-      if(h > g_candHi) { g_candHi = h; g_candHiT = t; }
-      else if(g_candHi - l >= th)
-        { ConfirmPivot(true, g_candHi, g_candHiT, log); g_zzDir = -1; g_candLo = l; g_candLoT = t; }
-     }
-   else
-     {
-      if(l < g_candLo) { g_candLo = l; g_candLoT = t; }
-      else if(h - g_candLo >= th)
-        { ConfirmPivot(false, g_candLo, g_candLoT, log); g_zzDir = 1; g_candHi = h; g_candHiT = t; }
-     }
+   if(AtrZigZagStep(g_zz, h, l, t, th) != 0)
+      OnPivot(log);
   }
 
 // Прогрев по истории (без журнала), затем по одному закрытому бару.
@@ -666,6 +623,7 @@ int OnInit()
      }
    SessionsSetup();
 
+   AtrZigZagReset(g_zz);
    g_range.valid = false;
    g_range.id    = 0;
    for(int i = 0; i < FIBO_SLOTS; i++)

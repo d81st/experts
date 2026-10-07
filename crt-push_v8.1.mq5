@@ -7,10 +7,10 @@
 //  ─── АРХИТЕКТУРА ──────────────────────────────────────────────────
 //
 //  Тонкий оркестратор поверх трёх stateless-модулей:
-//    Include/CrtDetector.mqh      — чистая функция детекции паттерна
-//    Include/MultiTfScheduler.mqh — управление активным набором ТФ,
+//    Include/Levels/CrtDetector.mqh      — чистая функция детекции паттерна
+//    Include/Notify/MultiTfScheduler.mqh — управление активным набором ТФ,
 //                                   антидубль по бару, GlobalVariable
-//    Include/PushNotifier.mqh     — формирование сообщения, HUD,
+//    Include/Notify/PushNotifier.mqh     — формирование сообщения, HUD,
 //                                   диагностика, SendNotification
 //
 //  ─── ЛОГИКА ПАТТЕРНОВ ─────────────────────────────────────────────
@@ -37,9 +37,9 @@
 #property strict
 #property description "RB+CRT Notification Bot v8.1 | Multi-TF | модульная архитектура"
 
-#include "Include/CrtDetector.mqh"
-#include "Include/MultiTfScheduler.mqh"
-#include "Include/PushNotifier.mqh"
+#include "Include/Levels/CrtDetector.mqh"
+#include "Include/Notify/MultiTfScheduler.mqh"
+#include "Include/Notify/PushNotifier.mqh"
 
 input group "── Анализ ──"
 input double ImbBodyRatio        = 0.40;  // Мин. доля тела IMB от полного диапазона

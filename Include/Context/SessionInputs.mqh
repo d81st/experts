@@ -19,7 +19,7 @@
 #ifndef SESSIONINPUTS_MQH
 #define SESSIONINPUTS_MQH
 
-#include "../SessionFilter.mqh"
+#include "SessionFilter.mqh"
 
 #ifndef SESSION_DEFAULT_WINDOW_MINUTES
 #define SESSION_DEFAULT_WINDOW_MINUTES 5

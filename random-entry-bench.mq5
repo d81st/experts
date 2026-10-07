@@ -10,12 +10,12 @@
 #property description "Исследовательский эталон: случайные входы (не для торговли)"
 
 #include <Trade\Trade.mqh>
-#include "Include/BrokerAdapter.mqh"
-#include "Include/TrendFilter.mqh"
-#include "Include/PositionGuard.mqh"
-#include "Include/TradeExecutor.mqh"
-#include "Include/TimeExit.mqh"
-#include "Include/TesterMetric.mqh"
+#include "Include/Core/BrokerAdapter.mqh"
+#include "Include/Context/TrendFilter.mqh"
+#include "Include/Core/PositionGuard.mqh"
+#include "Include/Core/TradeExecutor.mqh"
+#include "Include/Exits/TimeExit.mqh"
+#include "Include/Core/TesterMetric.mqh"
 
 input group "── Случайный вход ──"
 input int             RandomSeed       = 1;     // Зерно генератора: разные зёрна — разные выборки

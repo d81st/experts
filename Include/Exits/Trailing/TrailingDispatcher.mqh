@@ -17,8 +17,8 @@
 #ifndef TRAILINGDISPATCHER_MQH
 #define TRAILINGDISPATCHER_MQH
 
-#include "../TradeAdapter.mqh"
-#include "../BrokerAdapter.mqh"
+#include "../../Core/TradeAdapter.mqh"
+#include "../../Core/BrokerAdapter.mqh"
 #include "SyncTrailManager.mqh"
 #include "BreakevenTrail.mqh"
 
