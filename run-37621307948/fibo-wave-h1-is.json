@@ -1,0 +1,40 @@
+{
+  "expert": "fibo-zones_v1.1",
+  "symbols": [
+    "XAUUSDm",
+    "XAUUSD"
+  ],
+  "period": "M1",
+  "model": 4,
+  "delay": 200,
+  "deposit": 1000,
+  "currency": "USD",
+  "leverage": 2000,
+  "inputs": {
+    "TradingTimeframe": 30,
+    "EntryMode": 0,
+    "RiskPercent": 3.0,
+    "UseZoneExt3": false,
+    "ZigZagAtrMult": 6.0
+  },
+  "from": "2026.01.05",
+  "to": "2026.05.29",
+  "variants": [
+    {
+      "name": "h1-k6-limit",
+      "inputs": {
+        "TradingTimeframe": 16385,
+        "ZigZagAtrMult": 6.0,
+        "EntryMode": 0
+      }
+    },
+    {
+      "name": "h1-k6-confirm",
+      "inputs": {
+        "TradingTimeframe": 16385,
+        "ZigZagAtrMult": 6.0,
+        "EntryMode": 1
+      }
+    }
+  ]
+}
