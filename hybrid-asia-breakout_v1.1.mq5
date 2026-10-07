@@ -1,15 +1,19 @@
 ﻿//+------------------------------------------------------------------+
-//|                                    hybrid-asia-breakout_v1.0.mq5 |
+//|                                    hybrid-asia-breakout_v1.1.mq5 |
 //|  Пробой диапазона Азии на открытии Лондона (opening range        |
 //|  breakout): коробка — максимум/минимум окна Азии (Levels/        |
 //|  DayLevels); в окне входа первая сделка дня по пробою коробки —  |
 //|  по касанию или по закрытию бара за ней; стоп — за противопо-    |
 //|  ложной границей или серединой коробки; тейк — RR от стопа;      |
 //|  незакрытая позиция закрывается в CloseHour.                     |
-//|  Модули: Levels/DayLevels, Core/*, Exits/Trailing.               |
+//|  v1.1: подключаемый режим рынка (Context/MarketRegime, выключен  |
+//|  по умолчанию): только в тренде или во флэте — против пробоя     |
+//|  (стоп за экстремумом пробоя, тейк RR).                          |
+//|  Модули: Levels/DayLevels, Context/MarketRegime, Core/*,         |
+//|  Exits/Trailing.                                                 |
 //+------------------------------------------------------------------+
 #property strict
-#property description "Hybrid Asia Breakout v1.0 | пробой диапазона Азии на открытии Лондона"
+#property description "Hybrid Asia Breakout v1.1 | пробой диапазона Азии на открытии Лондона + режим рынка"
 
 #include <Trade\Trade.mqh>
 #include "Include/Core/TradeAdapter.mqh"
@@ -21,6 +25,7 @@
 #include "Include/Exits/Trailing/TrailingDispatcher.mqh"
 #include "Include/Core/TesterMetric.mqh"
 #include "Include/Levels/DayLevels.mqh"
+#include "Include/Context/MarketRegime.mqh"
 CTrade trade;
 ITradeAdapter *g_trade_adapter = NULL;
 TrailingConfig g_trail_cfg;
@@ -59,6 +64,12 @@ input double MinSLPoints    = 1000;    // Мин. стоп: более близ�
 input double RiskReward     = 1.5;     // Тейк = RiskReward × стоп (0 = без тейка)
 input int    CloseHour      = 20;      // Закрыть позицию в этот час (0 = не закрывать)
 
+input group "── Режим рынка (по умолчанию выключен) ──"
+input ENUM_REGIME_MODE RegimeMode      = REGIME_OFF;  // Флэт: фильтр — день пропускаем, переключатель — против пробоя
+input ENUM_TIMEFRAMES  RegimeTimeframe = PERIOD_H1;
+input int              RegimePeriod    = 24;    // Баров для коэффициента эффективности
+input double           RegimeThreshold = 0.30;  // ER ≥ порога — тренд, ниже — флэт
+
 input group "── Управление капиталом ──"
 input int    MagicNumber      = 71007;
 input double RiskPercent      = 3.0;
@@ -75,6 +86,8 @@ input double                SyncTrailStepPoints   = 0.0;
 //── Состояние ─────────────────────────────────────────────────────────
 
 BrokerContext g_broker;
+MarketRegimeConfig g_regime;
+int           g_cntRegimeSkip = 0, g_cntFade = 0;
 datetime      g_lastBar  = 0;
 datetime      g_boxDay   = 0;      // день, для которого построена коробка
 bool          g_boxOk    = false;  // коробка годна для торговли сегодня
@@ -114,13 +127,45 @@ void UpdateBox(const datetime now)
                r.hi, r.lo, r.hi - r.lo, g_boxOk ? "" : " — размер вне пределов, день пропущен");
   }
 
-// Вход по пробою: dir +1 — вверх (покупка), -1 — вниз (продажа).
-void EnterBreakout(const int dir)
+// Экстремум пробоя после конца Азии (по минуткам и текущей цене): для сделки dir против
+// пробоя стоп ставится за ним — над максимумом для продажи, под минимумом для покупки.
+double BreakExtreme(const int dir)
   {
+   const datetime from = g_boxDay + AsiaEndHour * 3600;
+   double v[];
+   if(dir == -1)
+     {
+      double ext = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      if(CopyHigh(_Symbol, PERIOD_M1, from, TimeCurrent(), v) > 0)
+         ext = MathMax(ext, v[ArrayMaximum(v)]);
+      return MathMax(ext, g_boxHi);
+     }
+   double ext = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   if(CopyLow(_Symbol, PERIOD_M1, from, TimeCurrent(), v) > 0)
+      ext = MathMin(ext, v[ArrayMinimum(v)]);
+   return MathMin(ext, g_boxLo);
+  }
+
+// Пробой sig: +1 — вверх, -1 — вниз. Режим рынка решает направление сделки:
+// по пробою, против него (флэт в режиме переключателя) или пропуск дня.
+void EnterBreakout(const int sig)
+  {
+   const int dir = MarketRegimeApply(g_regime, sig);
+   if(dir == 0)
+     {
+      g_traded = true;
+      g_cntRegimeSkip++;
+      PrintFormat("⏭ Пробой %s пропущен: флэт (ER %.2f < %.2f)", sig == 1 ? "вверх" : "вниз",
+                  MarketRegimeER(g_regime), RegimeThreshold);
+      return;
+     }
+   const bool fade = (dir != sig);
    const double pt    = g_broker.adjustedPoint;
    const double entry = (dir == 1) ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double anchor;
-   if(StopMode == BREAKOUT_SL_MID)
+   if(fade)
+      anchor = BreakExtreme(dir);
+   else if(StopMode == BREAKOUT_SL_MID)
       anchor = (g_boxHi + g_boxLo) / 2.0;
    else
       anchor = (dir == 1) ? g_boxLo : g_boxHi;
@@ -146,15 +191,18 @@ void EnterBreakout(const int dir)
    req.sl              = sl;
    req.tp              = tp;
    req.lot             = lot;
-   req.comment         = StringFormat("ASIA_BO %s", dir == 1 ? "up" : "down");
+   req.comment         = StringFormat("ASIA_BO %s%s", sig == 1 ? "up" : "down", fade ? " fade" : "");
    req.maxSpreadToSL   = MaxSpreadToSL;
    req.maxSlippageToSL = MaxSlippageToSL;
    const TradeResult res = TradeExecutorSend(trade, g_broker, req);
    if(res.success)
      {
       g_cntTrades++;
-      PrintFormat("🚀 Пробой %s коробки Азии | вход %.3f SL %.3f (%.2f USD) TP %.3f",
-                  dir == 1 ? "вверх" : "вниз", entry, sl, dist, tp);
+      if(fade)
+         g_cntFade++;
+      PrintFormat("🚀 Пробой %s коробки Азии%s | %s вход %.3f SL %.3f (%.2f USD) TP %.3f",
+                  sig == 1 ? "вверх" : "вниз", fade ? " — флэт, против пробоя" : "",
+                  dir == 1 ? "BUY" : "SELL", entry, sl, dist, tp);
      }
    else if(res.skipped)
       g_traded = false;   // фильтр (спред, пауза) — попробуем на следующем тике/баре
@@ -175,8 +223,12 @@ int OnInit()
    g_trail_cfg.startFactor     = TrailingStartFactor;
    g_trail_cfg.breakevenOffset = BreakevenOffsetPoints;
    g_trail_cfg.trailStep       = SyncTrailStepPoints;
+   g_regime.mode      = RegimeMode;
+   g_regime.tf        = RegimeTimeframe;
+   g_regime.period    = RegimePeriod;
+   g_regime.threshold = RegimeThreshold;
 
-   PrintFormat("✅ Hybrid Asia Breakout v1.0 | Magic:%d | Азия %d–%d | вход до %d:00 %s | стоп:%s | RR %.2f | закрытие %d:00",
+   PrintFormat("✅ Hybrid Asia Breakout v1.1 | Magic:%d | Азия %d–%d | вход до %d:00 %s | стоп:%s | RR %.2f | закрытие %d:00",
                MagicNumber, AsiaStartHour, AsiaEndHour, EntryEndHour,
                EntryMode == BREAKOUT_TOUCH ? "по касанию" : "по закрытию " + EnumToString(TradingTimeframe),
                StopMode == BREAKOUT_SL_MID ? "середина" : "противоположная граница", RiskReward, CloseHour);
@@ -187,6 +239,8 @@ void OnDeinit(const int reason)
   {
    PrintFormat("📊 Дней: %d | пропущено по размеру коробки: %d | сделок: %d | без пробоя в окне: %d | закрыто по времени: %d",
                g_cntDays, g_cntSkipSize, g_cntTrades, g_cntNoBreak, g_cntTimeClose);
+   if(RegimeMode != REGIME_OFF)
+      PrintFormat("📊 Режим рынка: пропущено во флэте %d | против пробоя %d", g_cntRegimeSkip, g_cntFade);
    if(g_trade_adapter != NULL)
      {
       delete g_trade_adapter;

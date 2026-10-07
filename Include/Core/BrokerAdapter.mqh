@@ -277,12 +277,12 @@ void BrokerEnforceMinSLDist(const BrokerContext   &ctx,
       return;
 
    //--- подтянуть sl до min-дистанции, сохранив направление
-   if(orderType == ORDER_TYPE_BUY || orderType == ORDER_TYPE_BUY_LIMIT)
+   if(orderType == ORDER_TYPE_BUY || orderType == ORDER_TYPE_BUY_LIMIT || orderType == ORDER_TYPE_BUY_STOP)
      {
       // BUY/BUY_LIMIT: sl должен быть НИЖЕ entry
       sl = entry - ctx.minBrokerDistance;
      }
-   else if(orderType == ORDER_TYPE_SELL || orderType == ORDER_TYPE_SELL_LIMIT)
+   else if(orderType == ORDER_TYPE_SELL || orderType == ORDER_TYPE_SELL_LIMIT || orderType == ORDER_TYPE_SELL_STOP)
      {
       // SELL/SELL_LIMIT: sl должен быть ВЫШЕ entry
       sl = entry + ctx.minBrokerDistance;

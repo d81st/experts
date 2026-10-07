@@ -38,7 +38,8 @@
 //| и нормализуются по `_Digits` внутри TradeExecutorSend.           |
 //|                                                                  |
 //|   orderType — один из {ORDER_TYPE_BUY, ORDER_TYPE_SELL,          |
-//|               ORDER_TYPE_BUY_LIMIT, ORDER_TYPE_SELL_LIMIT}. Иные |
+//|               ORDER_TYPE_BUY_LIMIT, ORDER_TYPE_SELL_LIMIT,       |
+//|               ORDER_TYPE_BUY_STOP, ORDER_TYPE_SELL_STOP}. Иные   |
 //|               значения отвергаются с retcode                     |
 //|               TRADE_RETCODE_INVALID.                             |
 //|   price     — для market: целевая цена входа (Ask/Bid стратегией);
@@ -136,6 +137,7 @@ struct TradeResult
 //         INVALID_STOPS при нарушении.
 //      6. Fallback limit→market:
 //         BUY_LIMIT + Ask<=price → BUY; SELL_LIMIT + Bid>=price → SELL.
+//         Стоп-ордера: BUY_STOP + Ask>=price → BUY; SELL_STOP + Bid<=price → SELL.
 //         Переключение видимо caller'у (req — не-const ref).
 //      7. Market: торговля разрешена, спред ≤ maxSpreadToSL × SL,
 //         OrderCheck (маржа, объём). Пауза после серии отказов.
@@ -279,7 +281,9 @@ TradeResult TradeExecutorSend(CTrade              &tr,
    if(req.orderType != ORDER_TYPE_BUY        &&
       req.orderType != ORDER_TYPE_SELL       &&
       req.orderType != ORDER_TYPE_BUY_LIMIT  &&
-      req.orderType != ORDER_TYPE_SELL_LIMIT)
+      req.orderType != ORDER_TYPE_SELL_LIMIT &&
+      req.orderType != ORDER_TYPE_BUY_STOP   &&
+      req.orderType != ORDER_TYPE_SELL_STOP)
      {
       result.success     = false;
       result.ticket      = 0;
@@ -366,6 +370,17 @@ TradeResult TradeExecutorSend(CTrade              &tr,
       const double priceN = req.price;
       if(bidN >= priceN) req.orderType = ORDER_TYPE_SELL;
      }
+   else if(req.orderType == ORDER_TYPE_BUY_STOP)
+     {
+      // Стоп-ордер: цена уже на уровне или за ним — вход по рынку.
+      const double askN = NormalizeDouble(SymbolInfoDouble(_Symbol, SYMBOL_ASK), _Digits);
+      if(askN >= req.price) req.orderType = ORDER_TYPE_BUY;
+     }
+   else if(req.orderType == ORDER_TYPE_SELL_STOP)
+     {
+      const double bidN = NormalizeDouble(SymbolInfoDouble(_Symbol, SYMBOL_BID), _Digits);
+      if(bidN <= req.price) req.orderType = ORDER_TYPE_SELL;
+     }
 
    const bool isMarket = (req.orderType == ORDER_TYPE_BUY || req.orderType == ORDER_TYPE_SELL);
 
@@ -438,6 +453,14 @@ TradeResult TradeExecutorSend(CTrade              &tr,
             sent = tr.SellLimit(req.lot, req.price, _Symbol, req.sl, req.tp,
                                 ORDER_TIME_GTC, 0, req.comment);
             break;
+         case ORDER_TYPE_BUY_STOP:
+            sent = tr.BuyStop(req.lot, req.price, _Symbol, req.sl, req.tp,
+                              ORDER_TIME_GTC, 0, req.comment);
+            break;
+         case ORDER_TYPE_SELL_STOP:
+            sent = tr.SellStop(req.lot, req.price, _Symbol, req.sl, req.tp,
+                               ORDER_TIME_GTC, 0, req.comment);
+            break;
          default:
             // unreachable (STEP 1 validates), but be defensive
             result.success     = false;
@@ -474,6 +497,8 @@ TradeResult TradeExecutorSend(CTrade              &tr,
          case ORDER_TYPE_SELL:       dirLabel = "SELL";       break;
          case ORDER_TYPE_BUY_LIMIT:  dirLabel = "BUY_LIMIT";  break;
          case ORDER_TYPE_SELL_LIMIT: dirLabel = "SELL_LIMIT"; break;
+         case ORDER_TYPE_BUY_STOP:   dirLabel = "BUY_STOP";   break;
+         case ORDER_TYPE_SELL_STOP:  dirLabel = "SELL_STOP";  break;
          default:                    dirLabel = "?";          break;
         }
       const double slPoints = (broker.adjustedPoint > 0.0)
@@ -499,7 +524,8 @@ TradeResult TradeExecutorSend(CTrade              &tr,
                   dirLabel, _Symbol, req.lot, slPoints, tpPoints, rr, slipStr);
 
       const double fill = (isMarket && tr.ResultPrice() > 0.0) ? tr.ResultPrice() : req.price;
-      const double slip = (req.orderType == ORDER_TYPE_BUY || req.orderType == ORDER_TYPE_BUY_LIMIT)
+      const double slip = (req.orderType == ORDER_TYPE_BUY || req.orderType == ORDER_TYPE_BUY_LIMIT ||
+                           req.orderType == ORDER_TYPE_BUY_STOP)
                           ? fill - requested : requested - fill;
       TradeJournalWrite(StringFormat("ENTRY;%I64d;%I64d;%s;%.2f;%s;%s;%s;%s;%s;%s;%.1f;%d;;%u;%s",
                                      (long)tr.RequestMagic(), (long)result.ticket, dirLabel, req.lot,
