@@ -72,6 +72,7 @@ jobs:
             if ($text -match '(\d+)\s+warnings?') { $warn = [int]$Matches[1] }
             $ex5 = [IO.Path]::ChangeExtension($f.FullName, ".ex5")
             if ($err -gt 0 -or -not (Test-Path $ex5)) { $failed++; Write-Host "::error file=$($f.Name)::$err error(s)" }
+            if ($warn -gt 0) { Write-Host "::warning file=$($f.Name)::$warn warning(s)" }
             $summary += "| $($f.Name) | $err | $warn |"
           }
           $summary -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8

@@ -4,22 +4,22 @@
 //+------------------------------------------------------------------+
 #property strict
 #include <Trade\Trade.mqh>
-#include "Include/TradeAdapter.mqh"
-#include "Include/BrokerAdapter.mqh"
-#include "Include/SessionFilter.mqh"
-#include "Include/TrendFilter.mqh"
-#include "Include/PositionGuard.mqh"
-#include "Include/TradeExecutor.mqh"
-#include "Include/Trailing/SyncTrail.mqh"
-#include "Include/Trailing/BreakevenTrail.mqh"
-#include "Include/Trailing/TrailingDispatcher.mqh"
-#include "Include/EntryTrigger.mqh"
-#include "Include/TimeExit.mqh"
-#include "Include/TesterMetric.mqh"
+#include "Include/Core/TradeAdapter.mqh"
+#include "Include/Core/BrokerAdapter.mqh"
+#include "Include/Context/SessionFilter.mqh"
+#include "Include/Context/TrendFilter.mqh"
+#include "Include/Core/PositionGuard.mqh"
+#include "Include/Core/TradeExecutor.mqh"
+#include "Include/Exits/Trailing/SyncTrail.mqh"
+#include "Include/Exits/Trailing/BreakevenTrail.mqh"
+#include "Include/Exits/Trailing/TrailingDispatcher.mqh"
+#include "Include/Triggers/EntryTrigger.mqh"
+#include "Include/Exits/TimeExit.mqh"
+#include "Include/Core/TesterMetric.mqh"
 CTrade trade;
 
 //── Режим входа ──────────────────────────────────────────────────────
-// ENUM_ENTRY_MODE — в Include/EntryTrigger.mqh
+// ENUM_ENTRY_MODE — в Include/Triggers/EntryTrigger.mqh
 
 //── Входные параметры ─────────────────────────────────────────────────
 
@@ -62,7 +62,7 @@ input int    TimeExitBars  = 0;     // Закрыть позицию через 
 #define SESSION_DEFAULT_SELECTED      false
 #define SESSION_DEFAULT_LONDON        false
 #define SESSION_DEFAULT_CLOSE_ON_EXIT false
-#include "Include/Inputs/SessionInputs.mqh"
+#include "Include/Context/SessionInputs.mqh"
 
 input group "── Фильтр тренда (HTF) ──"
 input bool            UseTrendFilter = true;
@@ -130,7 +130,7 @@ datetime g_logged_bar = 0;   // только для CLOSE_CONFIRM: послед�
 //+------------------------------------------------------------------+
 
 //+------------------------------------------------------------------+
-//| СЕССИИ — реализация в Include/SessionFilter.mqh                  |
+//| СЕССИИ — реализация в Include/Context/SessionFilter.mqh          |
 //+------------------------------------------------------------------+
 
 bool IsSpreadAllowed()

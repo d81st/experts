@@ -9,8 +9,8 @@
 #ifndef BREAKEVENTRAIL_MQH
 #define BREAKEVENTRAIL_MQH
 
-#include "../TradeAdapter.mqh"
-#include "../BrokerAdapter.mqh"
+#include "../../Core/TradeAdapter.mqh"
+#include "../../Core/BrokerAdapter.mqh"
 
 //+------------------------------------------------------------------+
 //| BreakevenTrailManage — публичный API.                            |

@@ -7,19 +7,19 @@
 #property description "CRT Trade Bot v4.2 | TrueRB, InsideWick, ghostTrueRB, ghostInsideWick | 3 режима входа | EMA/ADX фильтр"
 
 #include <Trade\Trade.mqh>
-#include "Include/TradeAdapter.mqh"
-#include "Include/BrokerAdapter.mqh"
-#include "Include/SessionFilter.mqh"
-#include "Include/TrendFilter.mqh"
-#include "Include/PositionGuard.mqh"
-#include "Include/TradeExecutor.mqh"
-#include "Include/Trailing/SyncTrail.mqh"
-#include "Include/Trailing/BreakevenTrail.mqh"
-#include "Include/Trailing/TrailingDispatcher.mqh"
-#include "Include/CrtDetector.mqh"
-#include "Include/EntryTrigger.mqh"
-#include "Include/TimeExit.mqh"
-#include "Include/TesterMetric.mqh"
+#include "Include/Core/TradeAdapter.mqh"
+#include "Include/Core/BrokerAdapter.mqh"
+#include "Include/Context/SessionFilter.mqh"
+#include "Include/Context/TrendFilter.mqh"
+#include "Include/Core/PositionGuard.mqh"
+#include "Include/Core/TradeExecutor.mqh"
+#include "Include/Exits/Trailing/SyncTrail.mqh"
+#include "Include/Exits/Trailing/BreakevenTrail.mqh"
+#include "Include/Exits/Trailing/TrailingDispatcher.mqh"
+#include "Include/Levels/CrtDetector.mqh"
+#include "Include/Triggers/EntryTrigger.mqh"
+#include "Include/Exits/TimeExit.mqh"
+#include "Include/Core/TesterMetric.mqh"
 CTrade trade;
 ITradeAdapter *g_trade_adapter = NULL;
 TrailingConfig g_trail_cfg;   // заполняется в OnInit, используется TrailingManage
@@ -28,7 +28,7 @@ TrailingConfig g_trail_cfg;   // заполняется в OnInit, исполь�
 //| Enum: режим входа                                                |
 //+------------------------------------------------------------------+
 
-// ENUM_ENTRY_MODE — в Include/EntryTrigger.mqh
+// ENUM_ENTRY_MODE — в Include/Triggers/EntryTrigger.mqh
 
 //+------------------------------------------------------------------+
 //| Входные параметры                                                |
@@ -96,7 +96,7 @@ input double                SyncTrailStepPoints   = 0;
 
 // Параметры сессий — общие для всех ботов; у crt-bot окно у стыка сессий 1 мин.
 #define SESSION_DEFAULT_WINDOW_MINUTES 1
-#include "Include/Inputs/SessionInputs.mqh"
+#include "Include/Context/SessionInputs.mqh"
 
 input group "── Фильтр тренда (HTF) ──"
 input bool            UseTrendFilter = true;

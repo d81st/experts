@@ -12,15 +12,18 @@
 #property description "Fibo Zones v1.2 | зоны Фибоначчи у последней волны ATR-зигзага | лимитка или подтверждение"
 
 #include <Trade\Trade.mqh>
-#include "Include/TradeAdapter.mqh"
-#include "Include/BrokerAdapter.mqh"
-#include "Include/SessionFilter.mqh"
-#include "Include/PositionGuard.mqh"
-#include "Include/TradeExecutor.mqh"
-#include "Include/Trailing/SyncTrail.mqh"
-#include "Include/Trailing/BreakevenTrail.mqh"
-#include "Include/Trailing/TrailingDispatcher.mqh"
-#include "Include/TesterMetric.mqh"
+#include "Include/Core/TradeAdapter.mqh"
+#include "Include/Core/BrokerAdapter.mqh"
+#include "Include/Context/SessionFilter.mqh"
+#include "Include/Core/PositionGuard.mqh"
+#include "Include/Core/TradeExecutor.mqh"
+#include "Include/Exits/Trailing/SyncTrail.mqh"
+#include "Include/Exits/Trailing/BreakevenTrail.mqh"
+#include "Include/Exits/Trailing/TrailingDispatcher.mqh"
+#include "Include/Core/TesterMetric.mqh"
+#include "Include/Levels/AtrZigZag.mqh"
+#include "Include/Levels/FiboZones.mqh"
+#include "Include/Triggers/ZoneOrders.mqh"
 CTrade trade;
 ITradeAdapter *g_trade_adapter = NULL;
 TrailingConfig g_trail_cfg;
@@ -80,7 +83,7 @@ input double                SyncTrailStepPoints   = 0.0;
 #define SESSION_DEFAULT_SELECTED      false
 #define SESSION_DEFAULT_LONDON        false
 #define SESSION_DEFAULT_CLOSE_ON_EXIT false
-#include "Include/Inputs/SessionInputs.mqh"
+#include "Include/Context/SessionInputs.mqh"
 
 //── Состояние ─────────────────────────────────────────────────────────
 
@@ -92,12 +95,8 @@ int           g_atrHandle = INVALID_HANDLE;
 datetime      g_lastBar   = 0;
 bool          g_zzReady   = false;
 
-// ATR-зигзаг: 0 — направление не определено, +1 — после минимума ищем максимум, -1 — наоборот.
-int      g_zzDir    = 0;
-double   g_candHi   = 0.0, g_candLo = 0.0;
-datetime g_candHiT  = 0,   g_candLoT = 0;
-double   g_pivHi    = 0.0, g_pivLo = 0.0;
-datetime g_pivHiT   = 0,   g_pivLoT = 0;
+// ATR-зигзаг (Include/Levels/AtrZigZag.mqh): волны и подтверждённые точки разворота.
+AtrZigZag g_zz;
 
 // Диапазон — последняя подтверждённая волна.
 struct FiboRange
@@ -110,28 +109,15 @@ struct FiboRange
   };
 FiboRange g_range;
 
-// Сделка зоны: направление, вход, стоп, тейк.
-struct FiboZone
-  {
-   int    dir;      // +1 покупка, -1 продажа
-   double nearP;    // ближний край (вход лимиткой)
-   double farP;     // дальний край
-   double tp;
-   string name;
-  };
+// Сделка зоны (FiboZone) — в Include/Levels/FiboZones.mqh.
 
-bool     g_used[FIBO_SLOTS];      // зона уже торговалась в этом диапазоне
-ulong    g_ticket[FIBO_SLOTS];    // тикет лимитки
-bool     g_touched[FIBO_SLOTS];   // CONFIRM: цена заходила в зону
-double   g_touchExt[FIBO_SLOTS];  // CONFIRM: экстремум касания
+// Ордера по зонам (Include/Triggers/ZoneOrders.mqh): учёт слотов, лимитки, подтверждение.
+ZoneOrders       g_zo;
+ZoneOrdersConfig g_zo_cfg;
 datetime g_liveKey = 0;           // слот 7: время текущего экстремума волны (сменился — зона новая)
 
 // Статистика за прогон (печатается в OnDeinit).
 int g_cntRanges = 0;
-int g_cntPlaced[FIBO_SLOTS], g_cntFilled[FIBO_SLOTS], g_cntPassed[FIBO_SLOTS];
-int g_cntRisk[FIBO_SLOTS], g_cntRiskLow[FIBO_SLOTS], g_cntWidened[FIBO_SLOTS], g_cntMoved[FIBO_SLOTS];
-int g_cntOrphans = 0, g_cntExtraPos = 0;
-double g_startBalance = 0.0;
 
 //+------------------------------------------------------------------+
 //| Зоны                                                             |
@@ -164,203 +150,75 @@ bool BuildZone(const int slot, FiboZone &z)
 
    if(slot == 7)
      {
-      if(!g_zzReady || g_zzDir == 0 || g_pivHiT == 0 || g_pivLoT == 0)
+      if(!g_zzReady || g_zz.dir == 0 || !AtrZigZagHasRange(g_zz))
          return false;
-      if(g_zzDir == 1)   // после минимума волна идёт вверх: покупка на откате
-        {
-         const double W = g_candHi - g_pivLo;
-         if(W <= 0.0 || W < MinRangePoints * g_broker.adjustedPoint)
-            return false;
-         z.dir = 1; z.nearP = g_candHi - nearR * W; z.farP = g_candHi - farR * W; z.tp = g_candHi;
-        }
-      else
-        {
-         const double W = g_pivHi - g_candLo;
-         if(W <= 0.0 || W < MinRangePoints * g_broker.adjustedPoint)
-            return false;
-         z.dir = -1; z.nearP = g_candLo + nearR * W; z.farP = g_candLo + farR * W; z.tp = g_candLo;
-        }
+      // После минимума волна идёт вверх (покупка на откате), после максимума — вниз.
+      const double start = (g_zz.dir == 1) ? g_zz.pivLo  : g_zz.pivHi;
+      const double end   = (g_zz.dir == 1) ? g_zz.candHi : g_zz.candLo;
+      const double W     = (g_zz.dir == 1) ? end - start : start - end;
+      if(W <= 0.0 || W < MinRangePoints * g_broker.adjustedPoint)
+         return false;
+      FiboRetraceZone(start, end, nearR, farR, z);
       z.name = "откат текущей " + z.name;
       return true;
      }
 
    if(!g_range.valid)
       return false;
-   const double R = g_range.hi - g_range.lo;
    if(slot == 0)
      {
-      z.dir = g_range.waveDir;
-      if(z.dir == 1)
-        { z.nearP = g_range.hi - nearR * R; z.farP = g_range.hi - farR * R; z.tp = g_range.hi; }
+      if(g_range.waveDir == 1)
+         FiboRetraceZone(g_range.lo, g_range.hi, nearR, farR, z);
       else
-        { z.nearP = g_range.lo + nearR * R; z.farP = g_range.lo + farR * R; z.tp = g_range.lo; }
+         FiboRetraceZone(g_range.hi, g_range.lo, nearR, farR, z);
       z.name = "откат подтв. " + z.name;
      }
    else if(slot % 2 == 1)   // сверху: продажа на разворот, тейк — максимум диапазона
      {
-      z.dir = -1;
-      z.nearP = g_range.lo + nearR * R; z.farP = g_range.lo + farR * R; z.tp = g_range.hi;
+      FiboExtZone(g_range.hi, g_range.lo, true, nearR, farR, z);
       z.name = "сверху " + z.name;
      }
    else                     // снизу: покупка на разворот, тейк — минимум диапазона
      {
-      z.dir = 1;
-      z.nearP = g_range.hi - nearR * R; z.farP = g_range.hi - farR * R; z.tp = g_range.lo;
+      FiboExtZone(g_range.hi, g_range.lo, false, nearR, farR, z);
       z.name = "снизу " + z.name;
      }
    return true;
   }
 
-// Стоп за точкой farP + отступ; ближе MinSLPoints — расширяется до минимума.
-double ZoneSL(const FiboZone &z, const double entry, const double farP, bool &widened)
-  {
-   const double pt = g_broker.adjustedPoint;
-   double sl = farP - z.dir * SLBufferPoints * pt;
-   widened = MathAbs(entry - sl) < MinSLPoints * pt;
-   if(widened)
-      sl = entry - z.dir * MinSLPoints * pt;
-   return NormalizeDouble(sl, _Digits);
-  }
-
-// Пропуск из-за риска: отдельно считаем случаи, когда счёт уже просел вдвое.
-void CountRiskSkip(const int slot, const FiboZone &z, const double entry, const double sl)
-  {
-   if(AccountInfoDouble(ACCOUNT_BALANCE) < 0.5 * g_startBalance)
-     {
-      g_cntRiskLow[slot]++;
-      return;
-     }
-   g_cntRisk[slot]++;
-   PrintFormat("⏭ Зона %s пропущена: стоп %.2f USD — мин. лот рискует > %.1f%% баланса",
-               z.name, MathAbs(entry - sl), RiskPercent * MaxRiskOvershoot);
-  }
-
 // Слот 7: экстремум текущей волны сменился — прежняя зона больше не актуальна.
 void SyncLiveSlot()
   {
-   const datetime key = (g_zzDir == 1) ? g_candHiT : (g_zzDir == -1 ? g_candLoT : 0);
+   const datetime key = (g_zz.dir == 1) ? g_zz.candHiT : (g_zz.dir == -1 ? g_zz.candLoT : 0);
    if(key == g_liveKey)
       return;
    g_liveKey = key;
-   // Лимитку не снимаем: ManageLimits передвинет её на новую зону изменением ордера.
-   g_used[7] = false; g_touched[7] = false; g_touchExt[7] = 0.0;
+   ZoneOrdersRelease(g_zo, 7);
   }
 
-//+------------------------------------------------------------------+
-//| Ордера и позиции: учёт, удаление, защита от лишних               |
-//+------------------------------------------------------------------+
-
-// Снять лимитку слота. Ордера уже нет — значит, исполнен: зона отработана.
-// Тикет забывается только когда ордер действительно снят или исполнен.
-bool DeleteSlotOrder(const int slot)
+// Все зоны текущего диапазона и текущей волны (ok[i] — зона i есть).
+void BuildAllZones(FiboZone &zs[], bool &ok[])
   {
-   if(g_ticket[slot] == 0)
-      return true;
-   if(!PositionGuardPendingExists(g_ticket[slot]))
-     {
-      g_ticket[slot] = 0;
-      g_used[slot]   = true;
-      g_cntFilled[slot]++;
-      return true;
-     }
-   if(!trade.OrderDelete(g_ticket[slot]))
-      return false;
-   g_ticket[slot] = 0;
-   return true;
-  }
-
-// Лимитки бота, которых нет в учёте (не снялись при закрытом рынке, остались после
-// перезапуска), удаляются. Неудачные попытки повторяются не чаще раза в 10 секунд.
-void SweepOrphans()
-  {
-   static datetime lastFail = 0;
-   if(lastFail > 0 && TimeCurrent() - lastFail < 10)
-      return;
-   for(int i = OrdersTotal() - 1; i >= 0; i--)
-     {
-      const ulong t = OrderGetTicket(i);
-      if(t == 0 || OrderGetString(ORDER_SYMBOL) != _Symbol || OrderGetInteger(ORDER_MAGIC) != MagicNumber)
-         continue;
-      bool tracked = false;
-      for(int k = 0; k < FIBO_SLOTS && !tracked; k++)
-         tracked = (g_ticket[k] == t);
-      if(tracked)
-         continue;
-      if(trade.OrderDelete(t))
-        {
-         g_cntOrphans++;
-         PrintFormat("🧹 Удалена лимитка #%I64u вне учёта", t);
-        }
-      else
-         lastFail = TimeCurrent();
-     }
-  }
-
-// Бот держит одну сделку. Если исполнились сразу две лимитки (быстрое движение),
-// лишние позиции закрываются, остаётся самая ранняя.
-void CloseExtraPositions()
-  {
-   ulong    keep     = 0;
-   datetime keepTime = 0;
-   int      n        = 0;
-   for(int i = PositionsTotal() - 1; i >= 0; i--)
-     {
-      const ulong t = PositionGetTicket(i);
-      if(t == 0 || PositionGetString(POSITION_SYMBOL) != _Symbol || PositionGetInteger(POSITION_MAGIC) != MagicNumber)
-         continue;
-      n++;
-      const datetime pt = (datetime)PositionGetInteger(POSITION_TIME);
-      if(keep == 0 || pt < keepTime) { keep = t; keepTime = pt; }
-     }
-   if(n <= 1)
-      return;
-   for(int i = PositionsTotal() - 1; i >= 0; i--)
-     {
-      const ulong t = PositionGetTicket(i);
-      if(t == 0 || t == keep || PositionGetString(POSITION_SYMBOL) != _Symbol ||
-         PositionGetInteger(POSITION_MAGIC) != MagicNumber)
-         continue;
-      if(trade.PositionClose(t))
-        {
-         g_cntExtraPos++;
-         PrintFormat("⚠️ Закрыта лишняя позиция #%I64u (бот держит одну сделку)", t);
-        }
-     }
-  }
-
-// Отказ, который не исчезнет при повторе: зону вычёркиваем. Остальные — повторим позже.
-bool IsPermanentReject(const uint rc)
-  {
-   return rc == TRADE_RETCODE_INVALID || rc == TRADE_RETCODE_INVALID_VOLUME ||
-          rc == TRADE_RETCODE_INVALID_STOPS || rc == TRADE_RETCODE_NO_MONEY;
+   for(int i = 0; i < FIBO_SLOTS; i++)
+      ok[i] = BuildZone(i, zs[i]);
   }
 
 //+------------------------------------------------------------------+
 //| ATR-зигзаг по закрытым барам                                     |
 //+------------------------------------------------------------------+
 
-void ResetSlots()
+// Подтверждена новая точка разворота: диапазон — последняя подтверждённая волна.
+void OnPivot(const bool log)
   {
-   for(int i = 0; i < FIBO_SLOTS; i++)
-     {
-      DeleteSlotOrder(i);   // не удалось (рынок закрыт) — подберёт SweepOrphans
-      g_used[i] = false; g_ticket[i] = 0; g_touched[i] = false; g_touchExt[i] = 0.0;
-     }
-  }
-
-void ConfirmPivot(const bool isHigh, const double price, const datetime t, const bool log)
-  {
-   if(isHigh) { g_pivHi = price; g_pivHiT = t; }
-   else       { g_pivLo = price; g_pivLoT = t; }
-   if(g_pivHiT == 0 || g_pivLoT == 0)
+   if(!AtrZigZagHasRange(g_zz))
       return;
 
    g_range.id++;
-   g_range.hi      = g_pivHi;
-   g_range.lo      = g_pivLo;
-   g_range.waveDir = (g_pivLoT < g_pivHiT) ? 1 : -1;
-   g_range.valid   = (g_pivHi - g_pivLo) >= MinRangePoints * g_broker.adjustedPoint;
-   ResetSlots();
+   g_range.hi      = g_zz.pivHi;
+   g_range.lo      = g_zz.pivLo;
+   g_range.waveDir = AtrZigZagWaveDir(g_zz);
+   g_range.valid   = (g_zz.pivHi - g_zz.pivLo) >= MinRangePoints * g_broker.adjustedPoint;
+   ZoneOrdersReset(g_zo, trade);
    if(!log)
       return;
    g_cntRanges++;
@@ -379,29 +237,8 @@ void ZigZagStep(const int shift, const bool log)
    const double   l  = iLow(_Symbol, TradingTimeframe, shift);
    const datetime t  = iTime(_Symbol, TradingTimeframe, shift);
    const double   th = ZigZagAtrMult * atr[0];
-
-   if(g_zzDir == 0)
-     {
-      if(g_candHiT == 0 || h > g_candHi) { g_candHi = h; g_candHiT = t; }
-      if(g_candLoT == 0 || l < g_candLo) { g_candLo = l; g_candLoT = t; }
-      if(g_candHiT < t && g_candHi - l >= th)
-        { ConfirmPivot(true, g_candHi, g_candHiT, log); g_zzDir = -1; g_candLo = l; g_candLoT = t; }
-      else if(g_candLoT < t && h - g_candLo >= th)
-        { ConfirmPivot(false, g_candLo, g_candLoT, log); g_zzDir = 1; g_candHi = h; g_candHiT = t; }
-      return;
-     }
-   if(g_zzDir == 1)
-     {
-      if(h > g_candHi) { g_candHi = h; g_candHiT = t; }
-      else if(g_candHi - l >= th)
-        { ConfirmPivot(true, g_candHi, g_candHiT, log); g_zzDir = -1; g_candLo = l; g_candLoT = t; }
-     }
-   else
-     {
-      if(l < g_candLo) { g_candLo = l; g_candLoT = t; }
-      else if(h - g_candLo >= th)
-        { ConfirmPivot(false, g_candLo, g_candLoT, log); g_zzDir = 1; g_candHi = h; g_candHiT = t; }
-     }
+   if(AtrZigZagStep(g_zz, h, l, t, th) != 0)
+      OnPivot(log);
   }
 
 // Прогрев по истории (без журнала), затем по одному закрытому бару.
@@ -420,224 +257,6 @@ void ZigZagOnNewBar()
                      g_range.id, g_range.hi, g_range.lo, g_range.waveDir == 1 ? "вверх" : "вниз");
      }
    ZigZagStep(1, true);
-  }
-
-//+------------------------------------------------------------------+
-//| Лимитки                                                          |
-//+------------------------------------------------------------------+
-
-double ZoneLot(const double entry, const double sl)
-  {
-   return BrokerCalcLot(g_broker, RiskPercent, MathAbs(entry - sl) / g_broker.adjustedPoint,
-                        LOT_BY_TICK_VALUE, MaxRiskOvershoot);
-  }
-
-// Выставить лимитку зоны или привести существующую к нужным цене / стопу / тейку.
-void EnsureLimit(const int slot, const FiboZone &z)
-  {
-   const double entry = NormalizeDouble(z.nearP, _Digits);
-   bool widened;
-   const double sl  = ZoneSL(z, entry, z.farP, widened);
-   const double tp  = NormalizeDouble(z.tp, _Digits);
-   const double lot = ZoneLot(entry, sl);
-   if(lot <= 0.0)
-     {
-      g_used[slot] = true;
-      CountRiskSkip(slot, z, entry, sl);
-      DeleteSlotOrder(slot);
-      return;
-     }
-
-   if(g_ticket[slot] != 0)
-     {
-      if(!OrderSelect(g_ticket[slot]))
-         return;
-      if(MathAbs(OrderGetDouble(ORDER_PRICE_OPEN) - entry) < _Point &&
-         MathAbs(OrderGetDouble(ORDER_SL) - sl) < _Point &&
-         MathAbs(OrderGetDouble(ORDER_TP) - tp) < _Point)
-         return;
-      // Объём ордера не меняется — при другом лоте ордер выставляется заново.
-      if(MathAbs(OrderGetDouble(ORDER_VOLUME_INITIAL) - lot) > 1e-8)
-        {
-         DeleteSlotOrder(slot);
-         return;
-        }
-      if(trade.OrderModify(g_ticket[slot], entry, sl, tp, ORDER_TIME_GTC, 0))
-        {
-         g_cntMoved[slot]++;
-         if(widened)
-            g_cntWidened[slot]++;
-        }
-      else
-         DeleteSlotOrder(slot);   // не сдвинулась (например, цена слишком близко) — выставим заново
-      return;
-     }
-
-   TradeOrderRequest req;
-   req.orderType       = (z.dir == 1) ? ORDER_TYPE_BUY_LIMIT : ORDER_TYPE_SELL_LIMIT;
-   req.price           = entry;
-   req.sl              = sl;
-   req.tp              = tp;
-   req.lot             = lot;
-   req.comment         = StringFormat("FIBO_%d #%d", slot, g_range.id);
-   req.maxSpreadToSL   = MaxSpreadToSL;
-   req.maxSlippageToSL = MaxSlippageToSL;
-
-   const TradeResult res = TradeExecutorSend(trade, g_broker, req);
-   if(!res.success)
-     {
-      if(!res.skipped && IsPermanentReject(res.retcode))
-        {
-         g_used[slot] = true;
-         PrintFormat("❌ Лимитка зоны %s не выставлена: %u %s", z.name, res.retcode, res.description);
-        }
-      return;   // временный отказ или фильтр — повторим на следующих тиках
-     }
-   g_cntPlaced[slot]++;
-   if(widened)
-      g_cntWidened[slot]++;
-   // Лимитка могла сразу исполниться по рынку (цена ушла за уровень) — тогда тикета ордера нет.
-   if(req.orderType == ORDER_TYPE_BUY || req.orderType == ORDER_TYPE_SELL)
-     {
-      g_used[slot] = true;
-      g_cntFilled[slot]++;
-     }
-   else
-      g_ticket[slot] = res.ticket;
-   PrintFormat("📌 %s зона %s | вход %.3f SL %.3f (%.2f USD) TP %.3f | диапазон #%d",
-               z.dir == 1 ? "BUY LIMIT" : "SELL LIMIT", z.name, entry, sl, MathAbs(entry - sl),
-               tp, g_range.id);
-  }
-
-// Лимитки держим только у ближайшей к цене зоны в каждом направлении: дальняя зона
-// того же направления может исполниться лишь после ближней, а лишние ордера — это
-// лишние запросы к брокеру и риск двух сделок сразу.
-void ManageLimits()
-  {
-   const double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-   const double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   FiboZone zs[FIBO_SLOTS];
-   bool     want[FIBO_SLOTS];
-   int      bestBuy = -1, bestSell = -1;
-   double   dBuy = DBL_MAX, dSell = DBL_MAX;
-
-   for(int i = 0; i < FIBO_SLOTS; i++)
-     {
-      want[i] = false;
-      if(g_ticket[i] != 0 && !PositionGuardPendingExists(g_ticket[i]))
-        {
-         g_ticket[i] = 0;   // исполнена
-         g_used[i]   = true;
-         g_cntFilled[i]++;
-         continue;
-        }
-      if(g_used[i] || !BuildZone(i, zs[i]))
-        {
-         DeleteSlotOrder(i);
-         continue;
-        }
-      const double entry = NormalizeDouble(zs[i].nearP, _Digits);
-      // Цена уже на зоне или за ней: без ордера — зону пропускаем, с ордером — он исполняется.
-      if((zs[i].dir == 1 && ask <= entry) || (zs[i].dir == -1 && bid >= entry))
-        {
-         if(g_ticket[i] == 0)
-           {
-            g_used[i] = true;
-            g_cntPassed[i]++;
-           }
-         continue;
-        }
-      want[i] = true;
-      const double d = (zs[i].dir == 1) ? ask - entry : entry - bid;
-      if(zs[i].dir == 1 && d < dBuy)   { dBuy = d;  bestBuy = i; }
-      if(zs[i].dir == -1 && d < dSell) { dSell = d; bestSell = i; }
-     }
-
-   for(int i = 0; i < FIBO_SLOTS; i++)
-     {
-      if(!want[i])
-         continue;
-      if(i == bestBuy || i == bestSell)
-         EnsureLimit(i, zs[i]);
-      else
-         DeleteSlotOrder(i);
-     }
-  }
-
-// Открыта сделка или торговля на паузе — лимитки снимаем (вернутся позже).
-void CancelOpenSlots()
-  {
-   for(int i = 0; i < FIBO_SLOTS; i++)
-      DeleteSlotOrder(i);
-  }
-
-//+------------------------------------------------------------------+
-//| Вход по подтверждению (закрытый бар)                             |
-//+------------------------------------------------------------------+
-
-void ManageConfirmSlot(const int slot, const bool canEnter)
-  {
-   if(g_used[slot])
-      return;
-   FiboZone z;
-   if(!BuildZone(slot, z))
-      return;
-
-   const double h1 = iHigh(_Symbol, TradingTimeframe, 1);
-   const double l1 = iLow(_Symbol, TradingTimeframe, 1);
-   const double c1 = iClose(_Symbol, TradingTimeframe, 1);
-
-   if(z.dir == -1 ? (h1 >= z.nearP) : (l1 <= z.nearP))
-     {
-      if(!g_touched[slot])
-         g_touchExt[slot] = (z.dir == -1) ? h1 : l1;
-      g_touched[slot]  = true;
-      g_touchExt[slot] = (z.dir == -1) ? MathMax(g_touchExt[slot], h1) : MathMin(g_touchExt[slot], l1);
-     }
-   if(!g_touched[slot])
-      return;
-   if(z.dir == -1 ? (c1 >= z.nearP) : (c1 <= z.nearP))
-      return;   // бар ещё не закрылся обратно из зоны
-   if(!canEnter)
-     {
-      g_touched[slot] = false;   // подтверждение пришлось на открытую сделку — ждём нового касания
-      return;
-     }
-
-   const double entry = (z.dir == 1) ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   const double farP  = (z.dir == -1) ? MathMax(z.farP, g_touchExt[slot]) : MathMin(z.farP, g_touchExt[slot]);
-   bool widened;
-   const double sl    = ZoneSL(z, entry, farP, widened);
-   const double lot   = ZoneLot(entry, sl);
-   g_used[slot] = true;
-   if(lot <= 0.0)
-     {
-      CountRiskSkip(slot, z, entry, sl);
-      return;
-     }
-
-   TradeOrderRequest req;
-   req.orderType       = (z.dir == 1) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
-   req.price           = entry;
-   req.sl              = sl;
-   req.tp              = NormalizeDouble(z.tp, _Digits);
-   req.lot             = lot;
-   req.comment         = StringFormat("FIBO_%d #%d", slot, g_range.id);
-   req.maxSpreadToSL   = MaxSpreadToSL;
-   req.maxSlippageToSL = MaxSlippageToSL;
-
-   const TradeResult res = TradeExecutorSend(trade, g_broker, req);
-   if(res.success)
-     {
-      g_cntPlaced[slot]++;
-      g_cntFilled[slot]++;
-      if(widened)
-         g_cntWidened[slot]++;
-      PrintFormat("✅ %s по подтверждению, зона %s | SL %.3f (%.2f USD) TP %.3f | диапазон #%d",
-                  z.dir == 1 ? "BUY" : "SELL", z.name, sl, MathAbs(entry - sl), req.tp, g_range.id);
-     }
-   else if(!res.skipped)
-      PrintFormat("❌ Вход в зоне %s не удался: %u %s", z.name, res.retcode, res.description);
   }
 
 //+------------------------------------------------------------------+
@@ -666,16 +285,21 @@ int OnInit()
      }
    SessionsSetup();
 
+   AtrZigZagReset(g_zz);
    g_range.valid = false;
    g_range.id    = 0;
-   for(int i = 0; i < FIBO_SLOTS; i++)
-     {
-      g_used[i] = false; g_ticket[i] = 0; g_touched[i] = false; g_touchExt[i] = 0.0;
-      g_cntPlaced[i] = 0; g_cntFilled[i] = 0; g_cntPassed[i] = 0; g_cntRisk[i] = 0; g_cntRiskLow[i] = 0;
-      g_cntWidened[i] = 0; g_cntMoved[i] = 0;
-     }
-   g_liveKey      = 0;
-   g_startBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+
+   g_zo_cfg.magic            = MagicNumber;
+   g_zo_cfg.tf               = TradingTimeframe;
+   g_zo_cfg.riskPercent      = RiskPercent;
+   g_zo_cfg.maxRiskOvershoot = MaxRiskOvershoot;
+   g_zo_cfg.maxSpreadToSL    = MaxSpreadToSL;
+   g_zo_cfg.maxSlippageToSL  = MaxSlippageToSL;
+   g_zo_cfg.slBufferPoints   = SLBufferPoints;
+   g_zo_cfg.minSLPoints      = MinSLPoints;
+   g_zo_cfg.commentPrefix    = "FIBO";
+   ZoneOrdersInit(g_zo, FIBO_SLOTS);
+   g_liveKey = 0;
 
    PrintFormat("✅ Fibo Zones v1.2 | Magic:%d TF:%s | зигзаг %.1f×ATR(%d) | вход:%s | отступ %.0f пт | мин. стоп %.0f пт",
                MagicNumber, EnumToString(TradingTimeframe), ZigZagAtrMult, ZigZagAtrPeriod,
@@ -692,12 +316,9 @@ void OnDeinit(const int reason)
       if(!SlotLevels(i, nearR, farR))
          continue;
       string name = (i == 0) ? "откат подтв." : (i == 7 ? "откат текущей" : (i % 2 == 1 ? "сверху" : "снизу"));
-      PrintFormat("📊 Зона %s %.3f–%.3f: выставлений %d | сдвигов %d | исполнено %d | цена уже за зоной %d | "
-                  "стоп велик %d (+%d при балансе < 50%%) | стоп расширен до мин. %d",
-                  name, nearR, farR, g_cntPlaced[i], g_cntMoved[i], g_cntFilled[i], g_cntPassed[i],
-                  g_cntRisk[i], g_cntRiskLow[i], g_cntWidened[i]);
+      ZoneOrdersPrintSlot(g_zo, i, StringFormat("%s %.3f–%.3f", name, nearR, farR));
      }
-   PrintFormat("📊 Удалено лимиток вне учёта: %d | закрыто лишних позиций: %d", g_cntOrphans, g_cntExtraPos);
+   ZoneOrdersPrintTotals(g_zo);
    if(g_atrHandle != INVALID_HANDLE)
       IndicatorRelease(g_atrHandle);
    if(g_trade_adapter != NULL)
@@ -731,31 +352,36 @@ void OnTick()
       return;
    if(session == SESSION_JUST_EXITED && CloseOnSessionExit)
       PositionGuardCloseAll(trade, MagicNumber);
-   CloseExtraPositions();
-   SweepOrphans();
+   ZoneOrdersCloseExtra(g_zo, trade, MagicNumber);
+   ZoneOrdersSweepOrphans(g_zo, trade, MagicNumber);
    if(session != SESSION_TRADING || SessionsIsBoundary() || !g_zzReady)
      {
-      CancelOpenSlots();   // вне торговли лимитки не держим
+      ZoneOrdersCancelAll(g_zo, trade);   // вне торговли лимитки не держим
       return;
      }
 
    ENUM_POSITION_TYPE type;
    const bool hasPos = PositionGuardHasOpen(MagicNumber, type);
+   FiboZone zs[FIBO_SLOTS];
+   bool     ok[FIBO_SLOTS];
 
    if(EntryMode == FIBO_ENTRY_CONFIRM)
      {
       if(newBar)
-         for(int i = 0; i < FIBO_SLOTS; i++)
-            ManageConfirmSlot(i, !hasPos);
+        {
+         BuildAllZones(zs, ok);
+         ZoneOrdersConfirm(g_zo, trade, g_broker, g_zo_cfg, zs, ok, !hasPos, g_range.id);
+        }
       return;
      }
 
    if(hasPos)
      {
-      CancelOpenSlots();
+      ZoneOrdersCancelAll(g_zo, trade);
       return;
      }
-   ManageLimits();
+   BuildAllZones(zs, ok);
+   ZoneOrdersManageLimits(g_zo, trade, g_broker, g_zo_cfg, zs, ok, g_range.id);
   }
 
 //+------------------------------------------------------------------+

@@ -5,16 +5,17 @@
 //+------------------------------------------------------------------+
 #property strict
 #include <Trade\Trade.mqh>
-#include "Include/TradeAdapter.mqh"
-#include "Include/BrokerAdapter.mqh"
-#include "Include/SessionFilter.mqh"
-#include "Include/TrendFilter.mqh"
-#include "Include/PositionGuard.mqh"
-#include "Include/TradeExecutor.mqh"
-#include "Include/Trailing/SyncTrail.mqh"
-#include "Include/Trailing/BreakevenTrail.mqh"
-#include "Include/Trailing/TrailingDispatcher.mqh"
-#include "Include/TesterMetric.mqh"
+#include "Include/Core/TradeAdapter.mqh"
+#include "Include/Core/BrokerAdapter.mqh"
+#include "Include/Context/SessionFilter.mqh"
+#include "Include/Context/TrendFilter.mqh"
+#include "Include/Core/PositionGuard.mqh"
+#include "Include/Core/TradeExecutor.mqh"
+#include "Include/Exits/Trailing/SyncTrail.mqh"
+#include "Include/Exits/Trailing/BreakevenTrail.mqh"
+#include "Include/Exits/Trailing/TrailingDispatcher.mqh"
+#include "Include/Core/TesterMetric.mqh"
+#include "Include/Levels/DayLevels.mqh"
 //--- Создаем объект торгового класса
 CTrade trade;
 
@@ -88,7 +89,7 @@ input double                BreakevenOffsetPoints = 175;   // Оффсет дл�
 input double                SyncTrailStepPoints   = 0.0;   // Шаг для SYNC (пункты; 0 = любое улучшение)
 
 // Параметры сессий — общие для всех ботов (значения по умолчанию модуля).
-#include "Include/Inputs/SessionInputs.mqh"
+#include "Include/Context/SessionInputs.mqh"
 
 input group "Trend Filter (opt-in)"
 // Тренд-фильтр opt-in: при UseTrendFilter=false (по умолчанию)
@@ -404,30 +405,23 @@ bool KeyLevelSignal(const MqlRates &rates[], ENUM_ORDER_TYPE &order_type,
                     string &signal_msg, double &opposite)
 {
    const datetime barTime  = rates[1].time;
-   const datetime dayStart = barTime - (barTime % 86400);
-   double levelHigh = 0.0, levelLow = 0.0;
+   const datetime dayStart = DayLevelsDayStart(barTime);
+   DayRange r;
    string levelName = "";
 
    if(LevelMode == LEVEL_PREV_DAY)
    {
-      const int shift = iBarShift(_Symbol, PERIOD_D1, barTime) + 1;   // день перед свечой сигнала
-      levelHigh = iHigh(_Symbol, PERIOD_D1, shift);
-      levelLow  = iLow(_Symbol, PERIOD_D1, shift);
+      if(!DayLevelsPrevDay(barTime, false, r)) return false;   // день перед свечой сигнала
       levelName = "пред. дня";
    }
    else
    {
-      const datetime asiaFrom = dayStart + AsiaStartHour * 3600;
-      const datetime asiaTo   = dayStart + AsiaEndHour * 3600 - 1;
-      if(barTime < asiaTo) return false;   // диапазон Азии ещё не сформирован
-      double hi[], lo[];
-      if(CopyHigh(_Symbol, PERIOD_M1, asiaFrom, asiaTo, hi) <= 0) return false;
-      if(CopyLow(_Symbol, PERIOD_M1, asiaFrom, asiaTo, lo) <= 0) return false;
-      levelHigh = hi[ArrayMaximum(hi)];
-      levelLow  = lo[ArrayMinimum(lo)];
+      // Диапазон Азии ещё не сформирован — false.
+      if(!DayLevelsHours(barTime, AsiaStartHour, AsiaEndHour, r)) return false;
       levelName = "Азии";
    }
-   if(levelHigh <= 0.0 || levelLow <= 0.0) return false;
+   const double levelHigh = r.hi;
+   const double levelLow  = r.lo;
 
    static datetime s_highDay = 0, s_lowDay = 0;   // одна сделка на сторону уровня в день
    const string tf = EnumToString(TradingTimeframe);

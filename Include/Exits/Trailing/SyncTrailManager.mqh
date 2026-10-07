@@ -12,8 +12,8 @@
 #ifndef SYNCTRAILMANAGER_MQH
 #define SYNCTRAILMANAGER_MQH
 
-#include "../TradeAdapter.mqh"
-#include "../BrokerAdapter.mqh"
+#include "../../Core/TradeAdapter.mqh"
+#include "../../Core/BrokerAdapter.mqh"
 #include "SyncTrail.mqh"
 
 // Состояние SyncTrail по тикетам (поиск линейный).
