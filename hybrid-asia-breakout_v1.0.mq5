@@ -44,7 +44,7 @@ input group "── Коробка Азии ──"
 input int    AsiaStartHour   = 0;      // Начало окна Азии, час
 input int    AsiaEndHour     = 7;      // Конец окна Азии (не включая), час
 input double MinBoxPoints    = 3000;   // Мин. размер коробки, пункты (меньше — день пропускаем)
-input double MaxBoxPoints    = 30000;  // Макс. размер коробки, пункты (больше — день пропускаем)
+input double MaxBoxPoints    = 0;      // Макс. размер коробки, пункты (больше — день пропускаем; 0 = без ограничения)
 
 input group "── Вход ──"
 input ENUM_BREAKOUT_ENTRY EntryMode = BREAKOUT_CLOSE;
@@ -107,7 +107,7 @@ void UpdateBox(const datetime now)
    g_traded = false;
    g_cntDays++;
    const double size = (r.hi - r.lo) / g_broker.adjustedPoint;
-   g_boxOk = (size >= MinBoxPoints && size <= MaxBoxPoints);
+   g_boxOk = (size >= MinBoxPoints && (MaxBoxPoints <= 0.0 || size <= MaxBoxPoints));
    if(!g_boxOk)
       g_cntSkipSize++;
    PrintFormat("📦 Азия %s: H=%.3f L=%.3f (%.2f USD)%s", TimeToString(day, TIME_DATE),
