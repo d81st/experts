@@ -1,12 +1,14 @@
 ﻿//+------------------------------------------------------------------+
-//|                                              fibo-zones_v1.0.mq5 |
-//|  Fibo Zones v1.0: зоны Фибоначчи у последней волны ATR-зигзага.  |
-//|  Внутри волны — откат 0.382–0.5 по направлению волны; за         |
-//|  границами диапазона — 1.212–1.272 / 1.618–1.762 / 2.212–2.272   |
-//|  в обе стороны на разворот. Вход лимиткой или по подтверждению.  |
+//|                                              fibo-zones_v1.1.mq5 |
+//|  Fibo Zones v1.1: зоны Фибоначчи у последней волны ATR-зигзага.  |
+//|  Внутри волны — откат 0.382–0.5 по направлению волны (у          |
+//|  подтверждённой и у текущей, ещё развивающейся волны); за        |
+//|  границами диапазона — 1.212–1.272 / 1.618–1.762 (2.212–2.272    |
+//|  выключена) в обе стороны на разворот. Вход лимиткой или по      |
+//|  подтверждению.                                                  |
 //+------------------------------------------------------------------+
 #property strict
-#property description "Fibo Zones v1.0 | зоны Фибоначчи у последней волны ATR-зигзага | лимитка или подтверждение"
+#property description "Fibo Zones v1.1 | зоны Фибоначчи у последней волны ATR-зигзага | лимитка или подтверждение"
 
 #include <Trade\Trade.mqh>
 #include "Include/TradeAdapter.mqh"
@@ -40,7 +42,8 @@ input int    ZigZagWarmupBars = 500;  // Баров истории для пои
 input double MinRangePoints   = 0;    // Мин. размер волны, пункты (0 = без ограничения)
 
 input group "── Зоны (доли волны) ──"
-input bool   UseZoneRetrace = true;   // Откат внутри волны (по направлению волны)
+input bool   UseZoneRetrace = true;   // Откат подтверждённой волны (крупные волны)
+input bool   UseZoneRetraceLive = true; // Откат текущей волны: от последней точки до текущего экстремума
 input double RetraceNear    = 0.382;
 input double RetraceFar     = 0.5;
 input bool   UseZoneExt1    = true;   // За диапазоном, в обе стороны
@@ -49,7 +52,7 @@ input double Ext1Far        = 1.272;
 input bool   UseZoneExt2    = true;
 input double Ext2Near       = 1.618;
 input double Ext2Far        = 1.762;
-input bool   UseZoneExt3    = true;
+input bool   UseZoneExt3    = false;  // 2.212–2.272: убыточна на подборе, по умолчанию выключена
 input double Ext3Near       = 2.212;
 input double Ext3Far        = 2.272;
 
@@ -80,7 +83,8 @@ input double                SyncTrailStepPoints   = 0.0;
 
 //── Состояние ─────────────────────────────────────────────────────────
 
-#define FIBO_SLOTS 7   // 0 — откат; 1/2 — Ext1 сверху/снизу; 3/4 — Ext2; 5/6 — Ext3
+#define FIBO_SLOTS 8   // 0 — откат подтверждённой волны; 1/2 — Ext1 сверху/снизу; 3/4 — Ext2; 5/6 — Ext3;
+                      // 7 — откат текущей волны
 
 BrokerContext g_broker;
 int           g_atrHandle = INVALID_HANDLE;
@@ -119,11 +123,13 @@ bool     g_used[FIBO_SLOTS];      // зона уже торговалась в �
 ulong    g_ticket[FIBO_SLOTS];    // тикет лимитки
 bool     g_touched[FIBO_SLOTS];   // CONFIRM: цена заходила в зону
 double   g_touchExt[FIBO_SLOTS];  // CONFIRM: экстремум касания
+datetime g_liveKey = 0;           // слот 7: время текущего экстремума волны (сменился — зона новая)
 
 // Статистика за прогон (печатается в OnDeinit).
 int g_cntRanges = 0;
 int g_cntPlaced[FIBO_SLOTS], g_cntFilled[FIBO_SLOTS], g_cntPassed[FIBO_SLOTS];
-int g_cntRisk[FIBO_SLOTS], g_cntWidened[FIBO_SLOTS];
+int g_cntRisk[FIBO_SLOTS], g_cntRiskLow[FIBO_SLOTS], g_cntWidened[FIBO_SLOTS];
+double g_startBalance = 0.0;
 
 //+------------------------------------------------------------------+
 //| Зоны                                                             |
@@ -135,6 +141,7 @@ bool SlotLevels(const int slot, double &nearR, double &farR)
    switch(slot)
      {
       case 0:  nearR = RetraceNear; farR = RetraceFar; return UseZoneRetrace;
+      case 7:  nearR = RetraceNear; farR = RetraceFar; return UseZoneRetraceLive;
       case 1:
       case 2:  nearR = Ext1Near;    farR = Ext1Far;    return UseZoneExt1;
       case 3:
@@ -145,16 +152,39 @@ bool SlotLevels(const int slot, double &nearR, double &farR)
 
 // Цены зоны. Уровни отсчитываются от границ диапазона долями R = hi - lo:
 // откат — от конца волны внутрь; за диапазоном сверху — lo + r·R, снизу — hi - r·R.
+// Слот 7 — откат текущей волны: от последней подтверждённой точки до текущего экстремума.
 bool BuildZone(const int slot, FiboZone &z)
   {
-   if(!g_range.valid)
-      return false;
    double nearR, farR;
    if(!SlotLevels(slot, nearR, farR))
       return false;
-
-   const double R = g_range.hi - g_range.lo;
    z.name = StringFormat("%.3f–%.3f", nearR, farR);
+
+   if(slot == 7)
+     {
+      if(!g_zzReady || g_zzDir == 0 || g_pivHiT == 0 || g_pivLoT == 0)
+         return false;
+      if(g_zzDir == 1)   // после минимума волна идёт вверх: покупка на откате
+        {
+         const double W = g_candHi - g_pivLo;
+         if(W <= 0.0 || W < MinRangePoints * g_broker.adjustedPoint)
+            return false;
+         z.dir = 1; z.nearP = g_candHi - nearR * W; z.farP = g_candHi - farR * W; z.tp = g_candHi;
+        }
+      else
+        {
+         const double W = g_pivHi - g_candLo;
+         if(W <= 0.0 || W < MinRangePoints * g_broker.adjustedPoint)
+            return false;
+         z.dir = -1; z.nearP = g_candLo + nearR * W; z.farP = g_candLo + farR * W; z.tp = g_candLo;
+        }
+      z.name = "откат текущей " + z.name;
+      return true;
+     }
+
+   if(!g_range.valid)
+      return false;
+   const double R = g_range.hi - g_range.lo;
    if(slot == 0)
      {
       z.dir = g_range.waveDir;
@@ -162,7 +192,7 @@ bool BuildZone(const int slot, FiboZone &z)
         { z.nearP = g_range.hi - nearR * R; z.farP = g_range.hi - farR * R; z.tp = g_range.hi; }
       else
         { z.nearP = g_range.lo + nearR * R; z.farP = g_range.lo + farR * R; z.tp = g_range.lo; }
-      z.name = "откат " + z.name;
+      z.name = "откат подтв. " + z.name;
      }
    else if(slot % 2 == 1)   // сверху: продажа на разворот, тейк — максимум диапазона
      {
@@ -180,16 +210,39 @@ bool BuildZone(const int slot, FiboZone &z)
   }
 
 // Стоп за точкой farP + отступ; ближе MinSLPoints — расширяется до минимума.
-double ZoneSL(const int slot, const FiboZone &z, const double entry, const double farP)
+double ZoneSL(const FiboZone &z, const double entry, const double farP, bool &widened)
   {
    const double pt = g_broker.adjustedPoint;
    double sl = farP - z.dir * SLBufferPoints * pt;
-   if(MathAbs(entry - sl) < MinSLPoints * pt)
-     {
+   widened = MathAbs(entry - sl) < MinSLPoints * pt;
+   if(widened)
       sl = entry - z.dir * MinSLPoints * pt;
-      g_cntWidened[slot]++;
-     }
    return NormalizeDouble(sl, _Digits);
+  }
+
+// Пропуск из-за риска: отдельно считаем случаи, когда счёт уже просел вдвое.
+void CountRiskSkip(const int slot, const FiboZone &z, const double entry, const double sl)
+  {
+   if(AccountInfoDouble(ACCOUNT_BALANCE) < 0.5 * g_startBalance)
+     {
+      g_cntRiskLow[slot]++;
+      return;
+     }
+   g_cntRisk[slot]++;
+   PrintFormat("⏭ Зона %s пропущена: стоп %.2f USD — мин. лот рискует > %.1f%% баланса",
+               z.name, MathAbs(entry - sl), RiskPercent * MaxRiskOvershoot);
+  }
+
+// Слот 7: экстремум текущей волны сменился — прежняя зона больше не актуальна.
+void SyncLiveSlot()
+  {
+   const datetime key = (g_zzDir == 1) ? g_candHiT : (g_zzDir == -1 ? g_candLoT : 0);
+   if(key == g_liveKey)
+      return;
+   g_liveKey = key;
+   if(g_ticket[7] != 0 && PositionGuardPendingExists(g_ticket[7]))
+      trade.OrderDelete(g_ticket[7]);
+   g_ticket[7] = 0; g_used[7] = false; g_touched[7] = false; g_touchExt[7] = 0.0;
   }
 
 //+------------------------------------------------------------------+
@@ -320,14 +373,13 @@ void ManageLimitSlot(const int slot)
       return;
      }
 
-   const double sl  = ZoneSL(slot, z, entry, z.farP);
+   bool widened;
+   const double sl  = ZoneSL(z, entry, z.farP, widened);
    const double lot = ZoneLot(entry, sl);
    if(lot <= 0.0)
      {
       g_used[slot] = true;
-      g_cntRisk[slot]++;
-      PrintFormat("⏭ Зона %s пропущена: стоп %.2f USD — мин. лот рискует > %.1f%% баланса",
-                  z.name, MathAbs(entry - sl), RiskPercent * MaxRiskOvershoot);
+      CountRiskSkip(slot, z, entry, sl);
       return;
      }
 
@@ -352,6 +404,8 @@ void ManageLimitSlot(const int slot)
       return;
      }
    g_cntPlaced[slot]++;
+   if(widened)
+      g_cntWidened[slot]++;
    // Лимитка могла сразу исполниться по рынку (цена ушла за уровень) — тогда тикета ордера нет.
    if(req.orderType == ORDER_TYPE_BUY || req.orderType == ORDER_TYPE_SELL)
      {
@@ -418,14 +472,13 @@ void ManageConfirmSlot(const int slot, const bool canEnter)
 
    const double entry = (z.dir == 1) ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
    const double farP  = (z.dir == -1) ? MathMax(z.farP, g_touchExt[slot]) : MathMin(z.farP, g_touchExt[slot]);
-   const double sl    = ZoneSL(slot, z, entry, farP);
+   bool widened;
+   const double sl    = ZoneSL(z, entry, farP, widened);
    const double lot   = ZoneLot(entry, sl);
    g_used[slot] = true;
    if(lot <= 0.0)
      {
-      g_cntRisk[slot]++;
-      PrintFormat("⏭ Зона %s пропущена: стоп %.2f USD — мин. лот рискует > %.1f%% баланса",
-                  z.name, MathAbs(entry - sl), RiskPercent * MaxRiskOvershoot);
+      CountRiskSkip(slot, z, entry, sl);
       return;
      }
 
@@ -444,6 +497,8 @@ void ManageConfirmSlot(const int slot, const bool canEnter)
      {
       g_cntPlaced[slot]++;
       g_cntFilled[slot]++;
+      if(widened)
+         g_cntWidened[slot]++;
       PrintFormat("✅ %s по подтверждению, зона %s | SL %.3f (%.2f USD) TP %.3f | диапазон #%d",
                   z.dir == 1 ? "BUY" : "SELL", z.name, sl, MathAbs(entry - sl), req.tp, g_range.id);
      }
@@ -482,10 +537,13 @@ int OnInit()
    for(int i = 0; i < FIBO_SLOTS; i++)
      {
       g_used[i] = false; g_ticket[i] = 0; g_touched[i] = false; g_touchExt[i] = 0.0;
-      g_cntPlaced[i] = 0; g_cntFilled[i] = 0; g_cntPassed[i] = 0; g_cntRisk[i] = 0; g_cntWidened[i] = 0;
+      g_cntPlaced[i] = 0; g_cntFilled[i] = 0; g_cntPassed[i] = 0; g_cntRisk[i] = 0; g_cntRiskLow[i] = 0;
+      g_cntWidened[i] = 0;
      }
+   g_liveKey      = 0;
+   g_startBalance = AccountInfoDouble(ACCOUNT_BALANCE);
 
-   PrintFormat("✅ Fibo Zones v1.0 | Magic:%d TF:%s | зигзаг %.1f×ATR(%d) | вход:%s | отступ %.0f пт | мин. стоп %.0f пт",
+   PrintFormat("✅ Fibo Zones v1.1 | Magic:%d TF:%s | зигзаг %.1f×ATR(%d) | вход:%s | отступ %.0f пт | мин. стоп %.0f пт",
                MagicNumber, EnumToString(TradingTimeframe), ZigZagAtrMult, ZigZagAtrPeriod,
                EntryMode == FIBO_ENTRY_LIMIT ? "LIMIT" : "CONFIRM", SLBufferPoints, MinSLPoints);
    return INIT_SUCCEEDED;
@@ -499,9 +557,11 @@ void OnDeinit(const int reason)
       double nearR, farR;
       if(!SlotLevels(i, nearR, farR))
          continue;
-      string name = (i == 0) ? "откат" : (i % 2 == 1 ? "сверху" : "снизу");
-      PrintFormat("📊 Зона %s %.3f–%.3f: ордеров %d | исполнено %d | цена уже за зоной %d | риск велик %d | стоп расширен %d",
-                  name, nearR, farR, g_cntPlaced[i], g_cntFilled[i], g_cntPassed[i], g_cntRisk[i], g_cntWidened[i]);
+      string name = (i == 0) ? "откат подтв." : (i == 7 ? "откат текущей" : (i % 2 == 1 ? "сверху" : "снизу"));
+      PrintFormat("📊 Зона %s %.3f–%.3f: выставлений %d | исполнено %d | цена уже за зоной %d | "
+                  "стоп велик %d (+%d при балансе < 50%%) | стоп расширен до мин. %d",
+                  name, nearR, farR, g_cntPlaced[i], g_cntFilled[i], g_cntPassed[i],
+                  g_cntRisk[i], g_cntRiskLow[i], g_cntWidened[i]);
      }
    if(g_atrHandle != INVALID_HANDLE)
       IndicatorRelease(g_atrHandle);
@@ -527,6 +587,7 @@ void OnTick()
      {
       g_lastBar = bar;
       ZigZagOnNewBar();
+      SyncLiveSlot();
      }
 
    const ENUM_SESSION_STATE session = SessionsOnTick();
