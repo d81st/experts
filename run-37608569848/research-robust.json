@@ -1,0 +1,89 @@
+{
+  "expert": "liq-grab_v2.1",
+  "symbols": [
+    "XAUUSDm",
+    "XAUUSD"
+  ],
+  "period": "M3",
+  "from": "2026.01.05",
+  "to": "2026.07.03",
+  "model": 4,
+  "delay": 200,
+  "deposit": 10000,
+  "currency": "USD",
+  "leverage": 2000,
+  "inputs": {
+    "RiskPercent": 1.0,
+    "TrailingMode": 0,
+    "LevelMode": 0,
+    "TradingTimeframe": 3,
+    "StopMode": 0,
+    "TPMode": 0,
+    "AtrSLMultiplier": 1.5,
+    "MinSLPoints": 1000,
+    "MaxSLPoints": 15000,
+    "SweepSLBufferPoints": 100,
+    "RiskRewardRatio": 2.0,
+    "MinLiquidityRR": 1.5
+  },
+  "variants": [
+    {
+      "name": "pdh-m1-liq",
+      "inputs": {
+        "LevelMode": 1,
+        "TradingTimeframe": 1,
+        "StopMode": 1,
+        "TPMode": 1
+      }
+    },
+    {
+      "name": "pdh-m5-liq",
+      "inputs": {
+        "LevelMode": 1,
+        "TradingTimeframe": 5,
+        "StopMode": 1,
+        "TPMode": 1
+      }
+    },
+    {
+      "name": "pdh-m3-liq-buf50",
+      "inputs": {
+        "LevelMode": 1,
+        "TradingTimeframe": 3,
+        "StopMode": 1,
+        "TPMode": 1,
+        "SweepSLBufferPoints": 50
+      }
+    },
+    {
+      "name": "pdh-m3-liq-buf200",
+      "inputs": {
+        "LevelMode": 1,
+        "TradingTimeframe": 3,
+        "StopMode": 1,
+        "TPMode": 1,
+        "SweepSLBufferPoints": 200
+      }
+    },
+    {
+      "name": "pdh-m3-liq-minrr1.0",
+      "inputs": {
+        "LevelMode": 1,
+        "TradingTimeframe": 3,
+        "StopMode": 1,
+        "TPMode": 1,
+        "MinLiquidityRR": 1.0
+      }
+    },
+    {
+      "name": "pdh-m3-liq-minrr2.0",
+      "inputs": {
+        "LevelMode": 1,
+        "TradingTimeframe": 3,
+        "StopMode": 1,
+        "TPMode": 1,
+        "MinLiquidityRR": 2.0
+      }
+    }
+  ]
+}
