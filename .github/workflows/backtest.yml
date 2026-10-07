@@ -1,10 +1,7 @@
 name: Backtest MQL5
 
+# Только ручной запуск: автозапуск на push гонял все настройки подряд (часы минут Windows).
 on:
-  push:
-    paths:
-      - 'tester/*.json'
-      - '.github/workflows/backtest.yml'
   workflow_dispatch:
     inputs:
       only:
@@ -149,9 +146,12 @@ jobs:
               if ($inputLines) { (@("[TesterInputs]") + $inputLines) | Out-File $ini -Encoding Unicode -Append }
               Write-Host "=== $($cfgFile.Name)${suffix}: $($cfg.expert) on $sym $($cfg.period) $($cfg.from)-$($cfg.to), model $($cfg.model), delay $($cfg.delay) | inputs: $($inputLines -join '; ') ==="
               $t = Start-Process -FilePath "$env:MT5_ROOT\terminal64.exe" -ArgumentList "/portable", "/config:`"$ini`"" -PassThru
-              if (-not $t.WaitForExit(60 * 60 * 1000)) {
-                Write-Host "Tester did not finish in time, killing terminal"
+              # Обычный прогон — 1–5 минут; завис — убиваем через 20 минут и другой символ не пробуем.
+              if (-not $t.WaitForExit(20 * 60 * 1000)) {
+                Write-Host "Tester did not finish in 20 min, killing terminal"
                 Get-Process terminal64, metatester64 -ErrorAction SilentlyContinue | Stop-Process -Force
+                Remove-Item $ini -Force
+                break
               }
               Remove-Item $ini -Force
               $rep = Get-ChildItem $reports -Filter "$name.htm" -ErrorAction SilentlyContinue
