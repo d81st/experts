@@ -7,19 +7,19 @@
 #property description "CRT Trade Bot v4.2 | TrueRB, InsideWick, ghostTrueRB, ghostInsideWick | 3 режима входа | EMA/ADX фильтр"
 
 #include <Trade\Trade.mqh>
-#include "Include/Core/TradeAdapter.mqh"
-#include "Include/Core/BrokerAdapter.mqh"
-#include "Include/Context/SessionFilter.mqh"
-#include "Include/Context/TrendFilter.mqh"
-#include "Include/Core/PositionGuard.mqh"
-#include "Include/Core/TradeExecutor.mqh"
-#include "Include/Exits/Trailing/SyncTrail.mqh"
-#include "Include/Exits/Trailing/BreakevenTrail.mqh"
-#include "Include/Exits/Trailing/TrailingDispatcher.mqh"
-#include "Include/Levels/CrtDetector.mqh"
-#include "Include/Triggers/EntryTrigger.mqh"
-#include "Include/Exits/TimeExit.mqh"
-#include "Include/Core/TesterMetric.mqh"
+#include "../Include/Core/TradeAdapter.mqh"
+#include "../Include/Core/BrokerAdapter.mqh"
+#include "../Include/Context/SessionFilter.mqh"
+#include "../Include/Context/TrendFilter.mqh"
+#include "../Include/Core/PositionGuard.mqh"
+#include "../Include/Core/TradeExecutor.mqh"
+#include "../Include/Exits/Trailing/SyncTrail.mqh"
+#include "../Include/Exits/Trailing/BreakevenTrail.mqh"
+#include "../Include/Exits/Trailing/TrailingDispatcher.mqh"
+#include "../Include/Levels/CrtDetector.mqh"
+#include "../Include/Triggers/EntryTrigger.mqh"
+#include "../Include/Exits/TimeExit.mqh"
+#include "../Include/Core/TesterMetric.mqh"
 CTrade trade;
 ITradeAdapter *g_trade_adapter = NULL;
 TrailingConfig g_trail_cfg;   // заполняется в OnInit, используется TrailingManage
@@ -96,7 +96,7 @@ input double                SyncTrailStepPoints   = 0;
 
 // Параметры сессий — общие для всех ботов; у crt-bot окно у стыка сессий 1 мин.
 #define SESSION_DEFAULT_WINDOW_MINUTES 1
-#include "Include/Context/SessionInputs.mqh"
+#include "../Include/Context/SessionInputs.mqh"
 
 input group "── Фильтр тренда (HTF) ──"
 input bool            UseTrendFilter = true;

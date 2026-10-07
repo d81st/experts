@@ -5,17 +5,17 @@
 //+------------------------------------------------------------------+
 #property strict
 #include <Trade\Trade.mqh>
-#include "Include/Core/TradeAdapter.mqh"
-#include "Include/Core/BrokerAdapter.mqh"
-#include "Include/Context/SessionFilter.mqh"
-#include "Include/Context/TrendFilter.mqh"
-#include "Include/Core/PositionGuard.mqh"
-#include "Include/Core/TradeExecutor.mqh"
-#include "Include/Exits/Trailing/SyncTrail.mqh"
-#include "Include/Exits/Trailing/BreakevenTrail.mqh"
-#include "Include/Exits/Trailing/TrailingDispatcher.mqh"
-#include "Include/Core/TesterMetric.mqh"
-#include "Include/Levels/DayLevels.mqh"
+#include "../Include/Core/TradeAdapter.mqh"
+#include "../Include/Core/BrokerAdapter.mqh"
+#include "../Include/Context/SessionFilter.mqh"
+#include "../Include/Context/TrendFilter.mqh"
+#include "../Include/Core/PositionGuard.mqh"
+#include "../Include/Core/TradeExecutor.mqh"
+#include "../Include/Exits/Trailing/SyncTrail.mqh"
+#include "../Include/Exits/Trailing/BreakevenTrail.mqh"
+#include "../Include/Exits/Trailing/TrailingDispatcher.mqh"
+#include "../Include/Core/TesterMetric.mqh"
+#include "../Include/Levels/DayLevels.mqh"
 //--- Создаем объект торгового класса
 CTrade trade;
 
@@ -89,7 +89,7 @@ input double                BreakevenOffsetPoints = 175;   // Оффсет дл�
 input double                SyncTrailStepPoints   = 0.0;   // Шаг для SYNC (пункты; 0 = любое улучшение)
 
 // Параметры сессий — общие для всех ботов (значения по умолчанию модуля).
-#include "Include/Context/SessionInputs.mqh"
+#include "../Include/Context/SessionInputs.mqh"
 
 input group "Trend Filter (opt-in)"
 // Тренд-фильтр opt-in: при UseTrendFilter=false (по умолчанию)

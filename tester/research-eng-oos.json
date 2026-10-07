@@ -11,7 +11,7 @@
   "deposit": 10000,
   "currency": "USD",
   "leverage": 2000,
-  "expert": "engulfing-bot_v2.1",
+  "expert": "archive/engulfing-bot_v2.1",
   "inputs": {
     "RiskPercent": 1.0,
     "TrailingMode": 0,

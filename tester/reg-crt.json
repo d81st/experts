@@ -11,7 +11,7 @@
   "deposit": 1000,
   "currency": "USD",
   "leverage": 2000,
-  "expert": "crt-bot_v4.2",
+  "expert": "archive/crt-bot_v4.2",
   "variants": [
     {
       "name": "default",

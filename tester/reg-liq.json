@@ -11,7 +11,7 @@
   "deposit": 1000,
   "currency": "USD",
   "leverage": 2000,
-  "expert": "liq-grab_v2.1",
+  "expert": "archive/liq-grab_v2.1",
   "variants": [
     {
       "name": "default",

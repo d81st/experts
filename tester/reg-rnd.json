@@ -11,7 +11,7 @@
   "deposit": 1000,
   "currency": "USD",
   "leverage": 2000,
-  "expert": "random-entry-bench",
+  "expert": "archive/random-entry-bench",
   "variants": [
     {
       "name": "s1-t8",

@@ -37,9 +37,9 @@
 #property strict
 #property description "RB+CRT Notification Bot v8.1 | Multi-TF | модульная архитектура"
 
-#include "Include/Levels/CrtDetector.mqh"
-#include "Include/Notify/MultiTfScheduler.mqh"
-#include "Include/Notify/PushNotifier.mqh"
+#include "../Include/Levels/CrtDetector.mqh"
+#include "../Include/Notify/MultiTfScheduler.mqh"
+#include "../Include/Notify/PushNotifier.mqh"
 
 input group "── Анализ ──"
 input double ImbBodyRatio        = 0.40;  // Мин. доля тела IMB от полного диапазона

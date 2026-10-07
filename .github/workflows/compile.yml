@@ -57,7 +57,9 @@ jobs:
           New-Item -ItemType Directory -Force $logs | Out-Null
           $failed = 0
           $summary = @("| Файл | Ошибки | Предупреждения |", "|---|---|---|")
-          foreach ($f in Get-ChildItem $env:GITHUB_WORKSPACE -Filter *.mq5) {
+          # Боты в корне и старые боты в archive/.
+          $files = @(Get-ChildItem $env:GITHUB_WORKSPACE -Filter *.mq5) + @(Get-ChildItem "$env:GITHUB_WORKSPACE\archive" -Filter *.mq5 -ErrorAction SilentlyContinue)
+          foreach ($f in $files) {
             $log = Join-Path $logs ($f.BaseName + ".log")
             Start-Process -FilePath $me -ArgumentList "/compile:`"$($f.FullName)`"", "/log:`"$log`"", "/inc:`"$env:MQL5_DIR`"" -Wait
             if (-not (Test-Path $log)) {
