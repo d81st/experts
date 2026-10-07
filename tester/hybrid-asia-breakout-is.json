@@ -9,11 +9,11 @@
   "to": "2026.05.29",
   "model": 4,
   "delay": 200,
-  "deposit": 1000,
+  "deposit": 10000,
   "currency": "USD",
   "leverage": 2000,
   "inputs": {
-    "RiskPercent": 3.0,
+    "RiskPercent": 1.0,
     "EntryMode": 1,
     "StopMode": 0,
     "RiskReward": 1.5,
