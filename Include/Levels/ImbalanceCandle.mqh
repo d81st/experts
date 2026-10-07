@@ -18,12 +18,15 @@
 //| ImbalanceConfig — условия свечи (доли ATR предыдущих свечей).    |
 //|   minRangeAtr  — длина свечи (тень к тени) ≥ N × ATR             |
 //|   minBodyRatio — тело ≥ доли всей свечи                          |
+//|   requireGap   — нужен ли гэп (false — свеча только по длине и   |
+//|                  телу)                                           |
 //|   minGapAtr    — гэп ≥ N × ATR                                   |
 //+------------------------------------------------------------------+
 struct ImbalanceConfig
   {
    double minRangeAtr;
    double minBodyRatio;
+   bool   requireGap;
    double minGapAtr;
   };
 
@@ -41,6 +44,8 @@ bool ImbalanceDetect(const MqlRates &r2, const MqlRates &r1, const double atr,
    if(range < c.minRangeAtr * atr || MathAbs(r1.close - r1.open) < c.minBodyRatio * range)
       return false;
    dir = (r1.close > r1.open) ? 1 : -1;
+   if(!c.requireGap)
+      return true;
    const double gap = (dir == 1) ? r1.close - r2.high : r2.low - r1.close;
    return gap > 0.0 && gap >= c.minGapAtr * atr;
   }

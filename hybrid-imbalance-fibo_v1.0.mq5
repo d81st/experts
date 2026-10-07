@@ -48,6 +48,7 @@ input group "── Имбаланс-свеча ──"
 input int    ImbAtrPeriod    = 10;    // ATR свечей до имбаланса
 input double ImbMinRangeATR  = 1.0;   // Длина свечи (тень к тени) ≥ N × ATR
 input double ImbMinBodyRatio = 0.6;   // Тело ≥ доли свечи
+input bool   ImbRequireGap   = true;  // Гэп обязателен (false — свеча только по длине и телу)
 input double ImbMinGapATR    = 0.2;   // Гэп (закрытие − экстремум предыдущей) ≥ N × ATR
 input int    ZoneLifeBars    = 0;     // Уровни живут N свечей (0 = до следующей имбаланс-свечи)
 
@@ -191,6 +192,7 @@ int OnInit()
      }
    g_imb_cfg.minRangeAtr  = ImbMinRangeATR;
    g_imb_cfg.minBodyRatio = ImbMinBodyRatio;
+   g_imb_cfg.requireGap   = ImbRequireGap;
    g_imb_cfg.minGapAtr    = ImbMinGapATR;
    SessionsSetup();
 
@@ -205,9 +207,10 @@ int OnInit()
    g_zo_cfg.commentPrefix    = "HIF";
    ZoneOrdersInit(g_zo, IMB_SLOTS);
 
-   PrintFormat("✅ Hybrid Imbalance Fibo v1.0 | Magic:%d TF:%s | свеча ≥ %.1f×ATR(%d), тело ≥ %.0f%%, гэп ≥ %.2f×ATR | мин. стоп %.2f USD",
+   PrintFormat("✅ Hybrid Imbalance Fibo v1.0 | Magic:%d TF:%s | свеча ≥ %.1f×ATR(%d), тело ≥ %.0f%%, гэп %s | мин. стоп %.2f USD",
                MagicNumber, EnumToString(TradingTimeframe), ImbMinRangeATR, ImbAtrPeriod,
-               ImbMinBodyRatio * 100.0, ImbMinGapATR, MinSLPoints / 1000.0);
+               ImbMinBodyRatio * 100.0, ImbRequireGap ? StringFormat("≥ %.2f×ATR", ImbMinGapATR) : "выкл.",
+               MinSLPoints / 1000.0);
    return INIT_SUCCEEDED;
   }
 
