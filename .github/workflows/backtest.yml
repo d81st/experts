@@ -47,7 +47,7 @@ jobs:
           Copy-Item "$env:GITHUB_WORKSPACE\*.mq5" $dst
           Copy-Item "$env:GITHUB_WORKSPACE\Include" $dst -Recurse -Force
           # Боты в папках hybrid/ и archive/ (подключают ../Include), в терминале — experts\hybrid, experts\archive.
-          foreach ($d in @("hybrid", "archive")) { if (Test-Path "$env:GITHUB_WORKSPACE\$d") { Copy-Item "$env:GITHUB_WORKSPACE\$d" $dst -Recurse -Force } }
+          foreach ($d in @("hybrid", "archive", "tools")) { if (Test-Path "$env:GITHUB_WORKSPACE\$d") { Copy-Item "$env:GITHUB_WORKSPACE\$d" $dst -Recurse -Force } }
           foreach ($f in Get-ChildItem $dst -Filter *.mq5 -Recurse) {
             $log = "$env:RUNNER_TEMP\$($f.BaseName).compile.log"
             Start-Process -FilePath "$env:MT5_ROOT\metaeditor64.exe" -ArgumentList "/compile:`"$($f.FullName)`"", "/log:`"$log`"", "/inc:`"$env:MT5_ROOT\MQL5`"" -Wait
@@ -175,6 +175,14 @@ jobs:
           Copy-Item "$env:GITHUB_WORKSPACE\tester\*.json" $out
           Copy-Item "$env:MT5_ROOT\reports\*" $out -ErrorAction SilentlyContinue
           Copy-Item "$env:MT5_ROOT\logs\*.log" "$out\logs" -ErrorAction SilentlyContinue
+          # Данные, которые советники пишут в общую папку (tools/bar-dump.mq5): CSV сжимаем в data\.
+          $common = "$env:APPDATA\MetaQuotes\Terminal\Common\Files"
+          if (Test-Path $common) {
+            Get-ChildItem $common -Filter *.csv -ErrorAction SilentlyContinue | ForEach-Object {
+              New-Item -ItemType Directory -Force "$out\data" | Out-Null
+              Compress-Archive -Path $_.FullName -DestinationPath "$out\data\$($_.BaseName).zip" -CompressionLevel Optimal -Force
+            }
+          }
           Get-ChildItem "$env:MT5_ROOT\Tester" -Recurse -Filter *.log -ErrorAction SilentlyContinue |
             ForEach-Object { Copy-Item $_.FullName ("$out\logs\tester_" + $_.Directory.Parent.Name + "_" + $_.Name) }
           # Журналы сжимаем: за длинный период они весят сотни МБ (лимит GitHub — 100 МБ на файл).
