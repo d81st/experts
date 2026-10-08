@@ -3,7 +3,7 @@
   "symbols": [
     "XAUUSDm"
   ],
-  "period": "H1",
+  "period": "M5",
   "from": "2025.01.01",
   "to": "2026.10.07",
   "model": 2,
