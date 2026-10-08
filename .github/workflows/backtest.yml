@@ -46,8 +46,8 @@ jobs:
           New-Item -ItemType Directory -Force $dst | Out-Null
           Copy-Item "$env:GITHUB_WORKSPACE\*.mq5" $dst
           Copy-Item "$env:GITHUB_WORKSPACE\Include" $dst -Recurse -Force
-          # Старые боты — в archive/ (подключают ../Include), в терминале — experts\archive.
-          if (Test-Path "$env:GITHUB_WORKSPACE\archive") { Copy-Item "$env:GITHUB_WORKSPACE\archive" $dst -Recurse -Force }
+          # Боты в папках hybrid/ и archive/ (подключают ../Include), в терминале — experts\hybrid, experts\archive.
+          foreach ($d in @("hybrid", "archive")) { if (Test-Path "$env:GITHUB_WORKSPACE\$d") { Copy-Item "$env:GITHUB_WORKSPACE\$d" $dst -Recurse -Force } }
           foreach ($f in Get-ChildItem $dst -Filter *.mq5 -Recurse) {
             $log = "$env:RUNNER_TEMP\$($f.BaseName).compile.log"
             Start-Process -FilePath "$env:MT5_ROOT\metaeditor64.exe" -ArgumentList "/compile:`"$($f.FullName)`"", "/log:`"$log`"", "/inc:`"$env:MT5_ROOT\MQL5`"" -Wait

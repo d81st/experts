@@ -1,5 +1,5 @@
 {
-  "expert": "hybrid-nfp-straddle_v1.0",
+  "expert": "hybrid/hybrid-nfp-straddle_v1.0",
   "symbols": [
     "XAUUSDm",
     "XAUUSD"

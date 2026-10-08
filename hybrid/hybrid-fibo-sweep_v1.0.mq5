@@ -12,17 +12,17 @@
 #property description "Hybrid Fibo Sweep v1.0 | снятие ликвидности за фибо-зоной 1.212 / 1.618 и возврат"
 
 #include <Trade\Trade.mqh>
-#include "Include/Core/TradeAdapter.mqh"
-#include "Include/Core/BrokerAdapter.mqh"
-#include "Include/Context/SessionFilter.mqh"
-#include "Include/Core/PositionGuard.mqh"
-#include "Include/Core/TradeExecutor.mqh"
-#include "Include/Exits/Trailing/SyncTrail.mqh"
-#include "Include/Exits/Trailing/BreakevenTrail.mqh"
-#include "Include/Exits/Trailing/TrailingDispatcher.mqh"
-#include "Include/Core/TesterMetric.mqh"
-#include "Include/Levels/FiboWave.mqh"
-#include "Include/Triggers/ZoneOrders.mqh"
+#include "../Include/Core/TradeAdapter.mqh"
+#include "../Include/Core/BrokerAdapter.mqh"
+#include "../Include/Context/SessionFilter.mqh"
+#include "../Include/Core/PositionGuard.mqh"
+#include "../Include/Core/TradeExecutor.mqh"
+#include "../Include/Exits/Trailing/SyncTrail.mqh"
+#include "../Include/Exits/Trailing/BreakevenTrail.mqh"
+#include "../Include/Exits/Trailing/TrailingDispatcher.mqh"
+#include "../Include/Core/TesterMetric.mqh"
+#include "../Include/Levels/FiboWave.mqh"
+#include "../Include/Triggers/ZoneOrders.mqh"
 CTrade trade;
 ITradeAdapter *g_trade_adapter = NULL;
 TrailingConfig g_trail_cfg;
@@ -84,7 +84,7 @@ input double                SyncTrailStepPoints   = 0.0;
 #define SESSION_DEFAULT_SELECTED      false
 #define SESSION_DEFAULT_LONDON        false
 #define SESSION_DEFAULT_CLOSE_ON_EXIT false
-#include "Include/Context/SessionInputs.mqh"
+#include "../Include/Context/SessionInputs.mqh"
 
 //── Состояние ─────────────────────────────────────────────────────────
 

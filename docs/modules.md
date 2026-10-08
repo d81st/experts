@@ -71,9 +71,9 @@
 
 ## Боты
 
-В корне — fibo-zones и гибриды (`hybrid-*`). Старые боты (liq-grab, crt-bot, engulfing, crt-push,
-random-entry-bench) — в `archive/`: подключают модули через `../Include/`, компилируются вместе с остальными;
-в настройках тестов — `"expert": "archive/<имя>"`. На ПК папка `archive` кладётся рядом с `Include`.
+Рабочие боты — в `hybrid/`, старые (liq-grab, crt-bot, engulfing, crt-push, random-entry-bench, fibo-zones) —
+в `archive/`. Обе папки подключают модули через `../Include/` и компилируются на GitHub; в настройках тестов —
+`"expert": "hybrid/<имя>"` или `"archive/<имя>"`. На ПК папки `hybrid` и `archive` кладутся рядом с `Include`.
 
 | Бот | Уровни | Триггер | Выход | Контекст |
 |---|---|---|---|---|

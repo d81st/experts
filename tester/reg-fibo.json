@@ -11,7 +11,7 @@
   "deposit": 1000,
   "currency": "USD",
   "leverage": 2000,
-  "expert": "fibo-zones_v1.2",
+  "expert": "archive/fibo-zones_v1.2",
   "variants": [
     {
       "name": "m5-limit",

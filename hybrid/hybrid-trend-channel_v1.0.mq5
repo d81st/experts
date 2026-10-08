@@ -16,17 +16,17 @@
 #property description "Hybrid Trend Channel v1.0 | пробой канала на H4/D1, выход по обратному каналу"
 
 #include <Trade\Trade.mqh>
-#include "Include/Core/TradeAdapter.mqh"
-#include "Include/Core/BrokerAdapter.mqh"
-#include "Include/Core/PositionGuard.mqh"
-#include "Include/Core/TradeExecutor.mqh"
-#include "Include/Exits/Trailing/SyncTrail.mqh"
-#include "Include/Exits/Trailing/BreakevenTrail.mqh"
-#include "Include/Exits/Trailing/TrailingDispatcher.mqh"
-#include "Include/Core/TesterMetric.mqh"
-#include "Include/Triggers/ChannelBreakout.mqh"
-#include "Include/Context/MarketRegime.mqh"
-#include "Include/Context/NewsTimes.mqh"
+#include "../Include/Core/TradeAdapter.mqh"
+#include "../Include/Core/BrokerAdapter.mqh"
+#include "../Include/Core/PositionGuard.mqh"
+#include "../Include/Core/TradeExecutor.mqh"
+#include "../Include/Exits/Trailing/SyncTrail.mqh"
+#include "../Include/Exits/Trailing/BreakevenTrail.mqh"
+#include "../Include/Exits/Trailing/TrailingDispatcher.mqh"
+#include "../Include/Core/TesterMetric.mqh"
+#include "../Include/Triggers/ChannelBreakout.mqh"
+#include "../Include/Context/MarketRegime.mqh"
+#include "../Include/Context/NewsTimes.mqh"
 CTrade trade;
 ITradeAdapter *g_trade_adapter = NULL;
 TrailingConfig g_trail_cfg;
