@@ -1,0 +1,38 @@
+{
+  "symbols": [
+    "XAUUSDm",
+    "XAUUSD"
+  ],
+  "period": "M1",
+  "from": "2026.09.01",
+  "to": "2026.10.01",
+  "model": 4,
+  "delay": 200,
+  "deposit": 1000,
+  "currency": "USD",
+  "leverage": 2000,
+  "expert": "archive/liq-grab_v2.1",
+  "variants": [
+    {
+      "name": "default",
+      "inputs": {}
+    },
+    {
+      "name": "prevday-sweep",
+      "inputs": {
+        "LevelMode": 1,
+        "StopMode": 1,
+        "TPMode": 1
+      }
+    },
+    {
+      "name": "asia-atr-sync",
+      "inputs": {
+        "LevelMode": 2,
+        "StopMode": 2,
+        "TrailingMode": 2,
+        "TradingTimeframe": 5
+      }
+    }
+  ]
+}
