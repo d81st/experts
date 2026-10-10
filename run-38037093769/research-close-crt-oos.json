@@ -1,0 +1,70 @@
+{
+  "expert": "archive/crt-bot_v4.2",
+  "symbols": [
+    "XAUUSDm",
+    "XAUUSD"
+  ],
+  "period": "M1",
+  "from": "2026.06.01",
+  "to": "2026.10.05",
+  "model": 4,
+  "delay": 200,
+  "deposit": 10000,
+  "currency": "USD",
+  "leverage": 2000,
+  "inputs": {
+    "RiskPercent": 1.0,
+    "TrailingMode": 0,
+    "UseSessionFilter": false,
+    "CloseOnSessionExit": false,
+    "UseAsianSession": false,
+    "UseSelectedSessions": false,
+    "UseLondonSession": false,
+    "UseNewYorkSession": false,
+    "TradingTimeframe": 15,
+    "TrendTimeframe": 16385,
+    "EntryMode": 0,
+    "MinSLPoints": 2000,
+    "MaxSLPoints": 20000,
+    "UseTakeProfit": true,
+    "TimeExitBars": 0
+  },
+  "variants": [
+    {
+      "name": "close-t4",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "TrendTimeframe": 16385,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000,
+        "UseTakeProfit": false,
+        "EntryMode": 3,
+        "TimeExitBars": 4
+      }
+    },
+    {
+      "name": "close-t8",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "TrendTimeframe": 16385,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000,
+        "UseTakeProfit": false,
+        "EntryMode": 3,
+        "TimeExitBars": 8
+      }
+    },
+    {
+      "name": "close-t12",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "TrendTimeframe": 16385,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000,
+        "UseTakeProfit": false,
+        "EntryMode": 3,
+        "TimeExitBars": 12
+      }
+    }
+  ]
+}

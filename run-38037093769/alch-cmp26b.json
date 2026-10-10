@@ -1,0 +1,76 @@
+{
+  "expert": "hybrid/hybrid-alchemist_v1.0",
+  "symbols": [
+    "XAUUSDm",
+    "XAUUSD"
+  ],
+  "period": "M1",
+  "from": "2026.06.01",
+  "to": "2026.10.05",
+  "model": 4,
+  "delay": 200,
+  "deposit": 10000,
+  "currency": "USD",
+  "leverage": 2000,
+  "inputs": {
+    "RiskPercent": 1.0
+  },
+  "variants": [
+    {
+      "name": "h1-x12-atr3",
+      "inputs": {}
+    },
+    {
+      "name": "h1-x12-atr2",
+      "inputs": {
+        "StopAtrMult": 2.0
+      }
+    },
+    {
+      "name": "h1-x4-atr3",
+      "inputs": {
+        "ExitBars": 4
+      }
+    },
+    {
+      "name": "h1-x24-atr3",
+      "inputs": {
+        "ExitBars": 24
+      }
+    },
+    {
+      "name": "m30-x24-atr3",
+      "inputs": {
+        "TradingTimeframe": 30,
+        "ExitBars": 24
+      }
+    },
+    {
+      "name": "h2-x6-atr3",
+      "inputs": {
+        "TradingTimeframe": 16386,
+        "ExitBars": 6
+      }
+    },
+    {
+      "name": "h4-x3-atr3",
+      "inputs": {
+        "TradingTimeframe": 16388,
+        "ExitBars": 3
+      }
+    },
+    {
+      "name": "h1-x12-atr3-long",
+      "inputs": {
+        "TradeSide": 1
+      }
+    },
+    {
+      "name": "h1-x24-opp-atr3",
+      "inputs": {
+        "ExitBars": 24,
+        "ExitOnOpposite": true
+      }
+    }
+  ]
+}
