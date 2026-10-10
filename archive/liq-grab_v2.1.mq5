@@ -574,20 +574,17 @@ void CheckExitConditions() { /* заглушка */ }
 //| держит явного EA-pending state (ни g_pending, ни g_pattern_*) —  |
 //| только делегат к PositionGuard + диагностический Print           |
 //| (anti-spam: вызывающий код гарантирует ровно один                |
-//| вызов через edge-trigger `wasInsideOnPreviousTick`).             |
+//| вызов: событие выхода срабатывает один раз).                     |
 //|                                                                  |
-//| UTC-время выхода берётся из                                      |
-//| `g_selected_state.lastEvaluatedUtcSec` (секунды суток UTC,       |
-//| обновлены `SelectedSessionsIsInside` внутри `DetectExit` на этом |
-//| же тике) — детерминированно и без повторного обращения к         |
-//| `TimeGMT()`.                                                     |
+//| UTC-время выхода — `SessionsUtcNow()` (секунды суток UTC,        |
+//| пересчитаны `SessionsOnTick()` на этом же тике).                 |
 //+------------------------------------------------------------------+
 void HandleSessionExitClose()
   {
    const int closed    = PositionGuardCloseAll(trade, MagicNumber);
    const int cancelled = PositionGuardCancelAllPending(trade, MagicNumber);
 
-   const long t = g_selected_state.lastEvaluatedUtcSec;
+   const long t = SessionsUtcNow();
    PrintFormat("⏰ Session exit | UTC=%02d:%02d:%02d | closed=%d | cancelled=%d",
                (int)(t / 3600), (int)((t % 3600) / 60), (int)(t % 60),
                closed, cancelled);

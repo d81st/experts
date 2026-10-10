@@ -413,11 +413,10 @@ void CloseAllOpenPositions()
 //+------------------------------------------------------------------+
 //| ЗАКРЫТИЕ ПО SESSION_EXIT_EVENT (новый Selected Sessions API)     |
 //|                                                                  |
-//| Вызывается из OnTick prelude после SelectedSessionsDetectExit==  |
-//| true и только при CloseOnSessionExit=true. Edge-trigger в        |
-//| DetectExit гарантирует ровно один вызов на переход inside→       |
-//| outside, поэтому Print здесь тоже один на                        |
-//| событие.                                                         |
+//| Вызывается из OnTick, когда SessionsOnTick() вернул              |
+//| SESSION_JUST_EXITED, и только при CloseOnSessionExit=true.       |
+//| Событие выхода срабатывает один раз на переход inside→outside,   |
+//| поэтому Print здесь тоже один на событие.                        |
 //|                                                                  |
 //| Контракт:                                                        |
 //|   1. PositionGuardCloseAll(trade, MagicNumber)                   |
@@ -425,10 +424,8 @@ void CloseAllOpenPositions()
 //|   3. EA-specific pending: ResetPattern + g_pending_ticket=0      |
 //|   4. Один Print с UTC-временем выхода и счётчиками               |
 //|                                                                  |
-//| UTC-время берём из g_selected_state.lastEvaluatedUtcSec — оно    |
-//| записано последним вызовом SelectedSessionsIsInside (внутри      |
-//| SelectedSessionsDetectExit) и не требует повторного обращения к  |
-//| TimeGMT().                                                       |
+//| UTC-время — SessionsUtcNow(): пересчитано в SessionsOnTick()     |
+//| на этом же тике.                                                 |
 //+------------------------------------------------------------------+
 void HandleSessionExitClose()
 {
@@ -439,7 +436,7 @@ void HandleSessionExitClose()
    ResetPattern();
    g_pending_ticket = 0;
 
-   const long utcSec = g_selected_state.lastEvaluatedUtcSec;
+   const long utcSec = SessionsUtcNow();
    const int  hh = (int)(utcSec / 3600);
    const int  mm = (int)((utcSec % 3600) / 60);
    const int  ss = (int)(utcSec % 60);

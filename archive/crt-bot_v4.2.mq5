@@ -228,7 +228,7 @@ void CloseAllOpenPositions()
 //|                                                                  |
 //| Вызывается из OnTick prelude ровно один раз на                   |
 //| переход inside→outside, когда CloseOnSessionExit = true.         |
-//| Edge-trigger гарантируется SelectedSessionsDetectExit.           |
+//| Событие выхода срабатывает один раз (SessionsOnTick).            |
 //|                                                                  |
 //| 1) PositionGuardCloseAll(trade, MagicNumber)                     |
 //| 2) PositionGuardCancelAllPending(trade, MagicNumber)             |
@@ -245,9 +245,9 @@ void HandleSessionExitClose()
    // pending-ордер уже отменён модулем PositionGuard выше.
    g_pending.Reset();
 
-   // UTC-время выхода: берём из state, обновлённого DetectExit на текущем
-   // тике (lastEvaluatedUtcSec — секунды суток UTC, [0, 86399]).
-   const long utcSec = g_selected_state.lastEvaluatedUtcSec;
+   // UTC-время выхода: пересчитано SessionsOnTick() на текущем
+   // тике (секунды суток UTC, [0, 86399]).
+   const long utcSec = SessionsUtcNow();
    const int  hh     = (int)(utcSec / 3600);
    const int  mm     = (int)((utcSec % 3600) / 60);
    const int  ss     = (int)(utcSec % 60);
