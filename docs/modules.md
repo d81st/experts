@@ -34,7 +34,7 @@
 
 | Модуль | Что делает | Боты |
 |---|---|---|
-| `SessionFilter`, `SessionInputs` | окно у стыка сессий, выбор сессий (Азия/Лондон/НЙ), закрытие на выходе; общие входные параметры | все торговые |
+| `SessionFilter`, `SessionInputs` | один фильтр (одна конфигурация, часы сервера → UTC) с двумя правилами: выбранные сессии Азия/Лондон/НЙ в UTC с событием выхода; окно у дневного перерыва — не входить ±N минут, закрыть перед закрытием Америки; общие входные параметры (имена прежние) | все торговые |
 | `TrendFilter` | EMA fast/slow и ADX на старшем таймфрейме → разрешённое направление | crt-bot, engulfing, liq-grab (выкл.), random-entry-bench |
 | `MarketRegime` | тренд или флэт по коэффициенту эффективности (ER) за N баров; режимы: выкл. / только тренд / во флэте — против сигнала | hybrid-trend-channel, hybrid-asia-breakout (выкл. по умолчанию) |
 | `NewsTimes` | время выходов NFP, CPI, решений FOMC и ISM PMI за 2024–2026 (списки в коде, свои даты — параметром), общий список `NewsBuildList`, окно «рядом с новостью» | hybrid-nfp-straddle, hybrid-trend-channel (фильтры NFP и CPI/FOMC/ISM, выкл.) |
@@ -47,10 +47,8 @@
 | `FiboZones` | зона фибо (`FiboZone`: сторона, ближний и дальний край, цель) от волны или диапазона: откат и зоны за диапазоном | fibo-zones, hybrid-fibo-day |
 | `DayLevels` | максимум/минимум предыдущего дня и окна часов (Азия) со временем экстремумов | liq-grab, hybrid-fibo-day |
 | `ImbalanceCandle` | имбаланс-свеча (длинная, сильное тело, гэп за предыдущей свечой) и фибо-зоны от неё: откат внутри свечи, зоны за концом и за началом | hybrid-imbalance-fibo |
-| `CrtDetector` | паттерны CRT (TrueRB, InsideWick, bare imbalance, ghost) с уровнем входа | crt-bot, crt-push |
+| `CrtDetector` | паттерны CRT (TrueRB, InsideWick, bare imbalance, ghost) с уровнем входа; `CrtEntryPrice`, `CrtStopTarget` — вход, стоп за имбалансом и доджи, цель — тень доджи или край тела | crt-bot, crt-push |
 
-Ещё внутри ботов (кандидаты на вынос): цепочка экстремумов и снятие ликвидности
-(liq-grab), паттерн поглощения и уровень 50% (engulfing), стоп и цель паттерна (crt-bot).
 
 ### Triggers — когда входить
 
@@ -59,6 +57,9 @@
 | `EntryTrigger` | для сигнала с уровнем: касание (MARKET), снятие + возврат, закрытие бара за уровнем (CLOSE_CONFIRM); стоп пройден до входа — сигнал отменяется | crt-bot, engulfing |
 | `ZoneOrders` | вход от зон `FiboZone`: лимитка на ближнем краю или подтверждение закрытым баром; стоп за дальним краем + отступ (не меньше минимума); учёт ордеров по слотам, одна лимитка на направление, сдвиг через `OrderModify`, удаление ордеров вне учёта, закрытие лишней позиции; `askShiftPoints` (в ботах `AskShiftPoints`, 0 = выкл.) — сдвиг цен, исполняемых по Ask (вход Buy Limit, стоп и тейк продажи): зоны строятся по Bid-свечам | fibo-zones, hybrid-fibo-day |
 | `ChannelBreakout` | пробой канала Дончиана: закрытие за максимумом/минимумом N баров — вход, за противоположной границей короткого канала — выход | hybrid-trend-channel |
+| `LiquiditySweep` | снятие ликвидности: тренд по цепочке экстремумов + прокол уровня свечи цепочки с закрытием обратно (`StreakSweepSignal`); снятие границы дня/Азии, одна сделка на сторону в день (`RangeSweepSignal`); противоположный экстремум как цель | liq-grab |
+| `EngulfingPattern` | поглощение двух свечей (`EngulfingDetect`); уровень 50% тела (`EngulfingMidLevel`), стоп за экстремумами ± отступ в пределах мин./макс., цель по RR (`EngulfingStopTarget`) | engulfing, hybrid-fibo-pattern |
+| `AlchemistSignal` | первый бар, где сошлись SMA, наклон HMA, CCI за ±порогом и EMA старшего ТФ (каждый фильтр, кроме SMA, отключается) | hybrid-alchemist |
 
 ### Exits — сопровождение и выход
 
@@ -77,9 +78,9 @@
 
 | Бот | Уровни | Триггер | Выход | Контекст |
 |---|---|---|---|---|
-| liq-grab | цепочка экстремумов / `DayLevels` | снятие на закрытом баре (внутри бота) | фикс./за снятием/ATR стоп, RR или ликвидность, трейлинг | сессии, `TrendFilter` (выкл.) |
+| liq-grab | цепочка экстремумов / `DayLevels` | `LiquiditySweep` (снятие на закрытом баре) | фикс./за снятием/ATR стоп, RR или ликвидность, трейлинг | сессии, `TrendFilter` (выкл.) |
 | crt-bot | `CrtDetector` | `EntryTrigger` | стоп и цель паттерна, `TimeExit`, трейлинг | сессии, `TrendFilter` |
-| engulfing | поглощение 50% (внутри бота) | `EntryTrigger` | RR, `TimeExit`, трейлинг | сессии, `TrendFilter` |
+| engulfing | `EngulfingPattern` (уровень 50%) | `EntryTrigger` | RR, `TimeExit`, трейлинг | сессии, `TrendFilter` |
 | fibo-zones | `AtrZigZag` + `FiboZones` | `ZoneOrders` | стоп за зоной, цель — линия 0/1, трейлинг | сессии |
 | **hybrid-fibo-day** | `DayLevels` + `FiboZones` | `ZoneOrders` | стоп за зоной, цель — граница дня | сессии |
 | **hybrid-fibo-pattern** | `AtrZigZag` + `FiboZones` (`FiboWave`) | `EngulfingPattern` / `CrtDetector` в зоне, вход по рынку | стоп за зоной или паттерном, цель — линия 0/1 | сессии |
@@ -88,6 +89,7 @@
 | **hybrid-nfp-straddle** | `NewsTimes` (NFP) | buy stop / sell stop по обе стороны цены перед выходом, второй снимается | стоп от входа, RR, закрытие через N минут | — |
 | **hybrid-fibo-sweep** | `FiboWave` (зоны 1.212 / 1.618) | прокол зоны насквозь и закрытие обратно (внутри бота), вход по рынку | стоп за проколом, цель — граница диапазона или RR | сессии |
 | **hybrid-imbalance-fibo** | `ImbalanceCandle` (фибо от свечи) | `ZoneOrders` (лимитки) | стоп за зоной, цель — линия 0/1 свечи | сессии |
+| **hybrid-alchemist** | — | `AlchemistSignal`, вход по рынку на следующем баре (после дневного перерыва — на первом тике) | через N баров, стоп N × ATR, встречный сигнал | `MarketRegime`, `NewsTimes` (выкл.) |
 | random-entry-bench | случайно | — | `TimeExit` | `TrendFilter` |
 | crt-push | `CrtDetector` | — (уведомления) | — | `Notify/*` |
 
