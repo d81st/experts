@@ -1,0 +1,17 @@
+{
+  "expert": "tools/bar-dump",
+  "symbols": [
+    "XAUUSDm"
+  ],
+  "period": "M5",
+  "from": "2025.01.01",
+  "to": "2026.10.07",
+  "model": 2,
+  "delay": 0,
+  "deposit": 10000,
+  "currency": "USD",
+  "leverage": 2000,
+  "inputs": {
+    "Timeframe": 5
+  }
+}
