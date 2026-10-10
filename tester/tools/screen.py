@@ -556,17 +556,89 @@ def run_alch(m5, args, rng):
                 tr = [(i, d, trade_result(F, i, d, N)) for i, d in sig]
                 print(fmt(f"MA200 HMA{hp} CCI±{thr} N={N}", evaluate(F, tr, N, rng, True), True))
 
+
+# ── 5. Круглые уровни (Osler 2003, 2005) ─────────────────────────────
+
+def level_races(F, L, side, r, K, period_mask):
+    """Подходы к уровню L и «гонка» от него. side = −1: сопротивление (подход снизу),
+    +1: поддержка (подход сверху). Подход засчитывается, если после прошлого подхода цена
+    уходила от уровня на r. Исход: 1 — отскок на r назад раньше, чем продолжение на r дальше;
+    0 — продолжение; бар, задевший обе цели, и гонки дольше K баров отбрасываются.
+    Возвращает список (бар подхода, исход)."""
+    h, l = F.h, F.l
+    if side == -1:
+        touch = np.flatnonzero(h >= L); arm = np.flatnonzero(l <= L - r)
+        cont = np.flatnonzero(h >= L + r); back = np.flatnonzero(l <= L - r)
+    else:
+        touch = np.flatnonzero(l <= L); arm = np.flatnonzero(h >= L + r)
+        cont = np.flatnonzero(l <= L - r); back = np.flatnonzero(h >= L + r)
+    out = []
+    if len(touch) == 0 or len(arm) == 0:
+        return out
+    t = -1
+    while True:
+        # следующий «уход» после прошлого подхода, затем первое касание после него
+        k = np.searchsorted(arm, t + 1)
+        if k >= len(arm):
+            break
+        j = np.searchsorted(touch, arm[k] + 1)
+        if j >= len(touch):
+            break
+        t = touch[j]
+        if not period_mask[t]:
+            continue
+        ic = np.searchsorted(cont, t); ib = np.searchsorted(back, t + 1)
+        tc = cont[ic] if ic < len(cont) else F.n
+        tb = back[ib] if ib < len(back) else F.n
+        if min(tc, tb) > t + K or tc == tb:
+            continue
+        out.append((t, 1 if tb < tc else 0))
+    return out
+
+
+def run_round(m5, args, rng):
+    print("# 5. Круглые уровни (Osler): отскок перед круглым числом, ускорение за ним\n")
+    F = Frame(resample(m5, "5min"), "M5")
+    lo, hi = np.nanmin(F.l), np.nanmax(F.h)
+    K = 288   # сутки на M5
+    for step in (50, 100):
+        for r in (2.0, 5.0):
+            print(f"## шаг {step} USD, гонка ±{r} USD (M5, до суток)")
+            print("сдвиг от круглого числа по ходу подхода | подходов | доля отскоков | по периодам")
+            offsets = [-2.0, -1.0, -0.5, 0.0, 0.5, 1.0, 2.0] + [float(x) for x in range(5, step, 5)]
+            base = []
+            for off in offsets:
+                res = {k: [] for k in range(len(PERIODS))}
+                for side in (-1, 1):
+                    # сопротивление: уровень = круглое + off; поддержка: круглое − off
+                    first = np.floor(lo / step) * step
+                    for rnd in np.arange(first, hi + step, step):
+                        L = rnd + off if side == -1 else rnd - off
+                        for k in range(len(PERIODS)):
+                            for t, o in level_races(F, L, side, r, K, F.period == k):
+                                res[k].append(o)
+                allv = [o for k in res for o in res[k]]
+                if not allv:
+                    continue
+                by = " ".join(f"{np.mean(res[k]):.3f}({len(res[k])})" for k in res)
+                tag = "КРУГЛОЕ" if off == 0 else ""
+                print(f"{off:+6.1f} | {len(allv):5d} | {np.mean(allv):.3f} | {by} {tag}")
+                if abs(off) >= 5:
+                    base += allv
+            b = np.mean(base)
+            print(f"контроль (сдвиг ≥ 5 USD, не круглые): доля отскоков {b:.3f}, подходов {len(base)}\n")
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--bars", required=True)
     ap.add_argument("--holdout", action="store_true")
     ap.add_argument("--seed", type=int, default=1)
-    ap.add_argument("what", choices=["fvg", "sweep", "msnr", "osc", "alch"])
+    ap.add_argument("what", choices=["fvg", "sweep", "msnr", "osc", "alch", "round"])
     args = ap.parse_args()
     rng = np.random.default_rng(args.seed)
     m5 = load_m5(args.bars)
     m5 = m5[m5.index >= "2024-01-01"]
-    {"fvg": run_fvg, "sweep": run_sweep, "msnr": run_msnr, "osc": run_osc, "alch": run_alch}[args.what](m5, args, rng)
+    {"fvg": run_fvg, "sweep": run_sweep, "msnr": run_msnr, "osc": run_osc, "alch": run_alch, "round": run_round}[args.what](m5, args, rng)
     sys.stdout.flush()
 
 
