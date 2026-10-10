@@ -98,6 +98,8 @@ AlchemistState     g_sig;
 MarketRegimeConfig g_regime;
 datetime           g_news[];
 datetime           g_lastBar = 0;
+bool               g_pending = false;   // новый бар есть, но рынок был закрыт — обработать при открытии
+int                g_pendSig = 0;
 int                g_atr     = INVALID_HANDLE;
 int g_cntSignals = 0, g_cntBusy = 0, g_cntSide = 0, g_cntRegime = 0, g_cntNews = 0, g_cntTrades = 0;
 int g_cntExitBars = 0, g_cntExitOpp = 0;
@@ -228,16 +230,24 @@ void OnDeinit(const int reason)
 void OnTick()
   {
    TrailingManage(g_trade_adapter, g_broker, MagicNumber, g_trail_cfg);
-   if(!BrokerIsTradeSessionOpen())
-      return;
-   // Новый бар обрабатываем только при открытом рынке (иначе — на первом тике после перерыва).
+   // Сигнал считаем на каждом новом баре, даже если торговля закрыта (котировки золота идут
+   // до ~22:00, а торговая сессия закрывается около 21:00): вход — на первом тике после открытия.
    const datetime bar = iTime(_Symbol, TradingTimeframe, 0);
-   if(bar == g_lastBar)
+   if(bar != g_lastBar)
+     {
+      g_lastBar = bar;
+      const int fresh = AlchemistSignal(g_sig, g_cfg);
+      // необработанный сигнал (пришёл, пока рынок был закрыт) не затираем пустым
+      if(fresh != 0 || !g_pending)
+         g_pendSig = fresh;
+      g_pending = true;
+     }
+   if(!g_pending || !BrokerIsTradeSessionOpen())
       return;
-   g_lastBar = bar;
+   g_pending = false;
 
    ExitByBars();
-   const int sig = AlchemistSignal(g_sig, g_cfg);
+   const int sig = g_pendSig;
 
    ENUM_POSITION_TYPE type;
    if(PositionGuardHasOpen(MagicNumber, type))
