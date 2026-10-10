@@ -68,6 +68,7 @@ input ENUM_HYBRID_ENTRY EntryMode   = HYBRID_ENTRY_LIMIT;
 input ENUM_TIMEFRAMES TradingTimeframe = PERIOD_M5;  // Бар подтверждения (режим CONFIRM)
 input double SLBufferPoints = 300;   // Стоп за дальним краем зоны + отступ
 input double MinSLPoints    = 1000;  // Мин. стоп: более близкий расширяется до этого значения
+input double AskShiftPoints = 0;      // Сдвиг цен по Ask (вход Buy Limit, стоп/тейк продажи) ≈ спред, 0 = выкл
 // Тейк: откат — конец волны дня; зоны за диапазоном — пробитая граница диапазона.
 
 input group "── Управление капиталом ──"
@@ -76,6 +77,7 @@ input double RiskPercent      = 3.0;
 input double MaxRiskOvershoot = 1.5;   // Пропуск, если мин. лот рискует > RiskPercent × N (0 = выкл)
 input double MaxSpreadToSL    = 0.25;  // Вход по рынку: макс. спред как доля стопа (0 = выкл)
 input double MaxSlippageToSL  = 0.10;  // Вход по рынку: макс. проскальзывание как доля стопа
+input bool   CloseOnSlippage  = false; // Вход по рынку исполнился хуже допуска — сразу закрыть
 
 input group "── Трейлинг (по умолчанию выключен) ──"
 input ENUM_TRAILING_MODE_EX TrailingMode          = TRAILING_OFF_EX;
@@ -207,6 +209,7 @@ void UpdateRange()
 int OnInit()
   {
    trade.SetExpertMagicNumber(MagicNumber);
+   TradeExecutorSetCloseOnSlippage(CloseOnSlippage);
    BrokerInit(g_broker);
    trade.SetTypeFilling(g_broker.fillType);
 
@@ -233,6 +236,7 @@ int OnInit()
    g_zo_cfg.slBufferPoints   = SLBufferPoints;
    g_zo_cfg.minSLPoints      = MinSLPoints;
    g_zo_cfg.commentPrefix    = "HFD";
+   g_zo_cfg.askShiftPoints   = AskShiftPoints;
    ZoneOrdersInit(g_zo, DAY_SLOTS);
 
    PrintFormat("✅ Hybrid Fibo Day v1.0 | Magic:%d | диапазон: %s | вход:%s TF:%s | отступ %.0f пт | мин. стоп %.0f пт",

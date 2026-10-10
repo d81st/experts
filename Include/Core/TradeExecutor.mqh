@@ -166,6 +166,16 @@ TradeResult TradeExecutorSend(CTrade              &tr,
 int      g_tradeExecutorFailStreak  = 0;
 datetime g_tradeExecutorPausedUntil = 0;
 
+//--- Market-исполнение: брокер не ограничивает проскальзывание (отклонение в запросе
+//    игнорируется). Включено — сделка, исполненная хуже запрошенной цены больше чем на
+//    maxSlippageToSL × стоп, сразу закрывается; результат — неуспех (retcode PRICE_CHANGED).
+bool     g_tradeExecutorCloseOnSlip = false;
+
+void TradeExecutorSetCloseOnSlippage(const bool on)
+  {
+   g_tradeExecutorCloseOnSlip = on;
+  }
+
 //+------------------------------------------------------------------+
 //| TradeExecutor_IsRetryable — временная ошибка, повтор имеет смысл. |
 //+------------------------------------------------------------------+
@@ -532,6 +542,27 @@ TradeResult TradeExecutorSend(CTrade              &tr,
                                      TradeJournal_D(requested), TradeJournal_D(fill), TradeJournal_D(slip),
                                      TradeJournal_D(spreadAtSend), TradeJournal_D(req.sl), TradeJournal_D(req.tp),
                                      latencyMs, used, rc, req.comment));
+
+      //--- STEP 11: проскальзывание сверх допуска → закрыть сразу (если включено)
+      if(isMarket && g_tradeExecutorCloseOnSlip && maxSlip > 0.0 && slip > maxSlip)
+        {
+         const ulong pos = result.ticket;
+         if(PositionSelectByTicket(pos) && tr.PositionClose(pos))
+           {
+            PrintFormat("✂️ Сделка #%I64u закрыта: проскальзывание %s > допуска %s",
+                        pos, DoubleToString(slip, _Digits), DoubleToString(maxSlip, _Digits));
+            TradeJournalWrite(StringFormat("SLIPCLOSE;%I64d;%I64d;%s;%.2f;%s;%s;%s",
+                                           (long)tr.RequestMagic(), (long)pos, dirLabel, req.lot,
+                                           TradeJournal_D(requested), TradeJournal_D(fill), TradeJournal_D(slip)));
+            result.success     = false;
+            result.ticket      = 0;
+            result.retcode     = TRADE_RETCODE_PRICE_CHANGED;
+            result.description = "closed: slippage over limit";
+           }
+         else
+            PrintFormat("⚠️ Проскальзывание %s > допуска %s, но позицию #%I64u закрыть не удалось",
+                        DoubleToString(slip, _Digits), DoubleToString(maxSlip, _Digits), pos);
+        }
      }
    else
      {

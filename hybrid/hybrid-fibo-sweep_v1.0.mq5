@@ -64,6 +64,7 @@ input ENUM_SWEEP_RETURN SweepReturn    = SWEEP_RETURN_FAR;  // Куда долж
 input group "── Стоп / тейк ──"
 input double        SLBufferPoints = 300;            // Стоп за экстремумом прокола + отступ
 input double        MinSLPoints    = 1000;           // Мин. стоп: более близкий расширяется до этого значения
+input double AskShiftPoints = 0;      // Сдвиг цен по Ask (вход Buy Limit, стоп/тейк продажи) ≈ спред, 0 = выкл
 input ENUM_SWEEP_TP TakeProfitMode = SWEEP_TP_LINE;
 input double        RiskReward     = 2.0;            // Для режима RR
 
@@ -73,6 +74,7 @@ input double RiskPercent      = 3.0;
 input double MaxRiskOvershoot = 1.5;
 input double MaxSpreadToSL    = 0.25;
 input double MaxSlippageToSL  = 0.10;
+input bool   CloseOnSlippage  = false; // Вход по рынку исполнился хуже допуска — сразу закрыть
 
 input group "── Трейлинг (по умолчанию выключен) ──"
 input ENUM_TRAILING_MODE_EX TrailingMode          = TRAILING_OFF_EX;
@@ -147,6 +149,7 @@ void CheckSweeps(const bool canEnter)
 int OnInit()
   {
    trade.SetExpertMagicNumber(MagicNumber);
+   TradeExecutorSetCloseOnSlippage(CloseOnSlippage);
    BrokerInit(g_broker);
    trade.SetTypeFilling(g_broker.fillType);
 
@@ -188,6 +191,7 @@ int OnInit()
    g_zo_cfg.slBufferPoints   = SLBufferPoints;
    g_zo_cfg.minSLPoints      = MinSLPoints;
    g_zo_cfg.commentPrefix    = "HFS";
+   g_zo_cfg.askShiftPoints   = AskShiftPoints;
    ZoneOrdersInit(g_zo, FIBO_WAVE_SLOTS);
    ArrayInitialize(g_cntSweeps, 0);
 

@@ -25,6 +25,11 @@
 //|   slBufferPoints — стоп за дальним краем зоны + отступ, пункты   |
 //|   minSLPoints    — более близкий стоп расширяется до минимума    |
 //|   commentPrefix  — приставка комментария ордера (FIBO_<слот>)    |
+//|   askShiftPoints — сдвиг цен, исполняемых по Ask: вход Buy Limit  |
+//|                    выше, стоп и тейк продажи выше. Свечи и зоны —  |
+//|                    по Bid, поэтому без сдвига покупка от зоны     |
+//|                    исполняется, только когда Bid ниже зоны на     |
+//|                    спред. 0 — выкл (как раньше)                   |
 //+------------------------------------------------------------------+
 struct ZoneOrdersConfig
   {
@@ -37,6 +42,7 @@ struct ZoneOrdersConfig
    double          slBufferPoints;
    double          minSLPoints;
    string          commentPrefix;
+   double          askShiftPoints;
   };
 
 //+------------------------------------------------------------------+
@@ -203,6 +209,21 @@ double ZoneOrdersSL(const ZoneOrdersConfig &c, const BrokerContext &b, const Fib
    return NormalizeDouble(sl, _Digits);
   }
 
+// Цена входа лимитки: покупка исполняется по Ask — сдвигаем на askShiftPoints вверх.
+double ZoneOrdersLimitEntry(const ZoneOrdersConfig &c, const BrokerContext &b, const FiboZone &z)
+  {
+   const double shift = (z.dir == 1) ? c.askShiftPoints * b.adjustedPoint : 0.0;
+   return NormalizeDouble(z.nearP + shift, _Digits);
+  }
+
+// Стоп и тейк продажи срабатывают по Ask — сдвигаем на askShiftPoints вверх.
+double ZoneOrdersAskSide(const ZoneOrdersConfig &c, const BrokerContext &b, const FiboZone &z, const double price)
+  {
+   if(z.dir == 1 || price == 0.0)
+      return price;
+   return NormalizeDouble(price + c.askShiftPoints * b.adjustedPoint, _Digits);
+  }
+
 double ZoneOrdersLot(const ZoneOrdersConfig &c, const BrokerContext &b, const double entry, const double sl)
   {
    return BrokerCalcLot(b, c.riskPercent, MathAbs(entry - sl) / b.adjustedPoint,
@@ -231,10 +252,10 @@ void ZoneOrdersRiskSkip(ZoneOrders &s, const ZoneOrdersConfig &c, const int slot
 void ZoneOrdersEnsureLimit(ZoneOrders &s, CTrade &tr, const BrokerContext &b, const ZoneOrdersConfig &c,
                            const int slot, const FiboZone &z, const int rangeId)
   {
-   const double entry = NormalizeDouble(z.nearP, _Digits);
+   const double entry = ZoneOrdersLimitEntry(c, b, z);
    bool widened;
-   const double sl  = ZoneOrdersSL(c, b, z, entry, z.farP, widened);
-   const double tp  = NormalizeDouble(z.tp, _Digits);
+   const double sl  = ZoneOrdersAskSide(c, b, z, ZoneOrdersSL(c, b, z, entry, z.farP, widened));
+   const double tp  = ZoneOrdersAskSide(c, b, z, NormalizeDouble(z.tp, _Digits));
    const double lot = ZoneOrdersLot(c, b, entry, sl);
    if(lot <= 0.0)
      {
@@ -336,7 +357,7 @@ void ZoneOrdersManageLimits(ZoneOrders &s, CTrade &tr, const BrokerContext &b, c
          ZoneOrdersDelete(s, tr, i);
          continue;
         }
-      const double entry = NormalizeDouble(zs[i].nearP, _Digits);
+      const double entry = ZoneOrdersLimitEntry(c, b, zs[i]);
       // Цена уже на зоне или за ней: без ордера — зону пропускаем, с ордером — он исполняется.
       if((zs[i].dir == 1 && ask <= entry) || (zs[i].dir == -1 && bid >= entry))
         {
@@ -410,7 +431,7 @@ void ZoneOrdersEnterMarket(ZoneOrders &s, CTrade &tr, const BrokerContext &b, co
   {
    const double entry = (z.dir == 1) ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
    bool widened;
-   const double sl    = ZoneOrdersSL(c, b, z, entry, farP, widened);
+   const double sl    = ZoneOrdersAskSide(c, b, z, ZoneOrdersSL(c, b, z, entry, farP, widened));
    const double lot   = ZoneOrdersLot(c, b, entry, sl);
    s.used[slot] = true;
    if(lot <= 0.0)
@@ -423,7 +444,7 @@ void ZoneOrdersEnterMarket(ZoneOrders &s, CTrade &tr, const BrokerContext &b, co
    req.orderType       = (z.dir == 1) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
    req.price           = entry;
    req.sl              = sl;
-   req.tp              = NormalizeDouble(z.tp, _Digits);
+   req.tp              = ZoneOrdersAskSide(c, b, z, NormalizeDouble(z.tp, _Digits));
    req.lot             = lot;
    req.comment         = StringFormat("%s_%d #%d", c.commentPrefix, slot, rangeId);
    req.maxSpreadToSL   = c.maxSpreadToSL;

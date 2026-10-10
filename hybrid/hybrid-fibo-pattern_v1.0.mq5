@@ -82,6 +82,7 @@ input double BareImbWickTolerance = 0.05;
 input group "── Стоп / тейк ──"
 input double SLBufferPoints = 300;    // Стоп за дальним краем зоны (или экстремумом паттерна) + отступ
 input double MinSLPoints    = 1000;   // Мин. стоп: более близкий расширяется до этого значения
+input double AskShiftPoints = 0;      // Сдвиг цен по Ask (вход Buy Limit, стоп/тейк продажи) ≈ спред, 0 = выкл
 // Тейк: откат — конец волны (линия 0); зоны за диапазоном — пробитая граница.
 
 input group "── Управление капиталом ──"
@@ -90,6 +91,7 @@ input double RiskPercent      = 3.0;
 input double MaxRiskOvershoot = 1.5;
 input double MaxSpreadToSL    = 0.25;
 input double MaxSlippageToSL  = 0.10;
+input bool   CloseOnSlippage  = false; // Вход по рынку исполнился хуже допуска — сразу закрыть
 
 input group "── Трейлинг (по умолчанию выключен) ──"
 input ENUM_TRAILING_MODE_EX TrailingMode          = TRAILING_OFF_EX;
@@ -194,6 +196,7 @@ void CheckPatternEntries(const bool canEnter)
 int OnInit()
   {
    trade.SetExpertMagicNumber(MagicNumber);
+   TradeExecutorSetCloseOnSlippage(CloseOnSlippage);
    BrokerInit(g_broker);
    trade.SetTypeFilling(g_broker.fillType);
 
@@ -255,6 +258,7 @@ int OnInit()
    g_zo_cfg.slBufferPoints   = SLBufferPoints;
    g_zo_cfg.minSLPoints      = MinSLPoints;
    g_zo_cfg.commentPrefix    = "HFP";
+   g_zo_cfg.askShiftPoints   = AskShiftPoints;
    ZoneOrdersInit(g_zo, FIBO_WAVE_SLOTS);
 
    PrintFormat("✅ Hybrid Fibo Pattern v1.0 | Magic:%d TF:%s | зигзаг %.1f×ATR(%d) | паттерн:%s",

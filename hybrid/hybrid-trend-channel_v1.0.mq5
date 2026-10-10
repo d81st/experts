@@ -63,12 +63,19 @@ input group "── Фильтр NFP (по умолчанию выключен) 
 input int    AvoidNfpMinutes = 0;                // Не входить за N минут до и после NFP (0 = выкл.)
 input string NfpExtraTimes   = "";               // Добавить даты к встроенным: "ГГГГ.ММ.ДД ЧЧ:ММ;…"
 
+input group "── Фильтр CPI / FOMC / ISM (по умолчанию выключен) ──"
+input int    AvoidMacroMinutes = 0;              // Не входить за N минут до и после выбранных новостей (0 = выкл.)
+input bool   MacroCPI          = true;           // CPI, 8:30 по Нью-Йорку
+input bool   MacroFOMC         = true;           // Решение FOMC, 14:00 по Нью-Йорку
+input bool   MacroISM          = true;           // ISM Manufacturing PMI, 10:00 по Нью-Йорку
+
 input group "── Управление капиталом ──"
 input int    MagicNumber      = 71010;
 input double RiskPercent      = 1.0;
 input double MaxRiskOvershoot = 1.5;
 input double MaxSpreadToSL    = 0.10;
 input double MaxSlippageToSL  = 0.10;
+input bool   CloseOnSlippage  = false; // Вход по рынку исполнился хуже допуска — сразу закрыть
 
 input group "── Трейлинг (по умолчанию выключен) ──"
 input ENUM_TRAILING_MODE_EX TrailingMode          = TRAILING_OFF_EX;
@@ -81,10 +88,11 @@ input double                SyncTrailStepPoints   = 0.0;
 BrokerContext      g_broker;
 MarketRegimeConfig g_regime;
 datetime           g_nfp[];
+datetime           g_macro[];
 datetime           g_lastBar = 0;
 int                g_atr     = INVALID_HANDLE;
 bool               g_fade    = false;   // открытая сделка — против пробоя (выход по стопу/тейку)
-int g_cntSignals = 0, g_cntSide = 0, g_cntRegime = 0, g_cntFade = 0, g_cntNfp = 0, g_cntTrades = 0, g_cntExits = 0;
+int g_cntSignals = 0, g_cntSide = 0, g_cntRegime = 0, g_cntFade = 0, g_cntNfp = 0, g_cntMacro = 0, g_cntTrades = 0, g_cntExits = 0;
 
 void Enter(const int dir, const bool fade)
   {
@@ -125,6 +133,7 @@ void Enter(const int dir, const bool fade)
 int OnInit()
   {
    trade.SetExpertMagicNumber(MagicNumber);
+   TradeExecutorSetCloseOnSlippage(CloseOnSlippage);
    BrokerInit(g_broker);
    trade.SetTypeFilling(g_broker.fillType);
 
@@ -148,6 +157,8 @@ int OnInit()
    g_regime.threshold = RegimeThreshold;
    if(AvoidNfpMinutes > 0)
       NewsParseTimes(NEWS_NFP_DEFAULT + ";" + NfpExtraTimes, g_nfp);
+   if(AvoidMacroMinutes > 0)
+      NewsBuildList(false, MacroCPI, MacroFOMC, MacroISM, "", g_macro);
 
    PrintFormat("✅ Hybrid Trend Channel v1.0 | Magic:%d TF:%s | вход %d, выход %d баров | стоп %.1f×ATR(%d) | режим рынка:%s | NFP ±%d мин",
                MagicNumber, EnumToString(TradingTimeframe), EntryPeriod, ExitPeriod, StopAtrMult, AtrPeriod,
@@ -158,8 +169,8 @@ int OnInit()
 
 void OnDeinit(const int reason)
   {
-   PrintFormat("📊 Пробоев: %d | отсеяно стороной: %d, режимом (флэт): %d, NFP: %d | против пробоя: %d | сделок: %d | выходов по каналу: %d",
-               g_cntSignals, g_cntSide, g_cntRegime, g_cntNfp, g_cntFade, g_cntTrades, g_cntExits);
+   PrintFormat("📊 Пробоев: %d | отсеяно стороной: %d, режимом (флэт): %d, NFP: %d, CPI/FOMC/ISM: %d | против пробоя: %d | сделок: %d | выходов по каналу: %d",
+               g_cntSignals, g_cntSide, g_cntRegime, g_cntNfp, g_cntMacro, g_cntFade, g_cntTrades, g_cntExits);
    if(g_atr != INVALID_HANDLE)
       IndicatorRelease(g_atr);
    if(g_trade_adapter != NULL)
@@ -211,6 +222,11 @@ void OnTick()
    if(AvoidNfpMinutes > 0 && NewsInWindow(g_nfp, TimeCurrent(), AvoidNfpMinutes, AvoidNfpMinutes) > 0)
      {
       g_cntNfp++;
+      return;
+     }
+   if(AvoidMacroMinutes > 0 && NewsInWindow(g_macro, TimeCurrent(), AvoidMacroMinutes, AvoidMacroMinutes) > 0)
+     {
+      g_cntMacro++;
       return;
      }
    const bool fade = (dir != sig);

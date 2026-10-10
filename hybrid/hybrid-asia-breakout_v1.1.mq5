@@ -76,6 +76,7 @@ input double RiskPercent      = 3.0;
 input double MaxRiskOvershoot = 1.5;
 input double MaxSpreadToSL    = 0.10;
 input double MaxSlippageToSL  = 0.10;
+input bool   CloseOnSlippage  = false; // Вход по рынку исполнился хуже допуска — сразу закрыть
 
 input group "── Трейлинг (по умолчанию выключен) ──"
 input ENUM_TRAILING_MODE_EX TrailingMode          = TRAILING_OFF_EX;
@@ -213,6 +214,7 @@ void EnterBreakout(const int sig)
 int OnInit()
   {
    trade.SetExpertMagicNumber(MagicNumber);
+   TradeExecutorSetCloseOnSlippage(CloseOnSlippage);
    BrokerInit(g_broker);
    trade.SetTypeFilling(g_broker.fillType);
 

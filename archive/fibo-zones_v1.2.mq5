@@ -63,6 +63,7 @@ input group "── Вход / стоп / тейк ──"
 input ENUM_FIBO_ENTRY EntryMode = FIBO_ENTRY_LIMIT;
 input double SLBufferPoints = 300;    // Стоп за дальним краем зоны + отступ (≈ спред + немного)
 input double MinSLPoints    = 1000;   // Мин. стоп: более близкий стоп расширяется до этого значения
+input double AskShiftPoints = 0;      // Сдвиг цен по Ask (вход Buy Limit, стоп/тейк продажи) ≈ спред, 0 = выкл
 // Тейк: откат — конец волны (линия 0); зоны за диапазоном — пробитая граница диапазона.
 
 input group "── Управление капиталом ──"
@@ -148,6 +149,7 @@ int OnInit()
    g_zo_cfg.slBufferPoints   = SLBufferPoints;
    g_zo_cfg.minSLPoints      = MinSLPoints;
    g_zo_cfg.commentPrefix    = "FIBO";
+   g_zo_cfg.askShiftPoints   = AskShiftPoints;
    ZoneOrdersInit(g_zo, FIBO_SLOTS);
 
    PrintFormat("✅ Fibo Zones v1.2 | Magic:%d TF:%s | зигзаг %.1f×ATR(%d) | вход:%s | отступ %.0f пт | мин. стоп %.0f пт",

@@ -67,6 +67,7 @@ input ENUM_IMB_EXT_SIDE ExtSide        = IMB_EXT_END;
 input group "── Стоп / тейк ──"
 input double SLBufferPoints = 300;    // Стоп за дальним краем зоны + отступ (спред и запас)
 input double MinSLPoints    = 1500;   // Мин. стоп: более близкий расширяется до этого значения
+input double AskShiftPoints = 0;      // Сдвиг цен по Ask (вход Buy Limit, стоп/тейк продажи) ≈ спред, 0 = выкл
 // Тейк: откат и зоны за концом свечи — конец свечи (линия 1); за началом — начало (линия 0).
 
 input group "── Управление капиталом ──"
@@ -75,6 +76,7 @@ input double RiskPercent      = 3.0;
 input double MaxRiskOvershoot = 1.5;
 input double MaxSpreadToSL    = 0.25;
 input double MaxSlippageToSL  = 0.10;
+input bool   CloseOnSlippage  = false; // Вход по рынку исполнился хуже допуска — сразу закрыть
 
 input group "── Трейлинг (по умолчанию выключен) ──"
 input ENUM_TRAILING_MODE_EX TrailingMode          = TRAILING_OFF_EX;
@@ -173,6 +175,7 @@ void OnNewBar()
 int OnInit()
   {
    trade.SetExpertMagicNumber(MagicNumber);
+   TradeExecutorSetCloseOnSlippage(CloseOnSlippage);
    BrokerInit(g_broker);
    trade.SetTypeFilling(g_broker.fillType);
 
@@ -205,6 +208,7 @@ int OnInit()
    g_zo_cfg.slBufferPoints   = SLBufferPoints;
    g_zo_cfg.minSLPoints      = MinSLPoints;
    g_zo_cfg.commentPrefix    = "HIF";
+   g_zo_cfg.askShiftPoints   = AskShiftPoints;
    ZoneOrdersInit(g_zo, IMB_SLOTS);
 
    PrintFormat("✅ Hybrid Imbalance Fibo v1.0 | Magic:%d TF:%s | свеча ≥ %.1f×ATR(%d), тело ≥ %.0f%%, гэп %s | мин. стоп %.2f USD",
