@@ -1,0 +1,31 @@
+{
+  "symbols": [
+    "XAUUSDm",
+    "XAUUSD"
+  ],
+  "period": "M1",
+  "from": "2026.09.01",
+  "to": "2026.10.01",
+  "model": 4,
+  "delay": 200,
+  "deposit": 1000,
+  "currency": "USD",
+  "leverage": 2000,
+  "expert": "archive/fibo-zones_v1.2",
+  "variants": [
+    {
+      "name": "m5-limit",
+      "inputs": {
+        "TradingTimeframe": 5
+      }
+    },
+    {
+      "name": "m30-k10-confirm",
+      "inputs": {
+        "TradingTimeframe": 30,
+        "ZigZagAtrMult": 10.0,
+        "EntryMode": 1
+      }
+    }
+  ]
+}

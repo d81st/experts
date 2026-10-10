@@ -1,0 +1,25 @@
+{
+  "expert": "hybrid/hybrid-alchemist_v1.0",
+  "symbols": [
+    "XAUUSDm",
+    "XAUUSD"
+  ],
+  "period": "M1",
+  "from": "2026.01.05",
+  "to": "2026.05.29",
+  "model": 4,
+  "delay": 200,
+  "deposit": 1000000,
+  "currency": "USD",
+  "leverage": 2000,
+  "inputs": {
+    "RiskPercent": 1.0,
+    "StopAtrMult": 30.0
+  },
+  "variants": [
+    {
+      "name": "h1-x12-nostop",
+      "inputs": {}
+    }
+  ]
+}
