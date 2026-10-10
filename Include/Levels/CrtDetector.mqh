@@ -633,5 +633,59 @@ void CrtDetectorDetect(const MqlRates          &prev,
    //   сохраняют значения, установленные в шагах 3 и 4.
   }
 
+//+------------------------------------------------------------------+
+//| Вход, стоп и цель паттерна CRT (из crt-bot).                     |
+//|   imb    — свеча имбаланса (диапазона), doji — свеча снятия;     |
+//|   imbDir — направление имбаланса (+1 бычий → сделка SELL).       |
+//+------------------------------------------------------------------+
+
+// Цена входа по типу паттерна. iwAtExtreme — InsideWick: вход на экстремуме
+// имбаланса (true) или на закрытии доджи (false).
+double CrtEntryPrice(const MqlRates &imb, const MqlRates &doji, const int imbDir,
+                     const string pattern, const bool iwAtExtreme)
+  {
+   if(pattern == "ghostTrueRB" || pattern == "ghostInsideWick")
+      return (imbDir == 1) ? imb.high : imb.low;
+   if(pattern == "InsideWick")
+      return iwAtExtreme ? ((imbDir == 1) ? imb.high : imb.low) : doji.close;
+   return imb.close;   // TrueRB и прочие
+  }
+
+// Стоп — за экстремумом imb и doji ± bufferPts, в пределах [minSLPts, maxSLPts] от входа.
+// Цель — тень доджи за серединой тела имбаланса, иначе дальний край тела имбаланса;
+// не ближе расстояния до стопа (RR ≥ 1). Расстояния — в пунктах point.
+void CrtStopTarget(const MqlRates &imb, const MqlRates &doji, const int imbDir, const double entry,
+                   const double point, const double bufferPts, const double minSLPts,
+                   const double maxSLPts, double &sl, double &tp)
+  {
+   const double buffer    = bufferPts * point;
+   const double imbBodyHi = MathMax(imb.open, imb.close);
+   const double imbBodyLo = MathMin(imb.open, imb.close);
+   const double imbMid    = (imbBodyHi + imbBodyLo) * 0.5;
+   const double dojiBodyHi = MathMax(doji.open, doji.close);
+   const double dojiBodyLo = MathMin(doji.open, doji.close);
+
+   if(imbDir == 1)   // бычий имбаланс → продажа
+     {
+      sl = MathMax(imb.high, doji.high) + buffer;
+      sl = MathMax(sl, entry + minSLPts * point);
+      sl = MathMin(sl, entry + maxSLPts * point);
+      tp = (dojiBodyLo - doji.low > 0.0 && doji.low <= imbMid) ? doji.low : imbBodyLo;
+      const double slDist = sl - entry;
+      if(entry - tp < slDist)
+         tp = entry - slDist;
+     }
+   else              // медвежий имбаланс → покупка
+     {
+      sl = MathMin(imb.low, doji.low) - buffer;
+      sl = MathMin(sl, entry - minSLPts * point);
+      sl = MathMax(sl, entry - maxSLPts * point);
+      tp = (doji.high - dojiBodyHi > 0.0 && doji.high >= imbMid) ? doji.high : imbBodyHi;
+      const double slDist = entry - sl;
+      if(tp - entry < slDist)
+         tp = entry + slDist;
+     }
+  }
+
 #endif // CRTDETECTOR_MQH
 //+------------------------------------------------------------------+

@@ -410,82 +410,20 @@ void PlaceCRTLimitOrder(ENUM_ORDER_TYPE orderType, double price,
 double CalcEntryPrice(const MqlRates &imb, const MqlRates &doji,
                       const int imbDir, const string patternName)
 {
-   if(patternName == "ghostTrueRB" || patternName == "ghostInsideWick")
-      return (imbDir == 1) ? imb.high : imb.low;
-
-   if(patternName == "TrueRB")
-      return imb.close;
-
-   if(patternName == "InsideWick")
-   {
-      if(InsideWickEntryMode == IW_ENTRY_IMB_EXTREME)
-         return (imbDir == 1) ? imb.high : imb.low;
-      else
-         return doji.close;
-   }
-
-   return imb.close;
+   return CrtEntryPrice(imb, doji, imbDir, patternName, InsideWickEntryMode == IW_ENTRY_IMB_EXTREME);
 }
 
 //+------------------------------------------------------------------+
-//| РАСЧЁТ SL И TP                                                   |
+//| РАСЧЁТ SL И TP (Levels/CrtDetector: CrtStopTarget)               |
 //+------------------------------------------------------------------+
 
 void CalcCRTLevels(const MqlRates &imb, const MqlRates &doji,
                    const int imbDir, const string patternName,
                    double &sl_out, double &tp_out)
 {
-   double point  = g_broker.adjustedPoint;
-   double buffer = BufferPoints * point;
-   double entry  = CalcEntryPrice(imb, doji, imbDir, patternName);
-
-   double imbBodyHi = MathMax(imb.open, imb.close);
-   double imbBodyLo = MathMin(imb.open, imb.close);
-   double imbMid    = (imbBodyHi + imbBodyLo) * 0.5;
-
-   double dojiBodyHi      = MathMax(doji.open, doji.close);
-   double dojiBodyLo      = MathMin(doji.open, doji.close);
-   double dojiUpperShadow = doji.high - dojiBodyHi;
-   double dojiLowerShadow = dojiBodyLo - doji.low;
-
-   if(imbDir == 1)   // Bull IMB → SELL
-   {
-      double slRaw = MathMax(imb.high, doji.high) + buffer;
-      slRaw = MathMax(slRaw, entry + MinSLPoints * point);
-      slRaw = MathMin(slRaw, entry + MaxSLPoints * point);
-      sl_out = slRaw;
-
-      double tpCandidate;
-      if(dojiLowerShadow > 0.0 && doji.low <= imbMid)
-         tpCandidate = doji.low;
-      else
-         tpCandidate = imbBodyLo;
-
-      double slDist = sl_out - entry;
-      if(entry - tpCandidate < slDist)
-         tpCandidate = entry - slDist;
-
-      tp_out = tpCandidate;
-   }
-   else   // Bear IMB → BUY
-   {
-      double slRaw = MathMin(imb.low, doji.low) - buffer;
-      slRaw = MathMin(slRaw, entry - MinSLPoints * point);
-      slRaw = MathMax(slRaw, entry - MaxSLPoints * point);
-      sl_out = slRaw;
-
-      double tpCandidate;
-      if(dojiUpperShadow > 0.0 && doji.high >= imbMid)
-         tpCandidate = doji.high;
-      else
-         tpCandidate = imbBodyHi;
-
-      double slDist = entry - sl_out;
-      if(tpCandidate - entry < slDist)
-         tpCandidate = entry + slDist;
-
-      tp_out = tpCandidate;
-   }
+   const double entry = CalcEntryPrice(imb, doji, imbDir, patternName);
+   CrtStopTarget(imb, doji, imbDir, entry, g_broker.adjustedPoint, BufferPoints,
+                 MinSLPoints, MaxSLPoints, sl_out, tp_out);
 }
 
 //+------------------------------------------------------------------+

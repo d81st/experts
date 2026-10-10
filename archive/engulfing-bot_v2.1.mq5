@@ -214,9 +214,7 @@ void ResetPattern()
 
 double CalcTPByRR(double entry, double sl, int dir)
 {
-   double sl_dist = MathAbs(entry - sl);
-   if(dir == 1) return entry + sl_dist * RiskReward;
-   return entry - sl_dist * RiskReward;
+   return EngulfingRRTarget(entry, sl, dir, RiskReward);
 }
 
 //+------------------------------------------------------------------+
@@ -226,29 +224,11 @@ double CalcTPByRR(double entry, double sl, int dir)
 //| TP = дистанция SL * RiskReward                                   |
 //+------------------------------------------------------------------+
 
-void CalcSLTP(double entry, int dir,
-              double high2, double low2,
-              double high1, double low1,
+void CalcSLTP(double entry, int dir, const MqlRates &r2, const MqlRates &r1,
               double &sl_out, double &tp_out)
 {
-   double point = g_broker.adjustedPoint;
-
-   if(dir == -1)  // SELL: SL выше экстремума
-   {
-      double slBase = MathMax(high2, high1);
-      sl_out = slBase + BufferPoints * point;
-      sl_out = MathMax(sl_out, entry + MinSLPoints * point);
-      sl_out = MathMin(sl_out, entry + MaxSLPoints * point);
-      tp_out = CalcTPByRR(entry, sl_out, dir);
-   }
-   else           // BUY: SL ниже экстремума
-   {
-      double slBase = MathMin(low2, low1);
-      sl_out = slBase - BufferPoints * point;
-      sl_out = MathMin(sl_out, entry - MinSLPoints * point);
-      sl_out = MathMax(sl_out, entry - MaxSLPoints * point);
-      tp_out = CalcTPByRR(entry, sl_out, dir);
-   }
+   EngulfingStopTarget(r2, r1, dir, entry, g_broker.adjustedPoint, BufferPoints,
+                       MinSLPoints, MaxSLPoints, RiskReward, sl_out, tp_out);
 }
 
 //+------------------------------------------------------------------+
@@ -508,14 +488,11 @@ void CheckEngulfingEntry()
       if(last_rb_candle1_time == rates[2].time && last_rb_direction == new_dir) return;
 
       // 50% уровень тела свечи поглощения
-      double entry_level = (rates[1].open + rates[1].close) / 2.0;
+      double entry_level = EngulfingMidLevel(rates[1]);
 
       // Рассчитываем SL и TP относительно уровня входа
       double sl = 0.0, tp = 0.0;
-      CalcSLTP(entry_level, new_dir,
-               rates[2].high, rates[2].low,
-               rates[1].high, rates[1].low,
-               sl, tp);
+      CalcSLTP(entry_level, new_dir, rates[2], rates[1], sl, tp);
 
       double rb_gap_pts = MathAbs(rates[1].open - rates[2].close) / g_broker.adjustedPoint;
       PrintFormat("🔍 RB %s | b[2]:%.1f b[1]:%.1f | O[1]-C[2]:%.1f | 50%%:%.5f | SL:%.5f | TP:%.5f | RR:%.2f | SLd:%.1f | Exp:%s",

@@ -16,6 +16,7 @@
 #include "../Include/Exits/Trailing/TrailingDispatcher.mqh"
 #include "../Include/Core/TesterMetric.mqh"
 #include "../Include/Levels/DayLevels.mqh"
+#include "../Include/Triggers/LiquiditySweep.mqh"
 //--- Создаем объект торгового класса
 CTrade trade;
 
@@ -313,84 +314,35 @@ string TradeFrequencyBlock()
 }
 
 //+------------------------------------------------------------------+
-//| StreakSignal — исходная логика: тренд по цепочке экстремумов,    |
-//| уровень — экстремум свечи из цепочки, снятие на свече `sig`.     |
+//| StreakSignal — тренд по цепочке экстремумов, уровень — экстремум |
+//| свечи из цепочки, снятие на свече `sig` (Triggers/LiquiditySweep).|
 //+------------------------------------------------------------------+
+StreakSweepState g_streak;   // тренд цепочки живёт между вызовами
+
 bool StreakSignal(const MqlRates &rates[], const int sig,
                   ENUM_ORDER_TYPE &order_type, string &signal_msg)
 {
-   int non_ghost_idx[];
-   ArrayResize(non_ghost_idx, TrendLookback);
-   int count = 0;
-   for(int i = 1 + sig; i < HistoryDepth - 1 && count < TrendLookback; i++)
+   StreakSweepConfig c;
+   c.tf              = TradingTimeframe;
+   c.historyDepth    = HistoryDepth;
+   c.trendLookback   = TrendLookback;
+   c.minStreak       = MinStreak;
+   c.signalShift     = SignalCandleShift;
+   c.trendMaxAgeBars = TrendMaxAgeBars;
+   double level = 0.0;
+   const int dir = StreakSweepSignal(c, g_streak, rates, sig, level);
+   if(dir == 1)
    {
-      if(rates[i].high > rates[i+1].high || rates[i].low < rates[i+1].low)
-      {
-         non_ghost_idx[count] = i;
-         count++;
-      }
+      order_type = ORDER_TYPE_BUY;
+      signal_msg = "📈 Сигнал: BUY после снятия ликвидности Low в бычьем тренде (TF: " + EnumToString(TradingTimeframe) + ")";
+      return true;
    }
-   if(count < MinStreak) return false;
-   if(SignalCandleShift < 0 || SignalCandleShift >= count) return false;
-
-   int streak_high = 1;
-   for(int k = 1; k < count; k++)
+   if(dir == -1)
    {
-      if(rates[non_ghost_idx[k-1]].high > rates[non_ghost_idx[k]].high) streak_high++;
-      else break;
+      order_type = ORDER_TYPE_SELL;
+      signal_msg = "📉 Сигнал: SELL после снятия ликвидности High в медвежьем тренде (TF: " + EnumToString(TradingTimeframe) + ")";
+      return true;
    }
-   int streak_low = 1;
-   for(int k = 1; k < count; k++)
-   {
-      if(rates[non_ghost_idx[k-1]].low < rates[non_ghost_idx[k]].low) streak_low++;
-      else break;
-   }
-
-   int proposed_trend = 0;
-   if(streak_high >= MinStreak && streak_low < MinStreak) proposed_trend = 1;
-   else if(streak_low >= MinStreak && streak_high < MinStreak) proposed_trend = 2;
-
-   static int      current_trend    = 0;
-   static datetime trend_confirmed  = 0;   // время бара последнего подтверждения тренда
-   if(proposed_trend != 0)
-   {
-      current_trend   = proposed_trend;
-      trend_confirmed = rates[0].time;
-   }
-   else if(TrendMaxAgeBars > 0 && current_trend != 0 &&
-           rates[0].time - trend_confirmed > (datetime)TrendMaxAgeBars * PeriodSeconds(TradingTimeframe))
-   {
-      current_trend = 0;   // тренд устарел
-   }
-   if(current_trend == 0) return false;
-
-   int last_sig_idx = non_ghost_idx[SignalCandleShift];
-
-   if(current_trend == 1)
-   {
-      double level = rates[last_sig_idx].low;
-      bool swept    = rates[sig].low < level;
-      bool returned = rates[sig].close > level;
-      if(swept && returned)
-      {
-         order_type   = ORDER_TYPE_BUY;
-         signal_msg   = "📈 Сигнал: BUY после снятия ликвидности Low в бычьем тренде (TF: " + EnumToString(TradingTimeframe) + ")";
-         return true;
-      }
-   }
-   else if(current_trend == 2)
-   {
-      double level = rates[last_sig_idx].high;
-      bool swept    = rates[sig].high > level;
-      bool returned = rates[sig].close < level;
-      if(swept && returned)
-      {
-         order_type   = ORDER_TYPE_SELL;
-         signal_msg   = "📉 Сигнал: SELL после снятия ликвидности High в медвежьем тренде (TF: " + EnumToString(TradingTimeframe) + ")";
-         return true;
-      }
-   }
-
    return false;
 }
 
@@ -401,6 +353,8 @@ bool StreakSignal(const MqlRates &rates[], const int sig,
 //| Один вход на каждую сторону уровня в день. `opposite` — другая   |
 //| граница (цель для TP_LIQUIDITY).                                 |
 //+------------------------------------------------------------------+
+RangeSweepState g_rangeSweep;   // одна сделка на сторону уровня в день
+
 bool KeyLevelSignal(const MqlRates &rates[], ENUM_ORDER_TYPE &order_type,
                     string &signal_msg, double &opposite)
 {
@@ -420,31 +374,19 @@ bool KeyLevelSignal(const MqlRates &rates[], ENUM_ORDER_TYPE &order_type,
       if(!DayLevelsHours(barTime, AsiaStartHour, AsiaEndHour, r)) return false;
       levelName = "Азии";
    }
-   const double levelHigh = r.hi;
-   const double levelLow  = r.lo;
 
-   static datetime s_highDay = 0, s_lowDay = 0;   // одна сделка на сторону уровня в день
+   double level = 0.0;
+   const int dir = RangeSweepSignal(g_rangeSweep, rates[1], r.hi, r.lo, dayStart, level, opposite);
+   if(dir == 0)
+      return false;
    const string tf = EnumToString(TradingTimeframe);
-
-   if(rates[1].high > levelHigh && rates[1].close < levelHigh && s_highDay != dayStart)
-   {
-      s_highDay  = dayStart;
-      order_type = ORDER_TYPE_SELL;
-      opposite   = levelLow;
-      signal_msg = StringFormat("📉 Сигнал: SELL после снятия максимума %s %s (TF: %s)",
-                                levelName, DoubleToString(levelHigh, _Digits), tf);
-      return true;
-   }
-   if(rates[1].low < levelLow && rates[1].close > levelLow && s_lowDay != dayStart)
-   {
-      s_lowDay   = dayStart;
-      order_type = ORDER_TYPE_BUY;
-      opposite   = levelHigh;
-      signal_msg = StringFormat("📈 Сигнал: BUY после снятия минимума %s %s (TF: %s)",
-                                levelName, DoubleToString(levelLow, _Digits), tf);
-      return true;
-   }
-   return false;
+   order_type = (dir == 1) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+   signal_msg = (dir == 1)
+                ? StringFormat("📈 Сигнал: BUY после снятия минимума %s %s (TF: %s)",
+                               levelName, DoubleToString(level, _Digits), tf)
+                : StringFormat("📉 Сигнал: SELL после снятия максимума %s %s (TF: %s)",
+                               levelName, DoubleToString(level, _Digits), tf);
+   return true;
 }
 
 //+------------------------------------------------------------------+
@@ -537,12 +479,7 @@ void CheckEntrySignals()
    {
       double target = opposite;
       if(target <= 0.0)
-      {
-         target = (order_type == ORDER_TYPE_BUY) ? rates[sig + 1].high : rates[sig + 1].low;
-         for(int i = sig + 2; i < HistoryDepth; i++)
-            target = (order_type == ORDER_TYPE_BUY) ? MathMax(target, rates[i].high)
-                                                    : MathMin(target, rates[i].low);
-      }
+         target = SweepOppositeTarget(rates, sig, HistoryDepth, order_type == ORDER_TYPE_BUY ? 1 : -1);
       const double liqRR = MathAbs(target - entry) / (slPoints * g_broker.adjustedPoint);
       const bool   ahead = (order_type == ORDER_TYPE_BUY) ? (target > entry) : (target < entry);
       if(ahead && liqRR >= MinLiquidityRR) rr = liqRR;

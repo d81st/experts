@@ -95,5 +95,43 @@ bool EngulfingDetect(const MqlRates &r2, const MqlRates &r1, const EngulfingConf
    return true;
   }
 
+//+------------------------------------------------------------------+
+//| Уровни сделки от поглощения (из engulfing-bot).                  |
+//+------------------------------------------------------------------+
+
+// Уровень входа — 50% тела поглощающей свечи r1.
+double EngulfingMidLevel(const MqlRates &r1)
+  {
+   return (r1.open + r1.close) / 2.0;
+  }
+
+// Цель на RR × расстояние до стопа от входа в сторону dir.
+double EngulfingRRTarget(const double entry, const double sl, const int dir, const double rr)
+  {
+   const double dist = MathAbs(entry - sl);
+   return (dir == 1) ? entry + dist * rr : entry - dist * rr;
+  }
+
+// Стоп за экстремумом свечей r2 и r1 ± bufferPts, затем в пределах [minSLPts, maxSLPts]
+// от входа; цель — EngulfingRRTarget. Расстояния — в пунктах point.
+void EngulfingStopTarget(const MqlRates &r2, const MqlRates &r1, const int dir, const double entry,
+                         const double point, const double bufferPts, const double minSLPts,
+                         const double maxSLPts, const double rr, double &sl, double &tp)
+  {
+   if(dir == -1)   // продажа: стоп выше экстремума
+     {
+      sl = MathMax(r2.high, r1.high) + bufferPts * point;
+      sl = MathMax(sl, entry + minSLPts * point);
+      sl = MathMin(sl, entry + maxSLPts * point);
+     }
+   else            // покупка: стоп ниже экстремума
+     {
+      sl = MathMin(r2.low, r1.low) - bufferPts * point;
+      sl = MathMin(sl, entry - minSLPts * point);
+      sl = MathMax(sl, entry - maxSLPts * point);
+     }
+   tp = EngulfingRRTarget(entry, sl, dir, rr);
+  }
+
 #endif // ENGULFINGPATTERN_MQH
 //+------------------------------------------------------------------+
