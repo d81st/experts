@@ -161,70 +161,76 @@ def parse_exit(s):
 # ── стратегия ─────────────────────────────────────────────────────────
 
 def run(P, tfmin, L, N, K, select, exit_s, be, buffer=0.3, minSL=2.0, maxSL=5.0, spread=0.25,
-        single=False, mingap=0.0):
+        single=False, mingap=0.0, minage=0):
+    """Как в роботе: на каждом закрытом баре ТФ из живых разрывов (возраст minage … L−1 баров,
+    цена снаружи) в каждую сторону выбираются K по правилу select; у выбранных — лимитки,
+    у выпавших из выбора лимитка снимается. Срок лимитки — N баров с первой постановки, потом
+    разрыв больше не торгуется. single — одна позиция: пока она открыта, лимитки не исполняются."""
     tf = P.resample(tfmin)
     tt = tf.index.to_numpy()
     th, tl, tc = tf["high"].to_numpy(), tf["low"].to_numpy(), tf["close"].to_numpy()
     gaps = [g for g in find_gaps(tf) if abs(g[2] - g[3]) >= mingap]
     exit_ = parse_exit(exit_s)
-    bar_ns = np.timedelta64(tfmin, "m")
-    # индекс минуты для начала каждого бара ТФ
     pidx = np.searchsorted(P.t, tt)
-    alive = []          # [j, d, near, far, ordered]
+    pidx = np.append(pidx, P.n)
+    alive = []          # dict: j, d, near, far, sd, first (бар первой постановки) или −1
     gi = 0
     trades = []
     busy_until = -1
     for t in range(2, len(tf) - 1):
         while gi < len(gaps) and gaps[gi][0] <= t:
             j, d, near, far = gaps[gi]
-            alive.append([j, d, near, far, False])
             gi += 1
-        # разрыв закрыт насквозь (бар t прошёл дальний край) или устарел
-        keep = []
+            sd = abs(near - far) + buffer
+            if sd > maxSL:
+                continue
+            alive.append({"j": j, "d": d, "near": near, "far": far, "sd": max(sd, minSL), "first": -1})
+        # закрыт насквозь, устарел или истёк срок лимитки — убираем
+        nxt = []
         for g in alive:
-            j, d, near, far, used = g
-            if j < t and ((d == 1 and tl[t] <= far) or (d == -1 and th[t] >= far)):
+            if g["j"] < t and ((g["d"] == 1 and tl[t] <= g["far"]) or (g["d"] == -1 and th[t] >= g["far"])):
                 continue
-            if t - j >= L and not used:
+            if t - g["j"] >= L and g["first"] < 0:
                 continue
-            if used:
+            if g["first"] >= 0 and t + 1 - g["first"] >= N:
                 continue
-            keep.append(g)
-        alive = keep
+            nxt.append(g)
+        alive = nxt
         price = tc[t]
+        active = []
         for side in (1, -1):
-            cand = [g for g in alive if g[1] == side and not g[4] and t - g[0] < L and
-                    ((side == -1 and price < g[2]) or (side == 1 and price > g[2]))]
-            if not cand:
-                continue
+            cand = [g for g in alive if g["d"] == side and t - g["j"] >= minage and t - g["j"] < L and
+                    ((side == -1 and price < g["near"]) or (side == 1 and price > g["near"]))]
             if select == "near":
-                cand.sort(key=lambda g: abs(g[2] - price))
+                cand.sort(key=lambda g: abs(g["near"] - price))
             else:
-                cand.sort(key=lambda g: -g[0])
-            for g in cand[:K]:
-                g[4] = True
-                j, d, near, far, _ = g
-                sd = abs(near - far) + buffer
-                if sd > maxSL:
-                    continue
-                sd = max(sd, minSL)
-                i0 = pidx[t + 1]
-                i1 = np.searchsorted(P.t, tt[t + 1] + N * bar_ns) if t + 1 < len(tt) else P.n
-                if d == 1:
-                    f = P.first(lambda a, b: P.l[a:b] + spread <= near, i0, i1)
-                    if f < 0:
-                        continue
-                    entry = min(near, P.o[f] + spread)
-                else:
-                    f = P.first(lambda a, b: P.h[a:b] >= near, i0, i1)
-                    if f < 0:
-                        continue
-                    entry = max(near, P.o[f])
-                if single and f <= busy_until:
-                    continue
-                r, ie = bracket(P, f, d, entry, sd, exit_, be, spread)
-                busy_until = max(busy_until, ie)
-                trades.append((f, d, sd, r))
+                cand.sort(key=lambda g: -g["j"])
+            active += cand[:K]
+        # лимитки выбранных разрывов действуют на баре t+1
+        i0, i1 = pidx[t + 1], pidx[t + 2]
+        if i0 >= i1:
+            continue
+        fills = []
+        for g in active:
+            if g["first"] < 0:
+                g["first"] = t + 1
+            near, d = g["near"], g["d"]
+            if d == 1:
+                m = P.l[i0:i1] + spread <= near
+            else:
+                m = P.h[i0:i1] >= near
+            if m.any():
+                f = i0 + int(np.argmax(m))
+                fills.append((f, g))
+        for f, g in sorted(fills, key=lambda x: x[0]):
+            alive.remove(g)
+            if single and f <= busy_until:
+                continue
+            d, near = g["d"], g["near"]
+            entry = min(near, P.o[f] + spread) if d == 1 else max(near, P.o[f])
+            r, ie = bracket(P, f, d, entry, g["sd"], exit_, be, spread)
+            busy_until = max(busy_until, ie)
+            trades.append((f, d, g["sd"], r))
     return trades
 
 
@@ -331,6 +337,7 @@ def main():
     one.add_argument("--minsl", type=float, default=2.0)
     one.add_argument("--maxsl", type=float, default=5.0)
     one.add_argument("--mingap", type=float, default=0.0)
+    one.add_argument("--minage", type=int, default=0)
     one.add_argument("--trades")
     grid = sub.add_parser("grid")
     grid.add_argument("--tfs", default="15,30,60")
@@ -340,9 +347,9 @@ def main():
     if args.cmd == "one":
         tr = run(P, args.tf, args.L, args.N, args.K, args.select, args.exit, args.be,
                  minSL=args.minsl, maxSL=args.maxsl, spread=args.spread, single=args.single,
-                 mingap=args.mingap)
+                 mingap=args.mingap, minage=args.minage)
         mk = Monkey(P, args.exit, args.be, args.spread, rng)
-        print(fmt(f"M{args.tf} L{args.L} N{args.N} K{args.K} {args.select} g{args.mingap:g} {args.exit}{' BE' if args.be else ''}{' 1поз' if args.single else ''}",
+        print(fmt(f"M{args.tf} L{args.L} N{args.N} K{args.K} {args.select} g{args.mingap:g} a{args.minage} {args.exit}{' BE' if args.be else ''}{' 1поз' if args.single else ''}",
                   stats(P, tr, mk, args.holdout), args.holdout))
         if args.trades:
             pd.DataFrame([(P.t[f], d, sd, r) for f, d, sd, r in tr],
@@ -350,15 +357,16 @@ def main():
         return
     monkeys = {}
     for tfm in [int(x) for x in args.tfs.split(",")]:
-        for L, N, K, sel, mg, ex, be in itertools.product((30, 50), (10, 20, 40), (1, 3), ("near", "recent"),
-                                                          (0.0, 1.0, 2.0),
-                                                          ("tp5", "tp7", "tp10", "part5-10", "part5-7"),
-                                                          (False, True)):
+        for age, N, K, sel, mg, ex, be in itertools.product((0, 3, 10), (10, 20, 40), (1, 3), ("near", "recent"),
+                                                            (0.0, 1.0, 2.0),
+                                                            ("tp5", "tp7", "tp10", "part5-10"),
+                                                            (False, True)):
             if be and not ex.startswith("part"):
                 continue
-            tr = run(P, tfm, L, N, K, sel, ex, be, spread=args.spread, mingap=mg)
+            L = 50
+            tr = run(P, tfm, L, N, K, sel, ex, be, spread=args.spread, mingap=mg, minage=age)
             mk = monkeys.setdefault((ex, be), Monkey(P, ex, be, args.spread, rng))
-            print(fmt(f"M{tfm} L{L} N{N} K{K} {sel} g{mg:g} {ex}{' BE' if be else ''}",
+            print(fmt(f"M{tfm} L{L} N{N} K{K} {sel} g{mg:g} a{age} {ex}{' BE' if be else ''}",
                       stats(P, tr, mk, args.holdout), args.holdout), flush=True)
 
 
