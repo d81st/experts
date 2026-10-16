@@ -31,6 +31,8 @@ def load_trades(path):
         return []
     h = table[head[-1]]
     deals = [r for r in table[head[-1] + 1:] if len(r) == len(h)]
+    # Отчёт на реальных тиках бывает не по порядку — номера сделок идут по времени.
+    deals.sort(key=lambda r: int(r[1]) if r[1].strip().isdigit() else 0)
     # Колонки: Time, Deal, Symbol, Type, Direction, Volume, Price, Order, Commission, Swap, Profit, Balance, Comment
     trades, open_ = [], []
     balance = None

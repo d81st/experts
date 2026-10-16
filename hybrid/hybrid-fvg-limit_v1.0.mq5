@@ -85,12 +85,40 @@ PartialCloseState  g_part;
 datetime           g_news[];
 datetime           g_lastBar = 0;
 int                g_atr     = INVALID_HANDLE;
-int g_cntGaps = 0, g_cntPlaced = 0, g_cntTouched = 0, g_cntRisk = 0, g_cntNews = 0;
+int g_cntGaps = 0, g_cntPlaced = 0, g_cntTouched = 0, g_cntRisk = 0, g_cntNews = 0, g_cntOrphans = 0;
 
+// Снять лимитку; не удалось — её подберёт SweepOrphans (у разрыва тикет уже обнулён).
 void DeleteOrder(const ulong ticket)
   {
    if(ticket != 0 && PositionGuardPendingExists(ticket))
       trade.OrderDelete(ticket);
+  }
+
+// Лимитки бота, которых нет у живых разрывов (снять не удалось — например, «рынок закрыт»
+// сразу после перерыва), удаляются; неудачные попытки повторяются не чаще раза в 10 секунд.
+void SweepOrphans()
+  {
+   static datetime lastFail = 0;
+   if(lastFail > 0 && TimeCurrent() - lastFail < 10)
+      return;
+   for(int i = OrdersTotal() - 1; i >= 0; i--)
+     {
+      const ulong t = OrderGetTicket(i);
+      if(t == 0 || OrderGetString(ORDER_SYMBOL) != _Symbol || OrderGetInteger(ORDER_MAGIC) != MagicNumber)
+         continue;
+      bool tracked = false;
+      for(int k = 0; k < ArraySize(g_gaps) && !tracked; k++)
+         tracked = (g_gaps[k].ticket == t);
+      if(tracked)
+         continue;
+      if(trade.OrderDelete(t))
+        {
+         g_cntOrphans++;
+         PrintFormat("🧹 Снята лимитка #%I64u без живого разрыва", t);
+        }
+      else
+         lastFail = TimeCurrent();
+     }
   }
 
 void ClearOrders()
@@ -194,8 +222,8 @@ int OnInit()
 void OnDeinit(const int reason)
   {
    PrintFormat("📊 Разрывов найдено: %d | лимиток выставлено: %d | отработано касанием: %d | пропуск (риск мин. лота): %d | "
-               "без лимиток из-за новостей: %d баров",
-               g_cntGaps, g_cntPlaced, g_cntTouched, g_cntRisk, g_cntNews);
+               "без лимиток из-за новостей: %d баров | снято лимиток-сирот: %d",
+               g_cntGaps, g_cntPlaced, g_cntTouched, g_cntRisk, g_cntNews, g_cntOrphans);
    if(!MQLInfoInteger(MQL_TESTER))
       ClearOrders();
    if(g_atr != INVALID_HANDLE)
@@ -216,6 +244,7 @@ void OnTick()
    const bool hasPos = PositionGuardHasOpen(MagicNumber, type);
    if(OnePosition && hasPos)
       ClearOrders();   // исполнилась лимитка — остальные снимаем сразу
+   SweepOrphans();
 
    const datetime bar = iTime(_Symbol, TradingTimeframe, 0);
    if(bar == g_lastBar)
