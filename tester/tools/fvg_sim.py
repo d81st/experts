@@ -161,7 +161,7 @@ def parse_exit(s):
 # ── стратегия ─────────────────────────────────────────────────────────
 
 def run(P, tfmin, L, N, K, select, exit_s, be, buffer=0.3, minSL=2.0, maxSL=5.0, spread=0.25,
-        single=False, mingap=0.0, minage=0):
+        single=False, mingap=0.0, minage=0, atr_mode=False, atr_period=14):
     """Как в роботе: на каждом закрытом баре ТФ из живых разрывов (возраст minage … L−1 баров,
     цена снаружи) в каждую сторону выбираются K по правилу select; у выбранных — лимитки,
     у выпавших из выбора лимитка снимается. Срок лимитки — N баров с первой постановки, потом
@@ -169,7 +169,12 @@ def run(P, tfmin, L, N, K, select, exit_s, be, buffer=0.3, minSL=2.0, maxSL=5.0,
     tf = P.resample(tfmin)
     tt = tf.index.to_numpy()
     th, tl, tc = tf["high"].to_numpy(), tf["low"].to_numpy(), tf["close"].to_numpy()
-    gaps = [g for g in find_gaps(tf) if abs(g[2] - g[3]) >= mingap]
+    # atr_mode: mingap, minSL, maxSL — доли ATR(atr_period) рабочего ТФ на баре разрыва
+    pc = np.roll(tc, 1); pc[0] = tc[0]
+    trv = np.maximum(th - tl, np.maximum(np.abs(th - pc), np.abs(tl - pc)))
+    atr = pd.Series(trv).rolling(atr_period).mean().to_numpy()
+    scale = (lambda j: atr[j]) if atr_mode else (lambda j: 1.0)
+    gaps = [g for g in find_gaps(tf) if not np.isnan(atr[g[0]]) and abs(g[2] - g[3]) >= mingap * scale(g[0])]
     exit_ = parse_exit(exit_s)
     pidx = np.searchsorted(P.t, tt)
     pidx = np.append(pidx, P.n)
@@ -182,9 +187,9 @@ def run(P, tfmin, L, N, K, select, exit_s, be, buffer=0.3, minSL=2.0, maxSL=5.0,
             j, d, near, far = gaps[gi]
             gi += 1
             sd = abs(near - far) + buffer
-            if sd > maxSL:
+            if sd > maxSL * scale(j):
                 continue
-            alive.append({"j": j, "d": d, "near": near, "far": far, "sd": max(sd, minSL), "first": -1})
+            alive.append({"j": j, "d": d, "near": near, "far": far, "sd": max(sd, minSL * scale(j)), "first": -1})
         # закрыт насквозь, устарел или истёк срок лимитки — убираем
         nxt = []
         for g in alive:
@@ -237,12 +242,12 @@ def run(P, tfmin, L, N, K, select, exit_s, be, buffer=0.3, minSL=2.0, maxSL=5.0,
 # ── случайные входы ───────────────────────────────────────────────────
 
 class Monkey:
-    def __init__(self, P, exit_s, be, spread, rng, pool=1500):
+    def __init__(self, P, exit_s, be, spread, rng, pool=800):
         self.P, self.exit_, self.be, self.spread = P, parse_exit(exit_s), be, spread
         self.rng, self.pool, self.cache = rng, pool, {}
 
     def outcomes(self, k, d, sd):
-        key = (k, d, round(sd * 2) / 2)
+        key = (k, d, round(sd * 2) / 2 if sd < 6 else float(round(sd)))
         if key not in self.cache:
             P = self.P
             idx = np.flatnonzero(P.period == k)
@@ -338,24 +343,38 @@ def main():
     one.add_argument("--maxsl", type=float, default=5.0)
     one.add_argument("--mingap", type=float, default=0.0)
     one.add_argument("--minage", type=int, default=0)
+    one.add_argument("--atr", action="store_true", help="mingap, minsl, maxsl — в долях ATR(14) ТФ")
     one.add_argument("--trades")
     grid = sub.add_parser("grid")
     grid.add_argument("--tfs", default="15,30,60")
+    grida = sub.add_parser("grid-atr")
+    grida.add_argument("--tfs", default="15,30,60")
     args = ap.parse_args()
     rng = np.random.default_rng(args.seed)
     P = Path(args.bars)
     if args.cmd == "one":
         tr = run(P, args.tf, args.L, args.N, args.K, args.select, args.exit, args.be,
                  minSL=args.minsl, maxSL=args.maxsl, spread=args.spread, single=args.single,
-                 mingap=args.mingap, minage=args.minage)
+                 mingap=args.mingap, minage=args.minage, atr_mode=args.atr)
         mk = Monkey(P, args.exit, args.be, args.spread, rng)
-        print(fmt(f"M{args.tf} L{args.L} N{args.N} K{args.K} {args.select} g{args.mingap:g} a{args.minage} {args.exit}{' BE' if args.be else ''}{' 1поз' if args.single else ''}",
+        print(fmt(f"M{args.tf} L{args.L} N{args.N} K{args.K} {args.select} g{args.mingap:g}{'ATR' if args.atr else ''} sl{args.minsl:g}-{args.maxsl:g} a{args.minage} {args.exit}{' BE' if args.be else ''}{' 1поз' if args.single else ''}",
                   stats(P, tr, mk, args.holdout), args.holdout))
         if args.trades:
             pd.DataFrame([(P.t[f], d, sd, r) for f, d, sd, r in tr],
                          columns=["time", "dir", "stop_usd", "R"]).to_csv(args.trades, index=False)
         return
     monkeys = {}
+    if args.cmd == "grid-atr":
+        for tfm in [int(x) for x in args.tfs.split(",")]:
+            for age, N, mg, mn, mx, ex in itertools.product((0, 3, 10), (10, 20, 40), (0.1, 0.2, 0.3),
+                                                            (0.2, 0.3), (0.6, 1.0),
+                                                            ("tp5", "tp7", "tp10", "part5-10")):
+                tr = run(P, tfm, 50, N, 3, "near", ex, False, minSL=mn, maxSL=mx, spread=args.spread,
+                         mingap=mg, minage=age, atr_mode=True)
+                mk = monkeys.setdefault(ex, Monkey(P, ex, False, args.spread, rng))
+                print(fmt(f"M{tfm} N{N} g{mg:g}ATR sl{mn:g}-{mx:g}ATR a{age} {ex}",
+                          stats(P, tr, mk, args.holdout), args.holdout), flush=True)
+        return
     for tfm in [int(x) for x in args.tfs.split(",")]:
         for age, N, K, sel, mg, ex, be in itertools.product((0, 3, 10), (10, 20, 40), (1, 3), ("near", "recent"),
                                                             (0.0, 1.0, 2.0),
