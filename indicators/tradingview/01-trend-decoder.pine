@@ -1,0 +1,85 @@
+//@version=5
+indicator("Trend Decoder 9 / code 6.18", overlay=true)
+
+// ─── Пользовательский ввод (Интерактивные точки) ──────────────
+grp_manual = "Выбор диапазона (кликните 2 раза на графике)"
+
+// В Pine Script связка time и price с confirm=true объединяется в один клик мыши
+t1 = input.time(0, "Время 1-й точки", confirm=true, group=grp_manual)
+p1 = input.price(0.0, "Цена 1-й точки", confirm=true, group=grp_manual)
+
+t2 = input.time(0, "Время 2-й точки", confirm=true, group=grp_manual)
+p2 = input.price(0.0, "Цена 2-й точки", confirm=true, group=grp_manual)
+
+point_mult = input.float(1.0, "Множитель пунктов", tooltip="Для индексов и криптовалют оставьте 1.0. Для Forex используйте 10000 или 100000.", group="Настройки")
+
+// ─── 1. Определяем экстремумы и направление по времени ─────────
+// Находим фактические максимумы и минимумы из двух выбранных точек
+maxPrice = math.max(p1, p2)
+minPrice = math.min(p1, p2)
+
+// Определяем, какая цена была раньше хронологически
+early_p = t1 < t2 ? p1 : p2
+late_p  = t1 < t2 ? p2 : p1
+
+// Определяем направление внутри range (1 = Бычье, -1 = Медвежье)
+// Если ранняя цена выше поздней -> движение вниз (медвежье)
+trendDir = early_p > late_p ? -1 : 1
+
+// ─── 2. Математические вычисления ──────────────
+// Разница в пунктах
+RangePoints = math.abs(maxPrice - minPrice) * point_mult
+
+// Вычисление корней
+decoder9 = math.sqrt(RangePoints * 9)
+code6_18 = math.sqrt(RangePoints * 6.18)
+
+// Вычисление P (убираем последнюю цифру, деля на 10 и округляя вниз)
+// Пример: 4000 станет 400. 54321 станет 5432.
+P_val = math.floor(code6_18 / 10)
+
+// ВАЖНО: Возвращаем пункты обратно в формат цены графика
+adj_dec9 = decoder9 / point_mult
+adj_c618 = code6_18 / point_mult
+adj_P    = P_val / point_mult
+
+// ─── 3. Расчет уровней ──────────────
+float topFirstLevel = na
+float bottomFirstLevel = na
+float topSecondLevel = na
+float bottomSecondLevel = na
+float TP = na
+
+// Проверка: отрисовываем только если точки установлены
+if p1 > 0 and p2 > 0
+    if trendDir == -1 // Движение медвежье -> сигнал BUY (строим снизу-вверх от MinPrice)
+        topFirstLevel     := minPrice + adj_dec9
+        bottomFirstLevel  := minPrice + adj_c618
+
+        topSecondLevel    := minPrice + (adj_dec9 / 2)
+        bottomSecondLevel := minPrice + (adj_c618 / 2)
+
+        TP                := minPrice + adj_P
+
+    else // Движение бычье -> сигнал SELL (строим сверху-вниз от MaxPrice)
+        topFirstLevel     := maxPrice - adj_dec9
+        bottomFirstLevel  := maxPrice - adj_c618
+
+        topSecondLevel    := maxPrice - (adj_dec9 / 2)
+        bottomSecondLevel := maxPrice - (adj_c618 / 2)
+
+        TP                := maxPrice - adj_P
+
+// ─── 4. Отрисовка линий и зон ──────────────
+// Зона 1 (First Zone)
+p_top1 = plot(topFirstLevel, title="Top First Level", color=color.new(color.blue, 20), style=plot.style_line)
+p_bot1 = plot(bottomFirstLevel, title="Bottom First Level", color=color.new(color.blue, 20), style=plot.style_line)
+fill(p_top1, p_bot1, color=color.new(color.blue, 85), title="First Zone Fill")
+
+// Зона 2 (Second Zone)
+p_top2 = plot(topSecondLevel, title="Top Second Level", color=color.new(color.purple, 20), style=plot.style_line)
+p_bot2 = plot(bottomSecondLevel, title="Bottom Second Level", color=color.new(color.purple, 20), style=plot.style_line)
+fill(p_top2, p_bot2, color=color.new(color.purple, 85), title="Second Zone Fill")
+
+// Линия Take Profit (отображаем крестиками/точками чтобы выделялась)
+plot(TP, title="Take Profit", color=color.new(color.green, 0), style=plot.style_cross, linewidth=2)

@@ -1,0 +1,77 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © H4isenB (Time-Based Projection)
+//@version=5
+indicator("Time Retracement | RishRise", overlay=true, max_lines_count=50, max_boxes_count=10, max_labels_count=50, max_bars_back=5000)
+
+// ─── Пользовательский ввод (Интерактивное время) ──────────────
+grp_manual = "Выделение диапазона (Кликните на графике)"
+inp_t1 = input.time(0, "Начало диапазона", confirm=true, group=grp_manual)
+inp_t2 = input.time(0, "Конец диапазона",  confirm=true, group=grp_manual)
+
+grp_set = "Настройки расчета"
+// Добавлен множитель, так как для индексов (4000-3900=100) разница понятна,
+// но для Форекса (1.1050-1.1000=0.0050) баров получится слишком мало.
+point_mult = input.float(1.0, "Множитель пунктов", group=grp_set, tooltip="Оставьте 1.0 для индексов и крипты. Для Форекса установите 10000 или 100000.")
+
+// ─── Переменные для хранения баров клика ──────────────────────
+var int bar_1 = na
+var int bar_2 = na
+
+if time == inp_t1
+    bar_1 := bar_index
+if time == inp_t2
+    bar_2 := bar_index
+
+// ─── Основной расчет на последнем баре ────────────────────────
+if barstate.islast and not na(bar_1) and not na(bar_2)
+    // 1. Определяем границы диапазона (слева направо)
+    int left_b  = math.min(bar_1, bar_2)
+    int right_b = math.max(bar_1, bar_2)
+
+    // Переменные для экстремумов
+    float max_p = -999999.0
+    float min_p = 999999999.0
+    int max_b = na
+    int min_b = na
+
+    // Ищем максимум и минимум строго внутри выделенного диапазона
+    for i = (bar_index - right_b) to (bar_index - left_b)
+        if high[i] > max_p
+            max_p := high[i]
+            max_b := bar_index[i]
+        if low[i] < min_p
+            min_p := low[i]
+            min_b := bar_index[i]
+
+    // 2. Определяем направление range
+    // Если бар минимума был раньше бара максимума -> Бычий (рост)
+    // Если бар максимума был раньше бара минимума -> Медвежий (падение)
+    bool is_bullish = min_b < max_b
+
+    // 3. Расчет пунктов и количества баров по формуле: (P * 10) / 3
+    float P = (max_p - min_p) * point_mult
+    int offset_bars = math.round((P * 10) / 3)
+
+    // 4. Определяем точку отсчета
+    // Если бычий: отсчитываем от максимума. Если медвежий: от минимума.
+    int start_calc_bar = is_bullish ? max_b : min_b
+    int target_bar = start_calc_bar + offset_bars
+
+    // ─── ВИЗУАЛИЗАЦИЯ ─────────────────────────────────────────
+
+    // Вертикальные линии границ нашего Range
+    line.new(left_b, low, left_b, high, xloc=xloc.bar_index, extend=extend.both, color=color.new(color.gray, 50), style=line.style_dashed)
+    line.new(right_b, low, right_b, high, xloc=xloc.bar_index, extend=extend.both, color=color.new(color.gray, 50), style=line.style_dashed)
+
+    // Коробка для наглядного отображения Range и экстремумов
+    box.new(left_b, max_p, right_b, min_p, border_color=color.new(color.blue, 50), bgcolor=color.new(color.blue, 90))
+
+    // Третья линия - Целевое время (откат)
+    // Цвет зависит от тренда (бычий -> ожидаем откат вниз (красный), медвежий -> откат вверх (зеленый))
+    color target_col = is_bullish ? color.red : color.green
+
+    line.new(target_bar, min_p, target_bar, max_p, xloc=xloc.bar_index, extend=extend.both, color=target_col, width=2)
+
+    // Информационные метки
+    label.new(start_calc_bar, is_bullish ? max_p : min_p, "Старт отсчета", xloc=xloc.bar_index, color=color.orange, textcolor=color.white, style=is_bullish ? label.style_label_down : label.style_label_up, size=size.small)
+    label.new(target_bar, max_p, "Зона Отката\n+" + str.tostring(offset_bars) + " баров", xloc=xloc.bar_index, color=target_col, textcolor=color.white, style=label.style_label_down)

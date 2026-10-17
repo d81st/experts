@@ -1,0 +1,120 @@
+//@version=5
+indicator("Vibration Cycles | RichRise", overlay=true, max_boxes_count=50)
+
+// =====================================================================
+// 1. ПОЛЬЗОВАТЕЛЬСКИЕ НАСТРОЙКИ
+// =====================================================================
+startTime = input.time(timestamp("2024-01-01 00:00"), "Начало диапазона", confirm=true)
+endTime   = input.time(timestamp("2024-01-02 00:00"), "Конец диапазона", confirm=true)
+
+point_mult = input.float(1.0, "Множитель пунктов", tooltip="Для индексов и криптовалют оставьте 1.0. Для Forex используйте 10000 или 100000.")
+
+// =====================================================================
+// 2. ОГРАНИЧЕНИЕ ПО ТАЙМФРЕЙМУ (Исправлено)
+// =====================================================================
+is_valid_tf = timeframe.isseconds == false and (timeframe.isminutes == false or timeframe.multiplier >= 15)
+
+// Вывод предупреждения, если таймфрейм ниже 30m
+var table warningTable = table.new(position.top_right, 1, 1)
+if not is_valid_tf
+    if barstate.islast
+        table.cell(warningTable, 0, 0, "Индикатор предназначен для работы только на \nтаймфреймах 15m и выше.", text_color=color.white, bgcolor=color.olive, text_size=size.normal)
+
+// =====================================================================
+// 3. ПОИСК ЭКСТРЕМУМОВ ВНУТРИ ДИАПАЗОНА
+// =====================================================================
+var float maxPrice = na
+var int   maxTime  = na
+var float minPrice = na
+var int   minTime  = na
+
+if is_valid_tf
+    inRange = time >= startTime and time <= endTime
+
+    if inRange
+        if na(maxPrice) or high > maxPrice
+            maxPrice := high
+            maxTime  := time
+        if na(minPrice) or low < minPrice
+            minPrice := low
+            minTime  := time
+
+// =====================================================================
+// 4. РАСЧЁТ И ПОСТРОЕНИЕ ЗОН
+// =====================================================================
+// Массив для хранения и своевременного удаления старых графических боксов
+var box[] zoneBoxes = array.new<box>()
+
+if is_valid_tf and barstate.islast and not na(maxPrice) and not na(minPrice)
+
+    // Удаляем старые боксы перед перерисовкой на новом тике
+    if array.size(zoneBoxes) > 0
+        for j = 0 to array.size(zoneBoxes) - 1
+            box.delete(array.get(zoneBoxes, j))
+        array.clear(zoneBoxes)
+
+    // Определение направления
+    bool isBullish = minTime < maxTime
+    bool isBearish = maxTime < minTime
+
+    float baseExtreme = na
+    int   baseTime    = na
+    bool  buildAbove  = false
+
+    if isBullish
+        baseExtreme := maxPrice
+        baseTime    := maxTime
+        buildAbove  := false
+    else if isBearish
+        baseExtreme := minPrice
+        baseTime    := minTime
+        buildAbove  := true
+
+    // Расчет разницы экстремумов в пунктах
+    float rangePoints = math.abs(maxPrice - minPrice) * point_mult
+
+    // Получение значения P
+    float p_val = math.max(math.floor(rangePoints / 100), 1)
+
+    // Числовые диапазоны из ТЗ (Исправлено добавлением .0)
+    array<float> zoneStarts = array.from(9.0,  17.0, 25.0, 37.0, 49.0, 65.0, 81.0, 101.0, 121.0, 145.0)
+    array<float> zoneEnds   = array.from(11.0, 19.0, 28.0, 40.0, 53.0, 69.0, 86.0, 106.0, 127.0, 151.0)
+
+    // Построение зон
+    for i = 0 to array.size(zoneStarts) - 1
+        float zStart = array.get(zoneStarts, i)
+        float zEnd   = array.get(zoneEnds, i)
+
+        float pStartOffset = zStart * p_val
+        float pEndOffset   = zEnd * p_val
+
+        float level1 = na
+        float level2 = na
+
+        if buildAbove
+            level1 := baseExtreme + (pStartOffset / point_mult)
+            level2 := baseExtreme + (pEndOffset / point_mult)
+        else
+            level1 := baseExtreme - (pStartOffset / point_mult)
+            level2 := baseExtreme - (pEndOffset / point_mult)
+
+        // Определение цвета зоны
+        color boxColor = na
+        if buildAbove
+            if i % 3 == 0
+                boxColor := color.new(#ef5350, 75)
+            else if i % 3 == 1
+                boxColor := color.new(#d32f2f, 75)
+            else
+                boxColor := color.new(#b71c1c, 75)
+        else
+            if i % 3 == 0
+                boxColor := color.new(#66bb6a, 75)
+            else if i % 3 == 1
+                boxColor := color.new(#388e3c, 75)
+            else
+                boxColor := color.new(#1b5e20, 75)
+
+        // Отрисовка зоны и сохранение её в массив для контроля памяти
+        box currentBox = box.new(left=baseTime, top=math.max(level1, level2), right=time, bottom=math.min(level1, level2), xloc=xloc.bar_time, extend=extend.right, border_color=na, bgcolor=boxColor)
+        array.push(zoneBoxes, currentBox)
