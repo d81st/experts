@@ -1,0 +1,132 @@
+{
+  "expert": "archive/random-entry-bench",
+  "symbols": [
+    "XAUUSDm",
+    "XAUUSD"
+  ],
+  "period": "M1",
+  "from": "2026.06.01",
+  "to": "2026.10.05",
+  "model": 4,
+  "delay": 200,
+  "deposit": 10000,
+  "currency": "USD",
+  "leverage": 2000,
+  "inputs": {
+    "TradingTimeframe": 15,
+    "TrendTimeframe": 16385,
+    "RiskPercent": 1.0,
+    "EntryProbability": 0.02,
+    "MinSLPoints": 2000,
+    "MaxSLPoints": 20000,
+    "RandomSeed": 1,
+    "TimeExitBars": 8,
+    "DirectionMode": 0
+  },
+  "variants": [
+    {
+      "name": "s1-t4",
+      "inputs": {
+        "RandomSeed": 1,
+        "TimeExitBars": 4,
+        "DirectionMode": 0
+      }
+    },
+    {
+      "name": "s2-t4",
+      "inputs": {
+        "RandomSeed": 2,
+        "TimeExitBars": 4,
+        "DirectionMode": 0
+      }
+    },
+    {
+      "name": "s3-t4",
+      "inputs": {
+        "RandomSeed": 3,
+        "TimeExitBars": 4,
+        "DirectionMode": 0
+      }
+    },
+    {
+      "name": "s4-t4",
+      "inputs": {
+        "RandomSeed": 4,
+        "TimeExitBars": 4,
+        "DirectionMode": 0
+      }
+    },
+    {
+      "name": "s5-t4",
+      "inputs": {
+        "RandomSeed": 5,
+        "TimeExitBars": 4,
+        "DirectionMode": 0
+      }
+    },
+    {
+      "name": "s1-t8",
+      "inputs": {
+        "RandomSeed": 1,
+        "TimeExitBars": 8,
+        "DirectionMode": 0
+      }
+    },
+    {
+      "name": "s2-t8",
+      "inputs": {
+        "RandomSeed": 2,
+        "TimeExitBars": 8,
+        "DirectionMode": 0
+      }
+    },
+    {
+      "name": "s3-t8",
+      "inputs": {
+        "RandomSeed": 3,
+        "TimeExitBars": 8,
+        "DirectionMode": 0
+      }
+    },
+    {
+      "name": "s4-t8",
+      "inputs": {
+        "RandomSeed": 4,
+        "TimeExitBars": 8,
+        "DirectionMode": 0
+      }
+    },
+    {
+      "name": "s5-t8",
+      "inputs": {
+        "RandomSeed": 5,
+        "TimeExitBars": 8,
+        "DirectionMode": 0
+      }
+    },
+    {
+      "name": "long-s1-t8",
+      "inputs": {
+        "RandomSeed": 1,
+        "TimeExitBars": 8,
+        "DirectionMode": 1
+      }
+    },
+    {
+      "name": "long-s2-t8",
+      "inputs": {
+        "RandomSeed": 2,
+        "TimeExitBars": 8,
+        "DirectionMode": 1
+      }
+    },
+    {
+      "name": "long-s3-t8",
+      "inputs": {
+        "RandomSeed": 3,
+        "TimeExitBars": 8,
+        "DirectionMode": 1
+      }
+    }
+  ]
+}

@@ -1,0 +1,146 @@
+{
+  "expert": "archive/engulfing-bot_v2.1",
+  "symbols": [
+    "XAUUSDm",
+    "XAUUSD"
+  ],
+  "period": "M1",
+  "from": "2023.01.02",
+  "to": "2025.12.31",
+  "model": 1,
+  "delay": 200,
+  "deposit": 10000,
+  "currency": "USD",
+  "leverage": 2000,
+  "inputs": {
+    "RiskPercent": 1.0,
+    "TrailingMode": 0,
+    "RiskReward": 2.0,
+    "UseSessionFilter": false,
+    "CloseOnSessionExit": false,
+    "UseAsianSession": false,
+    "UseSelectedSessions": false,
+    "UseLondonSession": false,
+    "UseNewYorkSession": false,
+    "TradingTimeframe": 15,
+    "TrendTimeframe": 16385,
+    "EntryMode": 0,
+    "MinSLPoints": 2000,
+    "MaxSLPoints": 20000,
+    "NYStartHour": 12,
+    "NYEndHour": 21,
+    "MaxBarsToWait": 2
+  },
+  "variants": [
+    {
+      "name": "m15-ny-market",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "TrendTimeframe": 16385,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000,
+        "EntryMode": 1,
+        "UseSelectedSessions": true,
+        "UseLondonSession": false,
+        "UseNewYorkSession": true
+      }
+    },
+    {
+      "name": "rr1.5",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "TrendTimeframe": 16385,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000,
+        "EntryMode": 1,
+        "UseSelectedSessions": true,
+        "UseLondonSession": false,
+        "UseNewYorkSession": true,
+        "RiskReward": 1.5
+      }
+    },
+    {
+      "name": "rr3.0",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "TrendTimeframe": 16385,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000,
+        "EntryMode": 1,
+        "UseSelectedSessions": true,
+        "UseLondonSession": false,
+        "UseNewYorkSession": true,
+        "RiskReward": 3.0
+      }
+    },
+    {
+      "name": "m30",
+      "inputs": {
+        "TradingTimeframe": 30,
+        "TrendTimeframe": 16388,
+        "MinSLPoints": 3000,
+        "MaxSLPoints": 30000,
+        "EntryMode": 1,
+        "UseSelectedSessions": true,
+        "UseLondonSession": false,
+        "UseNewYorkSession": true
+      }
+    },
+    {
+      "name": "ny13-21",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "TrendTimeframe": 16385,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000,
+        "EntryMode": 1,
+        "UseSelectedSessions": true,
+        "UseLondonSession": false,
+        "UseNewYorkSession": true,
+        "NYStartHour": 13
+      }
+    },
+    {
+      "name": "ny12-20",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "TrendTimeframe": 16385,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000,
+        "EntryMode": 1,
+        "UseSelectedSessions": true,
+        "UseLondonSession": false,
+        "UseNewYorkSession": true,
+        "NYEndHour": 20
+      }
+    },
+    {
+      "name": "wait1",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "TrendTimeframe": 16385,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000,
+        "EntryMode": 1,
+        "UseSelectedSessions": true,
+        "UseLondonSession": false,
+        "UseNewYorkSession": true,
+        "MaxBarsToWait": 1
+      }
+    },
+    {
+      "name": "wait3",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "TrendTimeframe": 16385,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000,
+        "EntryMode": 1,
+        "UseSelectedSessions": true,
+        "UseLondonSession": false,
+        "UseNewYorkSession": true,
+        "MaxBarsToWait": 3
+      }
+    }
+  ]
+}

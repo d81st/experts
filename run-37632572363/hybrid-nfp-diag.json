@@ -1,0 +1,28 @@
+{
+  "expert": "hybrid-nfp-straddle_v1.0",
+  "symbols": [
+    "XAUUSDm",
+    "XAUUSD"
+  ],
+  "period": "M1",
+  "from": "2026.01.05",
+  "to": "2026.05.29",
+  "model": 4,
+  "delay": 200,
+  "deposit": 10000,
+  "currency": "USD",
+  "leverage": 2000,
+  "inputs": {
+    "RiskPercent": 1.0
+  },
+  "variants": [
+    {
+      "name": "d3-sl6-rr2",
+      "inputs": {
+        "DistancePoints": 3000,
+        "SLPoints": 6000,
+        "RiskReward": 2.0
+      }
+    }
+  ]
+}

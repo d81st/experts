@@ -1,0 +1,38 @@
+{
+  "expert": "liq-grab_v2.1",
+  "symbols": [
+    "XAUUSDm",
+    "XAUUSD"
+  ],
+  "period": "M1",
+  "from": "2026.06.01",
+  "to": "2026.10.05",
+  "model": 4,
+  "delay": 200,
+  "deposit": 200,
+  "currency": "USD",
+  "leverage": 2000,
+  "inputs": {
+    "TradingTimeframe": 3
+  },
+  "variants": [
+    {
+      "name": "m1-current",
+      "inputs": {
+        "TradingTimeframe": 1
+      }
+    },
+    {
+      "name": "m3-current",
+      "inputs": {
+        "TradingTimeframe": 3
+      }
+    },
+    {
+      "name": "m5-current",
+      "inputs": {
+        "TradingTimeframe": 5
+      }
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  "expert": "liq-grab_v2.1",
+  "symbols": [
+    "XAUUSDm",
+    "XAUUSD"
+  ],
+  "period": "M3",
+  "from": "2026.07.06",
+  "to": "2026.10.05",
+  "model": 4,
+  "delay": 200,
+  "deposit": 200,
+  "currency": "USD",
+  "leverage": 2000,
+  "inputs": {
+    "StopMode": 0,
+    "TPMode": 0,
+    "AtrSLMultiplier": 1.5
+  },
+  "variants": [
+    {
+      "name": "sl-fixed-tp-rr",
+      "inputs": {}
+    },
+    {
+      "name": "sl-atr1.5",
+      "inputs": {
+        "StopMode": 2,
+        "AtrSLMultiplier": 1.5
+      }
+    },
+    {
+      "name": "sl-atr2.5",
+      "inputs": {
+        "StopMode": 2,
+        "AtrSLMultiplier": 2.5
+      }
+    },
+    {
+      "name": "tp-liquidity",
+      "inputs": {
+        "TPMode": 1
+      }
+    },
+    {
+      "name": "sl-atr2.0-tp-liq",
+      "inputs": {
+        "StopMode": 2,
+        "AtrSLMultiplier": 2.0,
+        "TPMode": 1
+      }
+    }
+  ]
+}

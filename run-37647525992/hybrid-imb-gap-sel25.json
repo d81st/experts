@@ -1,0 +1,66 @@
+{
+  "expert": "hybrid-imbalance-fibo_v1.0",
+  "symbols": [
+    "XAUUSDm",
+    "XAUUSD"
+  ],
+  "period": "M1",
+  "from": "2025.01.02",
+  "to": "2025.12.31",
+  "model": 1,
+  "delay": 200,
+  "deposit": 10000,
+  "currency": "USD",
+  "leverage": 2000,
+  "inputs": {
+    "RiskPercent": 1.0,
+    "ExtSide": 2
+  },
+  "variants": [
+    {
+      "name": "m15-atr2-gap",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "MinSLPoints": 2000,
+        "ImbMinRangeATR": 2.0,
+        "ImbRequireGap": true
+      }
+    },
+    {
+      "name": "m15-atr2-nogap",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "MinSLPoints": 2000,
+        "ImbMinRangeATR": 2.0,
+        "ImbRequireGap": false
+      }
+    },
+    {
+      "name": "m15-atr3-nogap",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "MinSLPoints": 2000,
+        "ImbMinRangeATR": 3.0,
+        "ImbRequireGap": false
+      }
+    },
+    {
+      "name": "m5-atr3-gap",
+      "inputs": {
+        "TradingTimeframe": 5,
+        "MinSLPoints": 1500,
+        "ImbMinRangeATR": 3.0,
+        "ImbRequireGap": true
+      }
+    },
+    {
+      "name": "m5-atr3-nogap",
+      "inputs": {
+        "TradingTimeframe": 5,
+        "MinSLPoints": 1500,
+        "ImbMinRangeATR": 3.0,
+        "ImbRequireGap": false
+      }
+    }
+  ]
+}

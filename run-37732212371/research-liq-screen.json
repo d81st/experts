@@ -1,0 +1,504 @@
+{
+  "expert": "archive/liq-grab_v2.1",
+  "symbols": [
+    "XAUUSDm",
+    "XAUUSD"
+  ],
+  "period": "M1",
+  "from": "2023.01.02",
+  "to": "2025.12.31",
+  "model": 1,
+  "delay": 200,
+  "deposit": 10000,
+  "currency": "USD",
+  "leverage": 2000,
+  "inputs": {
+    "RiskPercent": 1.0,
+    "TrailingMode": 0,
+    "UseSessionFilter": false,
+    "CloseOnSessionExit": false,
+    "UseAsianSession": false,
+    "UseSelectedSessions": false,
+    "UseLondonSession": false,
+    "UseNewYorkSession": false,
+    "TradingTimeframe": 15,
+    "LevelMode": 0,
+    "StopMode": 2,
+    "TPMode": 0,
+    "RiskRewardRatio": 2.0,
+    "AtrSLMultiplier": 1.5,
+    "SweepSLBufferPoints": 200,
+    "MinSLPoints": 2000,
+    "MaxSLPoints": 20000
+  },
+  "variants": [
+    {
+      "name": "m15-lon-streak",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000,
+        "LevelMode": 0,
+        "StopMode": 2,
+        "UseSelectedSessions": true,
+        "UseLondonSession": true,
+        "UseNewYorkSession": false
+      }
+    },
+    {
+      "name": "m15-lon-prevday",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000,
+        "LevelMode": 1,
+        "StopMode": 1,
+        "UseSelectedSessions": true,
+        "UseLondonSession": true,
+        "UseNewYorkSession": false
+      }
+    },
+    {
+      "name": "m15-lon-asia",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000,
+        "LevelMode": 2,
+        "StopMode": 1,
+        "UseSelectedSessions": true,
+        "UseLondonSession": true,
+        "UseNewYorkSession": false
+      }
+    },
+    {
+      "name": "m15-ny-streak",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000,
+        "LevelMode": 0,
+        "StopMode": 2,
+        "UseSelectedSessions": true,
+        "UseLondonSession": false,
+        "UseNewYorkSession": true
+      }
+    },
+    {
+      "name": "m15-ny-prevday",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000,
+        "LevelMode": 1,
+        "StopMode": 1,
+        "UseSelectedSessions": true,
+        "UseLondonSession": false,
+        "UseNewYorkSession": true
+      }
+    },
+    {
+      "name": "m15-ny-asia",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000,
+        "LevelMode": 2,
+        "StopMode": 1,
+        "UseSelectedSessions": true,
+        "UseLondonSession": false,
+        "UseNewYorkSession": true
+      }
+    },
+    {
+      "name": "m15-lonny-streak",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000,
+        "LevelMode": 0,
+        "StopMode": 2,
+        "UseSelectedSessions": true,
+        "UseLondonSession": true,
+        "UseNewYorkSession": true
+      }
+    },
+    {
+      "name": "m15-lonny-prevday",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000,
+        "LevelMode": 1,
+        "StopMode": 1,
+        "UseSelectedSessions": true,
+        "UseLondonSession": true,
+        "UseNewYorkSession": true
+      }
+    },
+    {
+      "name": "m15-lonny-asia",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000,
+        "LevelMode": 2,
+        "StopMode": 1,
+        "UseSelectedSessions": true,
+        "UseLondonSession": true,
+        "UseNewYorkSession": true
+      }
+    },
+    {
+      "name": "m15-all-streak",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000,
+        "LevelMode": 0,
+        "StopMode": 2,
+        "UseSelectedSessions": false,
+        "UseLondonSession": false,
+        "UseNewYorkSession": false
+      }
+    },
+    {
+      "name": "m15-all-prevday",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000,
+        "LevelMode": 1,
+        "StopMode": 1,
+        "UseSelectedSessions": false,
+        "UseLondonSession": false,
+        "UseNewYorkSession": false
+      }
+    },
+    {
+      "name": "m15-all-asia",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000,
+        "LevelMode": 2,
+        "StopMode": 1,
+        "UseSelectedSessions": false,
+        "UseLondonSession": false,
+        "UseNewYorkSession": false
+      }
+    },
+    {
+      "name": "h1-lon-streak",
+      "inputs": {
+        "TradingTimeframe": 16385,
+        "MinSLPoints": 4000,
+        "MaxSLPoints": 40000,
+        "LevelMode": 0,
+        "StopMode": 2,
+        "UseSelectedSessions": true,
+        "UseLondonSession": true,
+        "UseNewYorkSession": false
+      }
+    },
+    {
+      "name": "h1-lon-prevday",
+      "inputs": {
+        "TradingTimeframe": 16385,
+        "MinSLPoints": 4000,
+        "MaxSLPoints": 40000,
+        "LevelMode": 1,
+        "StopMode": 1,
+        "UseSelectedSessions": true,
+        "UseLondonSession": true,
+        "UseNewYorkSession": false
+      }
+    },
+    {
+      "name": "h1-lon-asia",
+      "inputs": {
+        "TradingTimeframe": 16385,
+        "MinSLPoints": 4000,
+        "MaxSLPoints": 40000,
+        "LevelMode": 2,
+        "StopMode": 1,
+        "UseSelectedSessions": true,
+        "UseLondonSession": true,
+        "UseNewYorkSession": false
+      }
+    },
+    {
+      "name": "h1-ny-streak",
+      "inputs": {
+        "TradingTimeframe": 16385,
+        "MinSLPoints": 4000,
+        "MaxSLPoints": 40000,
+        "LevelMode": 0,
+        "StopMode": 2,
+        "UseSelectedSessions": true,
+        "UseLondonSession": false,
+        "UseNewYorkSession": true
+      }
+    },
+    {
+      "name": "h1-ny-prevday",
+      "inputs": {
+        "TradingTimeframe": 16385,
+        "MinSLPoints": 4000,
+        "MaxSLPoints": 40000,
+        "LevelMode": 1,
+        "StopMode": 1,
+        "UseSelectedSessions": true,
+        "UseLondonSession": false,
+        "UseNewYorkSession": true
+      }
+    },
+    {
+      "name": "h1-ny-asia",
+      "inputs": {
+        "TradingTimeframe": 16385,
+        "MinSLPoints": 4000,
+        "MaxSLPoints": 40000,
+        "LevelMode": 2,
+        "StopMode": 1,
+        "UseSelectedSessions": true,
+        "UseLondonSession": false,
+        "UseNewYorkSession": true
+      }
+    },
+    {
+      "name": "h1-lonny-streak",
+      "inputs": {
+        "TradingTimeframe": 16385,
+        "MinSLPoints": 4000,
+        "MaxSLPoints": 40000,
+        "LevelMode": 0,
+        "StopMode": 2,
+        "UseSelectedSessions": true,
+        "UseLondonSession": true,
+        "UseNewYorkSession": true
+      }
+    },
+    {
+      "name": "h1-lonny-prevday",
+      "inputs": {
+        "TradingTimeframe": 16385,
+        "MinSLPoints": 4000,
+        "MaxSLPoints": 40000,
+        "LevelMode": 1,
+        "StopMode": 1,
+        "UseSelectedSessions": true,
+        "UseLondonSession": true,
+        "UseNewYorkSession": true
+      }
+    },
+    {
+      "name": "h1-lonny-asia",
+      "inputs": {
+        "TradingTimeframe": 16385,
+        "MinSLPoints": 4000,
+        "MaxSLPoints": 40000,
+        "LevelMode": 2,
+        "StopMode": 1,
+        "UseSelectedSessions": true,
+        "UseLondonSession": true,
+        "UseNewYorkSession": true
+      }
+    },
+    {
+      "name": "h1-all-streak",
+      "inputs": {
+        "TradingTimeframe": 16385,
+        "MinSLPoints": 4000,
+        "MaxSLPoints": 40000,
+        "LevelMode": 0,
+        "StopMode": 2,
+        "UseSelectedSessions": false,
+        "UseLondonSession": false,
+        "UseNewYorkSession": false
+      }
+    },
+    {
+      "name": "h1-all-prevday",
+      "inputs": {
+        "TradingTimeframe": 16385,
+        "MinSLPoints": 4000,
+        "MaxSLPoints": 40000,
+        "LevelMode": 1,
+        "StopMode": 1,
+        "UseSelectedSessions": false,
+        "UseLondonSession": false,
+        "UseNewYorkSession": false
+      }
+    },
+    {
+      "name": "h1-all-asia",
+      "inputs": {
+        "TradingTimeframe": 16385,
+        "MinSLPoints": 4000,
+        "MaxSLPoints": 40000,
+        "LevelMode": 2,
+        "StopMode": 1,
+        "UseSelectedSessions": false,
+        "UseLondonSession": false,
+        "UseNewYorkSession": false
+      }
+    },
+    {
+      "name": "h4-lon-streak",
+      "inputs": {
+        "TradingTimeframe": 16388,
+        "MinSLPoints": 8000,
+        "MaxSLPoints": 80000,
+        "LevelMode": 0,
+        "StopMode": 2,
+        "UseSelectedSessions": true,
+        "UseLondonSession": true,
+        "UseNewYorkSession": false
+      }
+    },
+    {
+      "name": "h4-lon-prevday",
+      "inputs": {
+        "TradingTimeframe": 16388,
+        "MinSLPoints": 8000,
+        "MaxSLPoints": 80000,
+        "LevelMode": 1,
+        "StopMode": 1,
+        "UseSelectedSessions": true,
+        "UseLondonSession": true,
+        "UseNewYorkSession": false
+      }
+    },
+    {
+      "name": "h4-lon-asia",
+      "inputs": {
+        "TradingTimeframe": 16388,
+        "MinSLPoints": 8000,
+        "MaxSLPoints": 80000,
+        "LevelMode": 2,
+        "StopMode": 1,
+        "UseSelectedSessions": true,
+        "UseLondonSession": true,
+        "UseNewYorkSession": false
+      }
+    },
+    {
+      "name": "h4-ny-streak",
+      "inputs": {
+        "TradingTimeframe": 16388,
+        "MinSLPoints": 8000,
+        "MaxSLPoints": 80000,
+        "LevelMode": 0,
+        "StopMode": 2,
+        "UseSelectedSessions": true,
+        "UseLondonSession": false,
+        "UseNewYorkSession": true
+      }
+    },
+    {
+      "name": "h4-ny-prevday",
+      "inputs": {
+        "TradingTimeframe": 16388,
+        "MinSLPoints": 8000,
+        "MaxSLPoints": 80000,
+        "LevelMode": 1,
+        "StopMode": 1,
+        "UseSelectedSessions": true,
+        "UseLondonSession": false,
+        "UseNewYorkSession": true
+      }
+    },
+    {
+      "name": "h4-ny-asia",
+      "inputs": {
+        "TradingTimeframe": 16388,
+        "MinSLPoints": 8000,
+        "MaxSLPoints": 80000,
+        "LevelMode": 2,
+        "StopMode": 1,
+        "UseSelectedSessions": true,
+        "UseLondonSession": false,
+        "UseNewYorkSession": true
+      }
+    },
+    {
+      "name": "h4-lonny-streak",
+      "inputs": {
+        "TradingTimeframe": 16388,
+        "MinSLPoints": 8000,
+        "MaxSLPoints": 80000,
+        "LevelMode": 0,
+        "StopMode": 2,
+        "UseSelectedSessions": true,
+        "UseLondonSession": true,
+        "UseNewYorkSession": true
+      }
+    },
+    {
+      "name": "h4-lonny-prevday",
+      "inputs": {
+        "TradingTimeframe": 16388,
+        "MinSLPoints": 8000,
+        "MaxSLPoints": 80000,
+        "LevelMode": 1,
+        "StopMode": 1,
+        "UseSelectedSessions": true,
+        "UseLondonSession": true,
+        "UseNewYorkSession": true
+      }
+    },
+    {
+      "name": "h4-lonny-asia",
+      "inputs": {
+        "TradingTimeframe": 16388,
+        "MinSLPoints": 8000,
+        "MaxSLPoints": 80000,
+        "LevelMode": 2,
+        "StopMode": 1,
+        "UseSelectedSessions": true,
+        "UseLondonSession": true,
+        "UseNewYorkSession": true
+      }
+    },
+    {
+      "name": "h4-all-streak",
+      "inputs": {
+        "TradingTimeframe": 16388,
+        "MinSLPoints": 8000,
+        "MaxSLPoints": 80000,
+        "LevelMode": 0,
+        "StopMode": 2,
+        "UseSelectedSessions": false,
+        "UseLondonSession": false,
+        "UseNewYorkSession": false
+      }
+    },
+    {
+      "name": "h4-all-prevday",
+      "inputs": {
+        "TradingTimeframe": 16388,
+        "MinSLPoints": 8000,
+        "MaxSLPoints": 80000,
+        "LevelMode": 1,
+        "StopMode": 1,
+        "UseSelectedSessions": false,
+        "UseLondonSession": false,
+        "UseNewYorkSession": false
+      }
+    },
+    {
+      "name": "h4-all-asia",
+      "inputs": {
+        "TradingTimeframe": 16388,
+        "MinSLPoints": 8000,
+        "MaxSLPoints": 80000,
+        "LevelMode": 2,
+        "StopMode": 1,
+        "UseSelectedSessions": false,
+        "UseLondonSession": false,
+        "UseNewYorkSession": false
+      }
+    }
+  ]
+}

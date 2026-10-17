@@ -1,0 +1,52 @@
+{
+  "expert": "archive/liq-grab_v2.1",
+  "symbols": [
+    "XAUUSDm",
+    "XAUUSD"
+  ],
+  "period": "M3",
+  "from": "2026.07.06",
+  "to": "2026.10.05",
+  "model": 4,
+  "delay": 200,
+  "deposit": 200,
+  "currency": "USD",
+  "leverage": 2000,
+  "inputs": {
+    "StopMode": 2,
+    "TPMode": 1,
+    "AtrSLMultiplier": 2.0
+  },
+  "variants": [
+    {
+      "name": "atr1.5-tpliq",
+      "inputs": {
+        "AtrSLMultiplier": 1.5
+      }
+    },
+    {
+      "name": "atr1.75-tpliq",
+      "inputs": {
+        "AtrSLMultiplier": 1.75
+      }
+    },
+    {
+      "name": "atr2.0-tpliq",
+      "inputs": {
+        "AtrSLMultiplier": 2.0
+      }
+    },
+    {
+      "name": "atr2.25-tpliq",
+      "inputs": {
+        "AtrSLMultiplier": 2.25
+      }
+    },
+    {
+      "name": "atr2.5-tpliq",
+      "inputs": {
+        "AtrSLMultiplier": 2.5
+      }
+    }
+  ]
+}

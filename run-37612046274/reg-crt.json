@@ -1,0 +1,30 @@
+{
+  "symbols": [
+    "XAUUSDm",
+    "XAUUSD"
+  ],
+  "period": "M1",
+  "from": "2026.09.01",
+  "to": "2026.10.01",
+  "model": 4,
+  "delay": 200,
+  "deposit": 1000,
+  "currency": "USD",
+  "leverage": 2000,
+  "expert": "crt-bot_v4.2",
+  "variants": [
+    {
+      "name": "default",
+      "inputs": {}
+    },
+    {
+      "name": "m15-close-time",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "EntryMode": 3,
+        "UseTakeProfit": false,
+        "TimeExitBars": 8
+      }
+    }
+  ]
+}
