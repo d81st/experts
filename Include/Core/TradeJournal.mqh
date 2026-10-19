@@ -6,8 +6,9 @@
 //|  в-сделку: запрошенная/фактическая цена, спред, задержка,        |
 //|  проскальзывание на входе и на стопе/тейке.                      |
 //|                                                                  |
-//|  Входы, отказы и пропуски пишет TradeExecutorSend; выходы —      |
-//|  TradeJournalOnTransaction из OnTradeTransaction бота.           |
+//|  Входы, отказы и пропуски пишет TradeExecutorSend; исполнение    |
+//|  лимиток (FILL) и выходы — TradeJournalOnTransaction из          |
+//|  OnTradeTransaction бота.                                        |
 //|  В тестере журнал выключен (g_tradeJournalInTester = false).     |
 //+------------------------------------------------------------------+
 #ifndef TRADEJOURNAL_MQH
@@ -61,8 +62,33 @@ void TradeJournalOnTransaction(const MqlTradeTransaction &trans, const long magi
    if(!HistoryDealSelect(trans.deal))
       return;
    if(HistoryDealGetString(trans.deal, DEAL_SYMBOL) != _Symbol ||
-      HistoryDealGetInteger(trans.deal, DEAL_MAGIC) != magic ||
-      HistoryDealGetInteger(trans.deal, DEAL_ENTRY) != DEAL_ENTRY_OUT)
+      HistoryDealGetInteger(trans.deal, DEAL_MAGIC) != magic)
+      return;
+   const long entryKind = HistoryDealGetInteger(trans.deal, DEAL_ENTRY);
+   if(entryKind == DEAL_ENTRY_IN)
+     {
+      // Вход по рынку уже записал TradeExecutorSend (ENTRY); здесь — исполнение лимиток и стопов.
+      const ulong ord = (ulong)HistoryDealGetInteger(trans.deal, DEAL_ORDER);
+      if(!HistoryOrderSelect(ord))
+         return;
+      const ENUM_ORDER_TYPE ot = (ENUM_ORDER_TYPE)HistoryOrderGetInteger(ord, ORDER_TYPE);
+      if(ot == ORDER_TYPE_BUY || ot == ORDER_TYPE_SELL)
+         return;
+      const bool   buy  = (HistoryDealGetInteger(trans.deal, DEAL_TYPE) == DEAL_TYPE_BUY);
+      const double req  = HistoryOrderGetDouble(ord, ORDER_PRICE_OPEN);
+      const double fill = HistoryDealGetDouble(trans.deal, DEAL_PRICE);
+      TradeJournalWrite(StringFormat("FILL;%I64d;%I64d;%s;%.2f;%s;%s;%s;%s;%s;%s;;;;;%s",
+                                     magic, HistoryDealGetInteger(trans.deal, DEAL_POSITION_ID),
+                                     buy ? "BUY" : "SELL", HistoryDealGetDouble(trans.deal, DEAL_VOLUME),
+                                     TradeJournal_D(req), TradeJournal_D(fill),
+                                     TradeJournal_D(buy ? fill - req : req - fill),
+                                     TradeJournal_D(SymbolInfoDouble(_Symbol, SYMBOL_ASK) - SymbolInfoDouble(_Symbol, SYMBOL_BID)),
+                                     TradeJournal_D(HistoryOrderGetDouble(ord, ORDER_SL)),
+                                     TradeJournal_D(HistoryOrderGetDouble(ord, ORDER_TP)),
+                                     HistoryOrderGetString(ord, ORDER_COMMENT)));
+      return;
+     }
+   if(entryKind != DEAL_ENTRY_OUT)
       return;
 
    const ENUM_DEAL_REASON reason = (ENUM_DEAL_REASON)HistoryDealGetInteger(trans.deal, DEAL_REASON);

@@ -26,6 +26,7 @@
 #include "../Include/Exits/Trailing/TrailingDispatcher.mqh"
 #include "../Include/Exits/PartialClose.mqh"
 #include "../Include/Core/TesterMetric.mqh"
+#include "../Include/Core/AccountRisk.mqh"
 #include "../Include/Levels/FvgGaps.mqh"
 #include "../Include/Context/NewsTimes.mqh"
 CTrade trade;
@@ -68,6 +69,8 @@ input int    MagicNumber      = 71013;
 input double RiskPercent      = 1.0;
 input double MaxRiskOvershoot = 1.5;
 input bool   OnePosition      = true;  // Одна позиция: пока она открыта, лимиток нет
+input double MaxAccountRiskPercent = 0; // Общий риск счёта (все боты и символы), % баланса: лимитку не ставим, если
+                                        // открытый риск + её риск больше (0 = выкл.)
 
 input group "── Трейлинг (по умолчанию выключен) ──"
 input ENUM_TRAILING_MODE_EX TrailingMode          = TRAILING_OFF_EX;
@@ -85,7 +88,7 @@ PartialCloseState  g_part;
 datetime           g_news[];
 datetime           g_lastBar = 0;
 int                g_atr     = INVALID_HANDLE;
-int g_cntGaps = 0, g_cntPlaced = 0, g_cntTouched = 0, g_cntRisk = 0, g_cntNews = 0, g_cntOrphans = 0;
+int g_cntGaps = 0, g_cntPlaced = 0, g_cntTouched = 0, g_cntRisk = 0, g_cntNews = 0, g_cntOrphans = 0, g_cntAcct = 0;
 
 // Снять лимитку; не удалось — её подберёт SweepOrphans (у разрыва тикет уже обнулён).
 void DeleteOrder(const ulong ticket)
@@ -145,6 +148,14 @@ int PlaceOrder(const int i)
      {
       g_cntRisk++;
       return 0;
+     }
+   double openPct, newPct;
+   if(!AccountRiskAllows(AccountRiskMoney(_Symbol, gp.dir == 1, lot, entry, sl), MaxAccountRiskPercent, openPct, newPct))
+     {
+      g_cntAcct++;
+      PrintFormat("⏸ Общий риск счёта: открыто %.2f%% + лимитка %.2f%% > %.2f%% — ждём", openPct, newPct,
+                  MaxAccountRiskPercent);
+      return 1;   // разрыв остаётся, попробуем на следующем баре
      }
    TradeOrderRequest req;
    req.orderType = (gp.dir == 1) ? ORDER_TYPE_BUY_LIMIT : ORDER_TYPE_SELL_LIMIT;
@@ -222,8 +233,8 @@ int OnInit()
 void OnDeinit(const int reason)
   {
    PrintFormat("📊 Разрывов найдено: %d | лимиток выставлено: %d | отработано касанием: %d | пропуск (риск мин. лота): %d | "
-               "без лимиток из-за новостей: %d баров | снято лимиток-сирот: %d",
-               g_cntGaps, g_cntPlaced, g_cntTouched, g_cntRisk, g_cntNews, g_cntOrphans);
+               "без лимиток из-за новостей: %d баров | снято лимиток-сирот: %d | ожиданий из-за общего риска: %d",
+               g_cntGaps, g_cntPlaced, g_cntTouched, g_cntRisk, g_cntNews, g_cntOrphans, g_cntAcct);
    if(!MQLInfoInteger(MQL_TESTER))
       ClearOrders();
    if(g_atr != INVALID_HANDLE)
@@ -286,7 +297,22 @@ void OnTick()
          continue;
         }
       if(g_gaps[i].ticket != 0 && PositionGuardPendingExists(g_gaps[i].ticket))
+        {
+         // стоящая лимитка: другой бот мог войти — общий риск проверяем на каждом баре
+         double openPct, newPct;
+         if(MaxAccountRiskPercent > 0.0 && OrderSelect(g_gaps[i].ticket) &&
+            !AccountRiskAllows(AccountRiskMoney(_Symbol, g_gaps[i].dir == 1, OrderGetDouble(ORDER_VOLUME_CURRENT),
+                                                OrderGetDouble(ORDER_PRICE_OPEN), OrderGetDouble(ORDER_SL)),
+                               MaxAccountRiskPercent, openPct, newPct))
+           {
+            g_cntAcct++;
+            PrintFormat("⏸ Общий риск счёта: открыто %.2f%% + лимитка %.2f%% > %.2f%% — снимаем до следующего бара",
+                        openPct, newPct, MaxAccountRiskPercent);
+            DeleteOrder(g_gaps[i].ticket);
+            g_gaps[i].ticket = 0;
+           }
          continue;
+        }
       g_gaps[i].ticket = 0;
       if(PlaceOrder(i) == 0)
         {

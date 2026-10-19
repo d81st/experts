@@ -20,6 +20,7 @@
 #include "../Include/Core/BrokerAdapter.mqh"
 #include "../Include/Core/PositionGuard.mqh"
 #include "../Include/Core/TradeExecutor.mqh"
+#include "../Include/Core/AccountRisk.mqh"
 #include "../Include/Exits/Trailing/SyncTrail.mqh"
 #include "../Include/Exits/Trailing/BreakevenTrail.mqh"
 #include "../Include/Exits/Trailing/TrailingDispatcher.mqh"
@@ -93,6 +94,8 @@ input group "── Управление капиталом ──"
 input int    MagicNumber      = 71012;
 input double RiskPercent      = 1.0;
 input double MaxRiskOvershoot = 1.5;
+input double MaxAccountRiskPercent = 0; // Общий риск счёта (все боты и символы), % баланса: не входить, если
+                                        // открытый риск + риск сделки больше (0 = выкл.)
 input double MaxSpreadToSL    = 0.10;
 input double MaxSlippageToSL  = 0.10;
 input bool   CloseOnSlippage  = false; // Вход по рынку исполнился хуже допуска — сразу закрыть
@@ -115,7 +118,7 @@ bool               g_pending = false;   // новый бар есть, но ры
 int                g_pendSig = 0;
 int                g_pendDay = 0;       // тренд D1 на закрытии сигнального бара
 int                g_atr     = INVALID_HANDLE;
-int g_cntSignals = 0, g_cntBusy = 0, g_cntSide = 0, g_cntRegime = 0, g_cntNews = 0, g_cntTrades = 0, g_cntDay = 0;
+int g_cntSignals = 0, g_cntBusy = 0, g_cntSide = 0, g_cntRegime = 0, g_cntNews = 0, g_cntTrades = 0, g_cntDay = 0, g_cntAcct = 0;
 int g_cntExitBars = 0, g_cntExitOpp = 0;
 
 void Enter(const int dir)
@@ -132,6 +135,14 @@ void Enter(const int dir)
    if(lot <= 0.0)
      {
       PrintFormat("⏭ Пропуск: стоп %.2f USD — мин. лот рискует > %.1f%% баланса", dist, RiskPercent * MaxRiskOvershoot);
+      return;
+     }
+   double openPct, newPct;
+   if(!AccountRiskAllows(AccountRiskMoney(_Symbol, dir == 1, lot, entry, sl), MaxAccountRiskPercent, openPct, newPct))
+     {
+      g_cntAcct++;
+      PrintFormat("⏭ Пропуск: общий риск счёта — открыто %.2f%% + сделка %.2f%% > %.2f%%", openPct, newPct,
+                  MaxAccountRiskPercent);
       return;
      }
 
@@ -231,9 +242,9 @@ int OnInit()
 void OnDeinit(const int reason)
   {
    PrintFormat("📊 Сигналов: %d | при открытой сделке: %d | отсеяно трендом D1: %d, стороной: %d, режимом: %d, "
-               "новостями: %d | сделок: %d | выходов через N баров: %d, по встречному сигналу: %d",
-               g_cntSignals, g_cntBusy, g_cntDay, g_cntSide, g_cntRegime, g_cntNews, g_cntTrades, g_cntExitBars,
-               g_cntExitOpp);
+               "новостями: %d, общим риском счёта: %d | сделок: %d | выходов через N баров: %d, по встречному сигналу: %d",
+               g_cntSignals, g_cntBusy, g_cntDay, g_cntSide, g_cntRegime, g_cntNews, g_cntAcct, g_cntTrades,
+               g_cntExitBars, g_cntExitOpp);
    AlchemistRelease(g_sig);
    if(g_atr != INVALID_HANDLE)
       IndicatorRelease(g_atr);
