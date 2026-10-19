@@ -18,7 +18,9 @@
   "variants": [
     {
       "name": "h1-x12-off",
-      "inputs": {}
+      "inputs": {
+        "DayTrendFilter": 0
+      }
     },
     {
       "name": "h1-x12-st",
@@ -35,7 +37,8 @@
     {
       "name": "h1-x24-off",
       "inputs": {
-        "ExitBars": 24
+        "ExitBars": 24,
+        "DayTrendFilter": 0
       }
     },
     {
@@ -56,7 +59,8 @@
       "name": "h2-x6-off",
       "inputs": {
         "TradingTimeframe": 16386,
-        "ExitBars": 6
+        "ExitBars": 6,
+        "DayTrendFilter": 0
       }
     },
     {
@@ -79,7 +83,8 @@
       "name": "h4-x3-off",
       "inputs": {
         "TradingTimeframe": 16388,
-        "ExitBars": 3
+        "ExitBars": 3,
+        "DayTrendFilter": 0
       }
     },
     {

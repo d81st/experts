@@ -71,8 +71,8 @@ input double StopAtrMult    = 3.0;    // Стоп = N × ATR от входа (о
 input double MinSLPoints    = 1000;   // Мин. стоп: более близкий расширяется до этого значения
 input double RiskReward     = 0;      // Тейк = N × стоп (0 = без тейка)
 
-input group "── Фильтр тренда D1 (по умолчанию выключен) ──"
-input ENUM_DAY_TREND DayTrendFilter  = DAY_TREND_OFF;  // Входить только по тренду D1
+input group "── Фильтр тренда D1 ──"
+input ENUM_DAY_TREND DayTrendFilter  = DAY_TREND_STRUCTURE;  // Входить только по тренду D1
 input int            DayStructureLen = 5;              // Структура: баров слева и справа у точки разворота
 input int            DayEmaPeriod    = 50;             // EMA: период
 

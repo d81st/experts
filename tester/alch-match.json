@@ -19,7 +19,9 @@
   "variants": [
     {
       "name": "h1-x12-nostop",
-      "inputs": {}
+      "inputs": {
+        "DayTrendFilter": 0
+      }
     }
   ]
 }

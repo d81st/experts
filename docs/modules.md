@@ -38,7 +38,7 @@
 | `SessionFilter`, `SessionInputs` | один фильтр (одна конфигурация, часы сервера → UTC) с двумя правилами: выбранные сессии Азия/Лондон/НЙ в UTC с событием выхода; окно у дневного перерыва — не входить ±N минут, закрыть перед закрытием Америки; общие входные параметры (имена прежние) | все торговые |
 | `TrendFilter` | EMA fast/slow и ADX на старшем таймфрейме → разрешённое направление | crt-bot, engulfing, liq-grab (выкл.), random-entry-bench |
 | `MarketRegime` | тренд или флэт по коэффициенту эффективности (ER) за N баров; режимы: выкл. / только тренд / во флэте — против сигнала | hybrid-trend-channel, hybrid-asia-breakout (выкл. по умолчанию) |
-| `MarketStructure` | тренд структуры как LimonFx (точки разворота len, BOS/CHoCH по закрытию) и простой тренд «закрытие выше/ниже EMA» по барам, закрытым к моменту; для D1 воскресенье сливается с понедельником, как в `screen.py` | hybrid-alchemist (фильтр тренда D1, выкл.) |
+| `MarketStructure` | тренд структуры как LimonFx (точки разворота len, BOS/CHoCH по закрытию) и простой тренд «закрытие выше/ниже EMA» по барам, закрытым к моменту; для D1 воскресенье сливается с понедельником, как в `screen.py` | hybrid-alchemist (фильтр тренда D1, по умолчанию — структура) |
 | `NewsTimes` | время выходов NFP, CPI, решений FOMC и ISM PMI за 2024–2026 (списки в коде, свои даты — параметром), общий список `NewsBuildList`, окно «рядом с новостью» | hybrid-nfp-straddle, hybrid-trend-channel (фильтры NFP и CPI/FOMC/ISM, выкл.) |
 
 ### Levels — где ждать сделку
@@ -94,7 +94,7 @@
 | **hybrid-fibo-sweep** | `FiboWave` (зоны 1.212 / 1.618) | прокол зоны насквозь и закрытие обратно (внутри бота), вход по рынку | стоп за проколом, цель — граница диапазона или RR | сессии |
 | **hybrid-imbalance-fibo** | `ImbalanceCandle` (фибо от свечи) | `ZoneOrders` (лимитки) | стоп за зоной, цель — линия 0/1 свечи | сессии |
 | **hybrid-fvg-limit** | `FvgGaps` (H1) | лимитки на ближнем крае разрыва, срок N баров | стоп за дальним краем + отступ (в ATR), тейк 10R, `PartialClose` и трейлинг (выкл.) | `NewsTimes` (выкл.), одна позиция, `AccountRisk` |
-| **hybrid-alchemist** | — | `AlchemistSignal`, вход по рынку на следующем баре (после дневного перерыва — на первом тике) | через N баров, стоп N × ATR, встречный сигнал | `MarketStructure` (тренд D1), `MarketRegime`, `NewsTimes` (выкл.), `AccountRisk` |
+| **hybrid-alchemist** | — | `AlchemistSignal`, вход по рынку на следующем баре (после дневного перерыва — на первом тике) | через N баров, стоп N × ATR, встречный сигнал | `MarketStructure` (тренд D1, вкл.), `MarketRegime`, `NewsTimes` (выкл.), `AccountRisk` |
 | random-entry-bench | случайно | — | `TimeExit` | `TrendFilter` |
 | crt-push | `CrtDetector` | — (уведомления) | — | `Notify/*` |
 
