@@ -1,0 +1,102 @@
+{
+  "expert": "hybrid/hybrid-alchemist_v1.0",
+  "symbols": [
+    "XAUUSDm",
+    "XAUUSD"
+  ],
+  "period": "M1",
+  "delay": 200,
+  "deposit": 10000,
+  "currency": "USD",
+  "leverage": 2000,
+  "inputs": {
+    "RiskPercent": 1.0
+  },
+  "from": "2026.01.05",
+  "to": "2026.05.29",
+  "model": 4,
+  "variants": [
+    {
+      "name": "h1-x12-off",
+      "inputs": {}
+    },
+    {
+      "name": "h1-x12-st",
+      "inputs": {
+        "DayTrendFilter": 1
+      }
+    },
+    {
+      "name": "h1-x12-ema",
+      "inputs": {
+        "DayTrendFilter": 2
+      }
+    },
+    {
+      "name": "h1-x24-off",
+      "inputs": {
+        "ExitBars": 24
+      }
+    },
+    {
+      "name": "h1-x24-st",
+      "inputs": {
+        "ExitBars": 24,
+        "DayTrendFilter": 1
+      }
+    },
+    {
+      "name": "h1-x24-ema",
+      "inputs": {
+        "ExitBars": 24,
+        "DayTrendFilter": 2
+      }
+    },
+    {
+      "name": "h2-x6-off",
+      "inputs": {
+        "TradingTimeframe": 16386,
+        "ExitBars": 6
+      }
+    },
+    {
+      "name": "h2-x6-st",
+      "inputs": {
+        "TradingTimeframe": 16386,
+        "ExitBars": 6,
+        "DayTrendFilter": 1
+      }
+    },
+    {
+      "name": "h2-x6-ema",
+      "inputs": {
+        "TradingTimeframe": 16386,
+        "ExitBars": 6,
+        "DayTrendFilter": 2
+      }
+    },
+    {
+      "name": "h4-x3-off",
+      "inputs": {
+        "TradingTimeframe": 16388,
+        "ExitBars": 3
+      }
+    },
+    {
+      "name": "h4-x3-st",
+      "inputs": {
+        "TradingTimeframe": 16388,
+        "ExitBars": 3,
+        "DayTrendFilter": 1
+      }
+    },
+    {
+      "name": "h4-x3-ema",
+      "inputs": {
+        "TradingTimeframe": 16388,
+        "ExitBars": 3,
+        "DayTrendFilter": 2
+      }
+    }
+  ]
+}
