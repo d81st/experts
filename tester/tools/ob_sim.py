@@ -55,9 +55,41 @@ def find_obs(tf, L=5):
     return out
 
 
+def find_obs_course(tf, L=5):
+    """Ордер-блок по курсу «Bozorni zabt etish» (урок 3): последняя свеча против тренда перед
+    импульсом, сломавшим структуру; зона — только тело (фитили не учитываем). Пробой вверх на баре
+    i: последняя медвежья свеча (закрытие < открытия) после пробитого максимума и до i — покупка
+    от верха тела (открытия), стоп под низом тела (закрытием). Вниз — зеркально."""
+    o, h, l, c = (tf[k].to_numpy() for k in ("open", "high", "low", "close"))
+    ph, pl = pivots(h, l, L)
+    out = []
+    up = dn = None
+    nlow = nhigh = 0
+    for i in range(1, len(c)):
+        if not np.isnan(ph[i]):
+            up = (ph[i], i - L); nhigh += 1
+        elif not np.isnan(pl[i]):
+            dn = (pl[i], i - L); nlow += 1
+        if up is not None and nlow > 1 and c[i] > up[0] and c[i - 1] <= up[0]:
+            red = [k for k in range(up[1], i + 1) if c[k] < o[k]]
+            if red:
+                k = red[-1]
+                out.append((i, 1, o[k], c[k]))
+            up = None
+        if dn is not None and nhigh > 1 and c[i] < dn[0] and c[i - 1] >= dn[0]:
+            green = [k for k in range(dn[1], i + 1) if c[k] > o[k]]
+            if green:
+                k = green[-1]
+                out.append((i, -1, o[k], c[k]))
+            dn = None
+    return out
+
+
 def zones_fn(kind):
     if kind == "ob":
         return find_obs
+    if kind == "obc":
+        return find_obs_course
     if kind == "fvg":
         return _find_fvg
     return lambda tf: sorted(find_obs(tf) + _find_fvg(tf), key=lambda g: g[0])
@@ -69,7 +101,7 @@ def main():
     ap.add_argument("--holdout", action="store_true")
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--spread", type=float, default=0.25)
-    ap.add_argument("--zones", default="ob", choices=["ob", "fvg", "both"])
+    ap.add_argument("--zones", default="ob", choices=["ob", "obc", "fvg", "both"])
     sub = ap.add_subparsers(dest="cmd", required=True)
     one = sub.add_parser("one")
     one.add_argument("--tf", type=int, default=60)
