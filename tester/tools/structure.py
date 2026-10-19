@@ -109,10 +109,11 @@ def main():
     ap.add_argument("--holdout", action="store_true")
     args = ap.parse_args()
     rng = np.random.default_rng(1)
-    m5 = S.load_m5(args.bars)
-    m5 = m5[m5.index >= "2024-01-01"]
+    m5_all = S.load_m5(args.bars)
+    m5 = m5_all[m5_all.index >= "2024-01-01"]
     frames = {r: S.resample(m5, r) for r in ("1h", "2h", "4h")}
-    D1 = S.resample(m5, "1D")
+    # D1 — с 2023 года: к январю 2024 тренд и EMA уже «разогреты», как у робота в тестере
+    D1 = S.resample(m5_all, "1D")
 
     for tf, N in (("1h", 12), ("1h", 24), ("2h", 6), ("4h", 3)):
         F = S.Frame(frames[tf], tf)

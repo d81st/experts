@@ -27,9 +27,17 @@
 #include "../Include/Triggers/AlchemistSignal.mqh"
 #include "../Include/Context/MarketRegime.mqh"
 #include "../Include/Context/NewsTimes.mqh"
+#include "../Include/Context/MarketStructure.mqh"
 CTrade trade;
 ITradeAdapter *g_trade_adapter = NULL;
 TrailingConfig g_trail_cfg;
+
+enum ENUM_DAY_TREND
+  {
+   DAY_TREND_OFF       = 0,  // Выключен
+   DAY_TREND_STRUCTURE = 1,  // Структура D1 (BOS/CHoCH, как LimonFx)
+   DAY_TREND_EMA       = 2   // Закрытие D1 выше/ниже EMA
+  };
 
 enum ENUM_ALCH_SIDE
   {
@@ -61,6 +69,11 @@ input int    AtrPeriod      = 14;
 input double StopAtrMult    = 3.0;    // Стоп = N × ATR от входа (от него считается лот)
 input double MinSLPoints    = 1000;   // Мин. стоп: более близкий расширяется до этого значения
 input double RiskReward     = 0;      // Тейк = N × стоп (0 = без тейка)
+
+input group "── Фильтр тренда D1 (по умолчанию выключен) ──"
+input ENUM_DAY_TREND DayTrendFilter  = DAY_TREND_OFF;  // Входить только по тренду D1
+input int            DayStructureLen = 5;              // Структура: баров слева и справа у точки разворота
+input int            DayEmaPeriod    = 50;             // EMA: период
 
 input group "── Режим рынка (по умолчанию выключен) ──"
 input ENUM_REGIME_MODE RegimeMode      = REGIME_OFF;
@@ -100,8 +113,9 @@ datetime           g_news[];
 datetime           g_lastBar = 0;
 bool               g_pending = false;   // новый бар есть, но рынок был закрыт — обработать при открытии
 int                g_pendSig = 0;
+int                g_pendDay = 0;       // тренд D1 на закрытии сигнального бара
 int                g_atr     = INVALID_HANDLE;
-int g_cntSignals = 0, g_cntBusy = 0, g_cntSide = 0, g_cntRegime = 0, g_cntNews = 0, g_cntTrades = 0;
+int g_cntSignals = 0, g_cntBusy = 0, g_cntSide = 0, g_cntRegime = 0, g_cntNews = 0, g_cntTrades = 0, g_cntDay = 0;
 int g_cntExitBars = 0, g_cntExitOpp = 0;
 
 void Enter(const int dir)
@@ -203,20 +217,23 @@ int OnInit()
    if(AvoidNewsMinutes > 0)
       NewsBuildList(NewsNFP, NewsCPI, NewsFOMC, NewsISM, NewsExtraTimes, g_news);
 
-   PrintFormat("✅ Hybrid Alchemist v1.0 | Magic:%d TF:%s | SMA%d%s%s%s | выход %d бар%s | стоп %.1f×ATR(%d) | новости ±%d мин",
+   PrintFormat("✅ Hybrid Alchemist v1.0 | Magic:%d TF:%s | SMA%d%s%s%s%s | выход %d бар%s | стоп %.1f×ATR(%d) | новости ±%d мин",
                MagicNumber, EnumToString(TradingTimeframe), MaPeriod,
                UseHma ? StringFormat(" + HMA%d", HmaPeriod) : "",
                UseCci ? StringFormat(" + CCI%d ±%.0f", CciPeriod, CciLevel) : "",
                UseHtf ? StringFormat(" + %s EMA%d", EnumToString(HtfTimeframe), HtfEmaPeriod) : "",
+               DayTrendFilter == DAY_TREND_STRUCTURE ? StringFormat(" + структура D1 (%d)", DayStructureLen) :
+               DayTrendFilter == DAY_TREND_EMA ? StringFormat(" + D1 EMA%d", DayEmaPeriod) : "",
                ExitBars, ExitOnOpposite ? " / встречный сигнал" : "", StopAtrMult, AtrPeriod, AvoidNewsMinutes);
    return INIT_SUCCEEDED;
   }
 
 void OnDeinit(const int reason)
   {
-   PrintFormat("📊 Сигналов: %d | при открытой сделке: %d | отсеяно стороной: %d, режимом: %d, новостями: %d | "
-               "сделок: %d | выходов через N баров: %d, по встречному сигналу: %d",
-               g_cntSignals, g_cntBusy, g_cntSide, g_cntRegime, g_cntNews, g_cntTrades, g_cntExitBars, g_cntExitOpp);
+   PrintFormat("📊 Сигналов: %d | при открытой сделке: %d | отсеяно трендом D1: %d, стороной: %d, режимом: %d, "
+               "новостями: %d | сделок: %d | выходов через N баров: %d, по встречному сигналу: %d",
+               g_cntSignals, g_cntBusy, g_cntDay, g_cntSide, g_cntRegime, g_cntNews, g_cntTrades, g_cntExitBars,
+               g_cntExitOpp);
    AlchemistRelease(g_sig);
    if(g_atr != INVALID_HANDLE)
       IndicatorRelease(g_atr);
@@ -239,7 +256,12 @@ void OnTick()
       const int fresh = AlchemistSignal(g_sig, g_cfg);
       // необработанный сигнал (пришёл, пока рынок был закрыт) не затираем пустым
       if(fresh != 0 || !g_pending)
+        {
          g_pendSig = fresh;
+         g_pendDay = (fresh == 0 || DayTrendFilter == DAY_TREND_OFF) ? 0 :
+                     (DayTrendFilter == DAY_TREND_STRUCTURE ? MsStructureTrend(PERIOD_D1, DayStructureLen, bar)
+                                                            : MsEmaTrend(PERIOD_D1, DayEmaPeriod, bar));
+        }
       g_pending = true;
      }
    if(!g_pending || !BrokerIsTradeSessionOpen())
@@ -272,6 +294,11 @@ void OnTick()
    if(sig == 0)
       return;
 
+   if(DayTrendFilter != DAY_TREND_OFF && g_pendDay != sig)
+     {
+      g_cntDay++;
+      return;
+     }
    const int dir = MarketRegimeApply(g_regime, sig);
    if(dir != sig)   // в режиме «переключатель» сигнал против тренда здесь не торгуем
      {
