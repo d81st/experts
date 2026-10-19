@@ -1,0 +1,145 @@
+{
+  "expert": "archive/liq-grab_v2.1",
+  "symbols": [
+    "XAUUSDm",
+    "XAUUSD"
+  ],
+  "period": "M1",
+  "from": "2026.01.05",
+  "to": "2026.05.29",
+  "model": 4,
+  "delay": 200,
+  "deposit": 200,
+  "currency": "USD",
+  "leverage": 2000,
+  "inputs": {
+    "CloseOnSessionExit": false,
+    "TradingTimeframe": 3,
+    "StopLossPoints": 3500,
+    "MaxSpreadToSL": 0.1,
+    "TrailingMode": 1,
+    "TrailingStartFactor": 0.5
+  },
+  "variants": [
+    {
+      "name": "m1-sl1500-be",
+      "inputs": {
+        "TradingTimeframe": 1,
+        "StopLossPoints": 1500,
+        "MaxSpreadToSL": 0.2,
+        "TrailingMode": 1,
+        "TrailingStartFactor": 0.5
+      }
+    },
+    {
+      "name": "m1-sl1500-sync05",
+      "inputs": {
+        "TradingTimeframe": 1,
+        "StopLossPoints": 1500,
+        "MaxSpreadToSL": 0.2,
+        "TrailingMode": 2,
+        "TrailingStartFactor": 0.5
+      }
+    },
+    {
+      "name": "m1-sl1500-sync10",
+      "inputs": {
+        "TradingTimeframe": 1,
+        "StopLossPoints": 1500,
+        "MaxSpreadToSL": 0.2,
+        "TrailingMode": 2,
+        "TrailingStartFactor": 1.0
+      }
+    },
+    {
+      "name": "m3-sl3500-be",
+      "inputs": {
+        "TradingTimeframe": 3,
+        "StopLossPoints": 3500,
+        "MaxSpreadToSL": 0.1,
+        "TrailingMode": 1,
+        "TrailingStartFactor": 0.5
+      }
+    },
+    {
+      "name": "m3-sl3500-sync05",
+      "inputs": {
+        "TradingTimeframe": 3,
+        "StopLossPoints": 3500,
+        "MaxSpreadToSL": 0.1,
+        "TrailingMode": 2,
+        "TrailingStartFactor": 0.5
+      }
+    },
+    {
+      "name": "m3-sl3500-sync10",
+      "inputs": {
+        "TradingTimeframe": 3,
+        "StopLossPoints": 3500,
+        "MaxSpreadToSL": 0.1,
+        "TrailingMode": 2,
+        "TrailingStartFactor": 1.0
+      }
+    },
+    {
+      "name": "m5-sl3500-be",
+      "inputs": {
+        "TradingTimeframe": 5,
+        "StopLossPoints": 3500,
+        "MaxSpreadToSL": 0.1,
+        "TrailingMode": 1,
+        "TrailingStartFactor": 0.5
+      }
+    },
+    {
+      "name": "m5-sl3500-sync05",
+      "inputs": {
+        "TradingTimeframe": 5,
+        "StopLossPoints": 3500,
+        "MaxSpreadToSL": 0.1,
+        "TrailingMode": 2,
+        "TrailingStartFactor": 0.5
+      }
+    },
+    {
+      "name": "m5-sl3500-sync10",
+      "inputs": {
+        "TradingTimeframe": 5,
+        "StopLossPoints": 3500,
+        "MaxSpreadToSL": 0.1,
+        "TrailingMode": 2,
+        "TrailingStartFactor": 1.0
+      }
+    },
+    {
+      "name": "m5-sl4500-be",
+      "inputs": {
+        "TradingTimeframe": 5,
+        "StopLossPoints": 4500,
+        "MaxSpreadToSL": 0.1,
+        "TrailingMode": 1,
+        "TrailingStartFactor": 0.5
+      }
+    },
+    {
+      "name": "m5-sl4500-sync05",
+      "inputs": {
+        "TradingTimeframe": 5,
+        "StopLossPoints": 4500,
+        "MaxSpreadToSL": 0.1,
+        "TrailingMode": 2,
+        "TrailingStartFactor": 0.5
+      }
+    },
+    {
+      "name": "m5-sl4500-sync10",
+      "inputs": {
+        "TradingTimeframe": 5,
+        "StopLossPoints": 4500,
+        "MaxSpreadToSL": 0.1,
+        "TrailingMode": 2,
+        "TrailingStartFactor": 1.0
+      }
+    }
+  ]
+}

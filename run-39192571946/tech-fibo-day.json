@@ -1,0 +1,55 @@
+{
+  "expert": "hybrid/hybrid-fibo-day_v1.0",
+  "symbols": [
+    "XAUUSDm",
+    "XAUUSD"
+  ],
+  "period": "M1",
+  "from": "2026.06.01",
+  "to": "2026.10.05",
+  "model": 4,
+  "delay": 200,
+  "deposit": 1000,
+  "currency": "USD",
+  "leverage": 2000,
+  "inputs": {
+    "RiskPercent": 3.0,
+    "RangeSource": 0,
+    "EntryMode": 0,
+    "TradingTimeframe": 5
+  },
+  "variants": [
+    {
+      "name": "asia-limit",
+      "inputs": {
+        "RangeSource": 1,
+        "EntryMode": 0
+      }
+    },
+    {
+      "name": "asia-limit-ask250",
+      "inputs": {
+        "RangeSource": 1,
+        "EntryMode": 0,
+        "AskShiftPoints": 250
+      }
+    },
+    {
+      "name": "asia-confirm-m5",
+      "inputs": {
+        "RangeSource": 1,
+        "EntryMode": 1,
+        "TradingTimeframe": 5
+      }
+    },
+    {
+      "name": "asia-confirm-m5-slipclose",
+      "inputs": {
+        "RangeSource": 1,
+        "EntryMode": 1,
+        "TradingTimeframe": 5,
+        "CloseOnSlippage": true
+      }
+    }
+  ]
+}
