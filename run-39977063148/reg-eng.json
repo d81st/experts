@@ -1,0 +1,30 @@
+{
+  "symbols": [
+    "XAUUSDm",
+    "XAUUSD"
+  ],
+  "period": "M1",
+  "from": "2026.09.01",
+  "to": "2026.10.01",
+  "model": 4,
+  "delay": 200,
+  "deposit": 1000,
+  "currency": "USD",
+  "leverage": 2000,
+  "expert": "archive/engulfing-bot_v2.1",
+  "variants": [
+    {
+      "name": "default",
+      "inputs": {}
+    },
+    {
+      "name": "m15-market",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "EntryMode": 1,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000
+      }
+    }
+  ]
+}
