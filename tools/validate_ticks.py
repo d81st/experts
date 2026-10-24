@@ -736,9 +736,12 @@ def resolve_request(event, dispatch, request_path, today):
             raise ValueError("request file is not valid JSON") from exc
         if not isinstance(data, dict):
             raise ValueError("request file must be an object")
-        extra = set(data) - {"run", "symbol", "from", "to", "gap_minutes", "publish_release"}
+        extra = set(data) - {"run", "symbol", "from", "to", "gap_minutes", "publish_release", "note"}
         if extra:
             raise ValueError("request file has an unexpected field")
+        note = data.get("note", "")
+        if not isinstance(note, str) or not re.fullmatch(r"[A-Za-z0-9 ._-]{0,80}", note):
+            raise ValueError("request file has an unexpected value")
         if data.get("run") is not True:
             return {"run": False, "reason": "run is not true"}
         symbol = data.get("symbol")

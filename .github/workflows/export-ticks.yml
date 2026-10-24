@@ -152,25 +152,35 @@ jobs:
             @("[Common]", "Login=$env:MT5_LOGIN", "Password=$env:MT5_PASSWORD", "Server=$env:MT5_SERVER",
               "ProxyEnable=0", "NewsEnable=0") | Out-File $ini -Encoding Unicode
             $t = Start-Process -FilePath "$env:MT5_ROOT\terminal64.exe" -ArgumentList "/portable", "/config:`"$ini`"" -PassThru
-            # Тот же первый запуск, что в backtest.yml: терминал обновляется и подтягивает символы.
-            # Журнал читается только ради факта логина и не печатается: в нём счёт и IP.
-            if (-not $t.WaitForExit(150 * 1000)) { }
-            $ok = $false
-            $logs = Get-ChildItem "$env:MT5_ROOT\logs" -Filter *.log -ErrorAction SilentlyContinue
-            foreach ($f in $logs) {
-              $bytes = [System.IO.File]::ReadAllBytes($f.FullName)
-              if ($bytes.Length -lt 2) { continue }
-              if ($bytes[0] -eq 255 -and $bytes[1] -eq 254) { $journal = [System.Text.Encoding]::Unicode.GetString($bytes) }
-              else { $journal = [System.Text.Encoding]::UTF8.GetString($bytes) }
-              if ($journal -match 'authorized on') { $ok = $true }
-            }
-            if (-not $ok) { throw "Could not log in to the trade server" }
-            Write-Host "Trade server accepted the login"
+            # Как в backtest.yml: даём терминалу обновиться, затем закрываем его
+            # и только после этого читаем журнал. Пока процесс жив, файл журнала занят.
+            # Строки журнала не печатаем: там номер счёта и IP.
+            if (-not $t.WaitForExit(150000)) { }
           } finally {
             Get-Process terminal64 -ErrorAction SilentlyContinue | Stop-Process -Force
             if (Test-Path $ini) { Remove-Item $ini -Force }
             Start-Sleep -Seconds 5
           }
+          $ok = $false
+          $logs = Get-ChildItem "$env:MT5_ROOT\logs" -Filter *.log -ErrorAction SilentlyContinue
+          foreach ($f in $logs) {
+            $bytes = $null
+            for ($i = 0; $i -lt 5; $i++) {
+              try {
+                $bytes = [System.IO.File]::ReadAllBytes($f.FullName)
+                break
+              } catch {
+                Start-Sleep -Seconds 2
+              }
+            }
+            if (-not $bytes -or $bytes.Length -lt 2) { continue }
+            if ($bytes[0] -eq 255 -and $bytes[1] -eq 254) { $journal = [System.Text.Encoding]::Unicode.GetString($bytes) }
+            else { $journal = [System.Text.Encoding]::UTF8.GetString($bytes) }
+            if ($journal -match 'authorized on') { $ok = $true }
+            $journal = $null
+          }
+          if (-not $ok) { throw "Could not log in to the trade server" }
+          Write-Host "Trade server accepted the login"
 
       - name: Export ticks
         shell: pwsh
