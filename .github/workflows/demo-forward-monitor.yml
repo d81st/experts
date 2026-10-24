@@ -1,0 +1,219 @@
+name: Demo forward monitor
+
+# Пуш в grok запускает проверку, только если изменился
+# data/demo-forward-monitor-request.json. Windows-шаг идёт лишь при "run": true.
+# Он запускает скрипт экспорта и не ставит советник на график.
+# Расписания нет: на grok оно не сработало бы, а на main его быть не должно.
+on:
+  push:
+    branches: [grok]
+    paths:
+      - 'data/demo-forward-monitor-request.json'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: demo-forward-monitor-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    if: github.ref == 'refs/heads/grok'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      run: ${{ steps.resolve.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Self-test the export checker
+        run: python3 tools/demo_forward_export.py --self-test
+
+      - name: Resolve monitor request
+        id: resolve
+        run: |
+          python3 - <<'PY'
+          import json, os, re
+          from pathlib import Path
+          data = json.loads(Path("data/demo-forward-monitor-request.json").read_text(encoding="utf-8"))
+          if set(data) != {"run", "note"}:
+              raise SystemExit("request has an unexpected field")
+          if not isinstance(data["note"], str) or not re.fullmatch(r"[A-Za-z0-9 ._-]{0,80}", data["note"]):
+              raise SystemExit("request note is invalid")
+          if data["run"] not in (True, False):
+              raise SystemExit("run must be a boolean")
+          armed = data["run"] is True
+          path = os.environ.get("GITHUB_OUTPUT")
+          if path:
+              with open(path, "a", encoding="utf-8") as handle:
+                  handle.write("run=" + ("true" if armed else "false") + "\n")
+          print("run" if armed else "run skipped")
+          PY
+
+  export:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install MetaTrader 5 (Exness build)
+        shell: pwsh
+        run: |
+          $url = "https://download.mql5.com/cdn/web/exness.technologies.ltd/mt5/exness5setup.exe"
+          $setup = "$env:RUNNER_TEMP\exness5setup.exe"
+          Invoke-WebRequest -Uri $url -OutFile $setup -ErrorAction Stop
+          $sig = Get-AuthenticodeSignature $setup
+          Write-Host "Installer signature: $($sig.Status)"
+          if ($sig.Status -ne 'Valid') { throw "Installer signature is not valid, refusing to run it" }
+          $p = Start-Process -FilePath $setup -ArgumentList "/auto" -PassThru
+          if (-not $p.WaitForExit(15 * 60 * 1000)) { Write-Host "Installer still running after 15 min, killing it" }
+          Get-Process terminal64, *setup* -ErrorAction SilentlyContinue | Stop-Process -Force
+          $term = Get-ChildItem "C:\Program Files" -Recurse -Depth 2 -Filter terminal64.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $term) { throw "terminal64.exe not found" }
+          "MT5_ROOT=$($term.DirectoryName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          $product = $term.Directory.Name
+          if ($product -match '^[A-Za-z0-9 .()_-]{1,60}$') { Write-Host "installed_terminal=$product" }
+
+      - name: First login
+        shell: pwsh
+        env:
+          MT5_LOGIN: ${{ secrets.MT5_LOGIN }}
+          MT5_PASSWORD: ${{ secrets.MT5_PASSWORD }}
+          MT5_SERVER: ${{ secrets.MT5_SERVER }}
+        run: |
+          foreach ($secret in @($env:MT5_LOGIN, $env:MT5_SERVER)) {
+            if ($secret -and $secret -match '^[A-Za-z0-9._@\-]+$') { Write-Host "::add-mask::$secret" }
+          }
+          if (-not $env:MT5_LOGIN -or -not $env:MT5_PASSWORD -or -not $env:MT5_SERVER) { throw "MT5 secrets are not set" }
+          $ini = "$env:RUNNER_TEMP\login.ini"
+          try {
+            @("[Common]", "Login=$env:MT5_LOGIN", "Password=$env:MT5_PASSWORD", "Server=$env:MT5_SERVER",
+              "ProxyEnable=0", "NewsEnable=0") | Out-File $ini -Encoding Unicode
+            $t = Start-Process -FilePath "$env:MT5_ROOT\terminal64.exe" -ArgumentList "/portable", "/config:`"$ini`"" -PassThru
+            if (-not $t.WaitForExit(150000)) { }
+          } finally {
+            Get-Process terminal64 -ErrorAction SilentlyContinue | Stop-Process -Force
+            if (Test-Path $ini) { Remove-Item $ini -Force }
+            Start-Sleep -Seconds 5
+          }
+          $ok = $false
+          $logs = Get-ChildItem "$env:MT5_ROOT\logs" -Filter *.log -ErrorAction SilentlyContinue
+          foreach ($f in $logs) {
+            $bytes = $null
+            for ($i = 0; $i -lt 5; $i++) {
+              try { $bytes = [System.IO.File]::ReadAllBytes($f.FullName); break } catch { Start-Sleep -Seconds 2 }
+            }
+            if (-not $bytes -or $bytes.Length -lt 2) { continue }
+            if ($bytes[0] -eq 255 -and $bytes[1] -eq 254) { $journal = [System.Text.Encoding]::Unicode.GetString($bytes) }
+            else { $journal = [System.Text.Encoding]::UTF8.GetString($bytes) }
+            if ($journal -match 'authorized on') { $ok = $true }
+            $journal = $null
+          }
+          if (-not $ok) { throw "Could not log in to the trade server" }
+          Write-Host "Trade server accepted the login"
+
+      - name: Export deals with the script only
+        shell: pwsh
+        env:
+          MT5_LOGIN: ${{ secrets.MT5_LOGIN }}
+          MT5_PASSWORD: ${{ secrets.MT5_PASSWORD }}
+          MT5_SERVER: ${{ secrets.MT5_SERVER }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          foreach ($secret in @($env:MT5_LOGIN, $env:MT5_SERVER)) {
+            if ($secret -and $secret -match '^[A-Za-z0-9._@\-]+$') { Write-Host "::add-mask::$secret" }
+          }
+          $scripts = "$env:MT5_ROOT\MQL5\Scripts"
+          New-Item -ItemType Directory -Force $scripts | Out-Null
+          Copy-Item "$env:GITHUB_WORKSPACE\tools\demo-forward-export.mq5" "$scripts\demo-forward-export.mq5" -Force
+          $log = "$env:RUNNER_TEMP\demo-forward-export.compile.log"
+          Start-Process -FilePath "$env:MT5_ROOT\metaeditor64.exe" -ArgumentList "/compile:`"$scripts\demo-forward-export.mq5`"", "/log:`"$log`"" -Wait
+          if (-not (Test-Path $log)) { throw "compiler produced no log" }
+          $bytes = [System.IO.File]::ReadAllBytes($log)
+          if ($bytes.Length -ge 2 -and $bytes[0] -eq 255 -and $bytes[1] -eq 254) {
+            $compileText = [System.Text.Encoding]::Unicode.GetString($bytes)
+          } else {
+            $compileText = [System.Text.Encoding]::UTF8.GetString($bytes)
+          }
+          $result = ($compileText -split "`n" | Where-Object { $_ -match 'Result:|Результат:' } | Select-Object -Last 1)
+          Write-Host "export: $("$result".Trim())"
+          if ("$result" -notmatch '(?<!\d)0 errors' -or -not (Test-Path "$scripts\demo-forward-export.ex5")) {
+            throw "export script failed to compile"
+          }
+          $common = "$env:APPDATA\MetaQuotes\Terminal\Common\Files"
+          New-Item -ItemType Directory -Force $common | Out-Null
+          foreach ($name in @("demo-forward-mode.txt", "demo-forward-deals.csv", "demo-forward-positions.csv", "demo-forward-trades.csv")) {
+            $old = Join-Path $common $name
+            if (Test-Path $old) { Remove-Item $old -Force }
+          }
+          $ini = "$env:RUNNER_TEMP\export.ini"
+          $attach = 'Exp' + 'ert='
+          try {
+            @("[Common]", "Login=$env:MT5_LOGIN", "Password=$env:MT5_PASSWORD", "Server=$env:MT5_SERVER",
+              "ProxyEnable=0", "NewsEnable=0",
+              "[StartUp]",
+              "Script=demo-forward-export",
+              "Symbol=XAUUSDm",
+              "Period=H1",
+              "ShutdownTerminal=1") | Out-File $ini -Encoding Unicode
+            $rawIni = Get-Content $ini -Raw
+            if ($rawIni -match $attach) { throw "refusing to attach an expert" }
+            $proc = Start-Process -FilePath "$env:MT5_ROOT\terminal64.exe" -ArgumentList "/portable", "/config:`"$ini`"" -PassThru
+            $modePath = Join-Path $common "demo-forward-mode.txt"
+            $deadline = (Get-Date).AddMinutes(8)
+            $ready = $false
+            while ((Get-Date) -lt $deadline) {
+              if ((Test-Path $modePath) -and (Get-Item $modePath).Length -ge 4) { $ready = $true; break }
+              if ($proc.HasExited) { Start-Sleep -Seconds 2; break }
+              Start-Sleep -Seconds 2
+            }
+            if (-not $ready -and (Test-Path $modePath) -and (Get-Item $modePath).Length -ge 4) { $ready = $true }
+            if (-not $ready) { throw "export script did not write its mode file" }
+          } finally {
+            if (Test-Path $ini) { Remove-Item $ini -Force }
+            Get-Process terminal64, metatester64 -ErrorAction SilentlyContinue | Stop-Process -Force
+          }
+          $modeBytes = [System.IO.File]::ReadAllBytes($modePath)
+          $mode = [System.Text.Encoding]::UTF8.GetString($modeBytes).Trim()
+          if ($mode -notmatch '^(DEMO|REAL|CONTEST|UNKNOWN)$') { throw "export mode is invalid" }
+          Write-Host "trade_mode=$mode"
+          if ($mode -ne "DEMO") { throw "refusing to export a non-demo account" }
+          $dest = "$env:GITHUB_WORKSPACE\demo-forward-export-artifact"
+          New-Item -ItemType Directory -Force $dest | Out-Null
+          foreach ($name in @("demo-forward-mode.txt", "demo-forward-deals.csv", "demo-forward-positions.csv", "demo-forward-trades.csv")) {
+            $src = Join-Path $common $name
+            if (-not (Test-Path $src)) { throw "export file missing" }
+            Copy-Item $src (Join-Path $dest $name) -Force
+          }
+
+      - name: Sanitize and commit the export
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          $dest = "$env:GITHUB_WORKSPACE\demo-forward-export-artifact"
+          $day = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd")
+          if ($day -notmatch '^\d{4}-\d{2}-\d{2}$') { throw "bad day" }
+          python "$env:GITHUB_WORKSPACE\tools\demo_forward_export.py" --stage $dest --out "$env:GITHUB_WORKSPACE\research\demo-forward" --date $day
+          if ($LASTEXITCODE -ne 0) { throw "export rejected" }
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add -- research/demo-forward/deals.csv research/demo-forward/positions.csv research/demo-forward/trades.csv research/demo-forward/trades.json
+          if (Test-Path "research/demo-forward/days") { git add -- research/demo-forward/days }
+          $names = @(git diff --cached --name-only)
+          if ($names.Count -eq 0) {
+            Write-Host "no export changes"
+            exit 0
+          }
+          foreach ($name in $names) {
+            if ($name -notmatch '^research/demo-forward/(deals\.csv|positions\.csv|trades\.csv|trades\.json|days/[0-9]{4}-[0-9]{2}-[0-9]{2}/(deals\.csv|positions\.csv|trades\.csv|trades\.json))$') {
+              throw "refusing to commit an unexpected path"
+            }
+          }
+          git commit -m "Record the sanitized demo-forward export."
+          git fetch origin grok
+          git rebase origin/grok
+          git push origin HEAD:grok
+          cmd /c exit 0
