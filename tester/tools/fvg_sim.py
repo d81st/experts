@@ -161,11 +161,12 @@ def parse_exit(s):
 # ── стратегия ─────────────────────────────────────────────────────────
 
 def run(P, tfmin, L, N, K, select, exit_s, be, buffer=0.3, minSL=2.0, maxSL=5.0, spread=0.25,
-        single=False, mingap=0.0, minage=0, atr_mode=False, atr_period=14):
+        single=False, mingap=0.0, minage=0, atr_mode=False, atr_period=14, raw=False):
     """Как в роботе: на каждом закрытом баре ТФ из живых разрывов (возраст minage … L−1 баров,
     цена снаружи) в каждую сторону выбираются K по правилу select; у выбранных — лимитки,
     у выпавших из выбора лимитка снимается. Срок лимитки — N баров с первой постановки, потом
-    разрыв больше не торгуется. single — одна позиция: пока она открыта, лимитки не исполняются."""
+    разрыв больше не торгуется. single — одна позиция: пока она открыта, лимитки не исполняются.
+    raw — вернуть исполнения (минута, направление, цена входа, стоп USD) без выхода и без single."""
     tf = P.resample(tfmin)
     tt = tf.index.to_numpy()
     th, tl, tc = tf["high"].to_numpy(), tf["low"].to_numpy(), tf["close"].to_numpy()
@@ -229,10 +230,13 @@ def run(P, tfmin, L, N, K, select, exit_s, be, buffer=0.3, minSL=2.0, maxSL=5.0,
                 fills.append((f, g))
         for f, g in sorted(fills, key=lambda x: x[0]):
             alive.remove(g)
-            if single and f <= busy_until:
-                continue
             d, near = g["d"], g["near"]
             entry = min(near, P.o[f] + spread) if d == 1 else max(near, P.o[f])
+            if raw:
+                trades.append((f, d, entry, g["sd"]))
+                continue
+            if single and f <= busy_until:
+                continue
             r, ie = bracket(P, f, d, entry, g["sd"], exit_, be, spread)
             busy_until = max(busy_until, ie)
             trades.append((f, d, g["sd"], r))
