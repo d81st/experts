@@ -80,6 +80,8 @@ class Bar:
     ask_close: float
     tick_count: int
     volume: float
+    # Откуда бар: ticks, exness, dukascopy, csv. Прогрев и живые тики не смешиваются.
+    source: str = "ticks"
 
     @property
     def spread_close(self) -> float:
@@ -88,10 +90,11 @@ class Bar:
 
 @dataclass(frozen=True)
 class SymbolSpec:
-    """Спецификация символа. Для XAUUSDm числа ниже — допущение, не выгрузка SymbolInfo.
+    """Спецификация символа.
 
     money_per_price — сколько USD приносит движение цены на 1.00 при объёме 1.0 лот.
-    Для золота Exness Standard это 100 (контракт 100 унций).
+    Для XAUUSDm это tick_value / tick_size из выгрузки терминала (100 USD).
+    stops_level и freeze_level — пункты брокера. 0 значит ограничения нет.
     """
 
     name: str
@@ -105,6 +108,8 @@ class SymbolSpec:
     volume_step: float
     adjusted_point: float
     leverage: float = 2000.0
+    stops_level: int = 0
+    freeze_level: int = 0
 
     def __post_init__(self) -> None:
         checks = {
@@ -118,6 +123,8 @@ class SymbolSpec:
             "volume_step": self.volume_step > 0.0,
             "adjusted_point": self.adjusted_point > 0.0,
             "leverage": self.leverage > 0.0,
+            "stops_level": self.stops_level >= 0,
+            "freeze_level": self.freeze_level >= 0,
         }
         bad = [name for name, ok in checks.items() if not ok]
         if bad:
@@ -140,27 +147,10 @@ def adjusted_point(digits: int, point: float) -> float:
 
 
 def xauusd_exness(leverage: float = 2000.0) -> SymbolSpec:
-    """Допущение по XAUUSDm Exness Standard (USD): 3 знака, 100 унций, шаг лота 0.01.
+    """XAUUSDm из data/symbol-spec/XAUUSDm.json. Без файла прогон не стартует."""
+    from .symbol_spec import load_xauusdm
 
-    tick_value 0.1 при tick_size 0.001 даёт 100 USD за 1.00 цены на 1 лот.
-    Это согласуется с убытком в отчёте h1-x12-st (проскальзывание стопа
-    0.143 USD × 0.02 лота × 100 = 0.286 USD сверх стопа). Подтвердить SymbolInfo
-    на терминале всё равно нужно: брокер может сменить контракт.
-    """
-    point = 0.001
-    return SymbolSpec(
-        name="XAUUSDm",
-        digits=3,
-        point=point,
-        contract_size=100.0,
-        tick_size=0.001,
-        tick_value=0.1,
-        volume_min=0.01,
-        volume_max=100.0,
-        volume_step=0.01,
-        adjusted_point=adjusted_point(3, point),
-        leverage=leverage,
-    )
+    return load_xauusdm(leverage=leverage).spec
 
 
 @dataclass

@@ -1,20 +1,26 @@
-"""Торговая сессия XAUUSD.
+"""Торговая сессия XAUUSDm по выгрузке терминала.
 
-Расписание выведено из двух наблюдений, не из SymbolInfoSessionTrade:
+Окна берутся из sessions.trade файла data/symbol-spec/XAUUSDm.json,
+серверное время UTC+0. Дамп снят 2026-10-24, в летнее время США:
 
-1. Аудит баров: дневная дыра котировок — около 20:57–22:00 летом США
-   и около 21:57–23:00 зимой. Воскресенье открывается чуть позже.
-2. Сделки h1-x12-st: зимой 2026 отложенный вход в 23:01, летом в 22:00:30.
-   Часа 21 среди входов нет.
+- понедельник–четверг: 00:00–20:58 и 22:01–24:00;
+- пятница: 00:00–20:58;
+- воскресенье: с 22:05;
+- суббота закрыта.
 
-Это пауза COMEX 17:00–18:00 America/New_York:
+Полночь (00:00 и 24:00) — якорь суток и при сдвиге не двигается.
+Сдвигаются только внутренние границы паузы.
 
-- летнее время США (EDT): закрыто [21:00, 22:00) UTC;
-- зимнее (EST): закрыто [22:00, 23:00) UTC.
+- captured, сдвиг 0: окна как в файле. Окно сверки июнь–октябрь 2026
+  целиком в летнем времени США, для него это и есть расписание.
+- winter, сдвиг +1 час: воскресенье с 23:05, пн–чт 00:00–21:58 и
+  23:01–24:00, пятница до 21:58. Это гипотеза на зиму, дамп её не содержит.
+- auto: +1 час, когда в США зимнее время (до второго воскресенья марта
+  07:00 UTC и с первого воскресенья ноября 06:00 UTC). Тоже не проверено
+  отдельной зимней выгрузкой.
 
-Пятница закрывается в начале этой паузы и не открывается до воскресенья.
-Суббота закрыта. Переход DST — второе воскресенье марта 07:00 UTC и
-первое воскресенье ноября 06:00 UTC. Праздники биржи не моделируются.
+Котировочные сессии (они чуть шире) воротами входа не являются.
+Праздники не моделируются. SL и TP обрабатываются на любом тике.
 """
 
 from __future__ import annotations
@@ -23,6 +29,9 @@ import calendar
 from datetime import datetime, timezone
 
 DAY_MS = 86_400_000
+DAY_S = 86_400
+
+Shift = str | int
 
 
 def weekday_mon0(time_msc: int) -> int:
@@ -40,13 +49,47 @@ def _nth_sunday(year: int, month: int, n: int) -> int:
     return sundays[n - 1].day
 
 
+def shift_edge(seconds: int, hours: int) -> int:
+    """Сдвинуть границу. 00:00 и 24:00 остаются на месте."""
+    if hours == 0 or seconds <= 0 or seconds >= DAY_S:
+        return seconds
+    moved = seconds + hours * 3600
+    if moved <= 0 or moved >= DAY_S:
+        raise ValueError(f"сдвиг сессии выносит границу за сутки: {seconds} + {hours}ч")
+    return moved
+
+
+def shift_ranges(
+    ranges: tuple[tuple[tuple[int, int], ...], ...] | list,
+    hours: int,
+) -> tuple[tuple[tuple[int, int], ...], ...]:
+    if hours == 0:
+        return tuple(tuple(day) for day in ranges)
+    shifted = []
+    for day in ranges:
+        shifted.append(tuple((shift_edge(start, hours), shift_edge(end, hours)) for start, end in day))
+    return tuple(shifted)
+
+
 class AlwaysOpen:
     def is_open(self, time_msc: int) -> bool:
         return True
 
 
 class ExnessGoldSession:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        shift: Shift = "captured",
+        ranges: tuple[tuple[tuple[int, int], ...], ...] | None = None,
+    ) -> None:
+        if ranges is None:
+            from .symbol_spec import load_xauusdm
+
+            ranges = load_xauusdm().trade_ranges
+        if len(ranges) != 7:
+            raise ValueError("сессия: нужно 7 дней, понедельник = 0")
+        self.base = tuple(tuple(day) for day in ranges)
+        self.shift = shift
         self._dst: dict[int, tuple[int, int]] = {}
         self._day: int | None = None
         self._ranges: list[tuple[int, int]] = []
@@ -62,29 +105,34 @@ class ExnessGoldSession:
         return bounds
 
     def is_dst(self, time_msc: int) -> bool:
+        """Летнее время США. Сервер Exness его не переводит; это только режим auto."""
         year = datetime.fromtimestamp(time_msc / 1000.0, timezone.utc).year
-        # На границе года зимнее расписание, DST внутри года.
         start, end = self._dst_bounds_msc(year)
         return start <= time_msc < end
 
+    def shift_hours(self, time_msc: int) -> int:
+        if self.shift == "captured":
+            return 0
+        if self.shift == "winter":
+            return 1
+        if self.shift == "auto":
+            return 0 if self.is_dst(time_msc) else 1
+        if isinstance(self.shift, int):
+            if self.shift < 0:
+                raise ValueError("сдвиг сессии < 0")
+            return self.shift
+        raise ValueError(f"неизвестный сдвиг сессии: {self.shift}")
+
     def _ranges_for_day(self, day_index: int) -> list[tuple[int, int]]:
         noon = day_index * DAY_MS + 12 * 3_600_000
-        dst = self.is_dst(noon)
-        close_s = 21 * 3600 if dst else 22 * 3600
-        open_s = 22 * 3600 if dst else 23 * 3600
+        hours = self.shift_hours(noon)
         wd = weekday_mon0(day_index * DAY_MS)
-        if wd == 5:  # суббота
-            return []
-        if wd == 6:  # воскресенье — только после открытия
-            return [(open_s, 24 * 3600)]
-        if wd == 4:  # пятница — до начала паузы
-            return [(0, close_s)]
-        return [(0, close_s), (open_s, 24 * 3600)]
+        return [(shift_edge(start, hours), shift_edge(end, hours)) for start, end in self.base[wd]]
 
     def is_open(self, time_msc: int) -> bool:
         day = time_msc // DAY_MS
         if day != self._day:
             self._day = day
             self._ranges = self._ranges_for_day(day)
-        sec = (time_msc // 1000) % 86400
-        return any(a <= sec < b for a, b in self._ranges)
+        sec = (time_msc // 1000) % DAY_S
+        return any(start <= sec < end for start, end in self._ranges)

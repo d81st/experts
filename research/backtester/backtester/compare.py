@@ -63,6 +63,37 @@ def load_our_csv(path: str | Path) -> list[OurTrade]:
     return trades
 
 
+# strict — допуск сверки «тик в тик»: 2 с и 0.05 цены.
+# aligned — тот же смысл пары, но шум исполнения внутри секунды не считается
+# расхождением: вход в пределах 5 с и 0.50 цены. Допуск цены общий для входа,
+# выхода и стопа. Время выхода остаётся 5 с: стоп на другом баре — всё ещё
+# другое событие. Объём не ослабляется: шаг 0.01 — это лот, не шум цены.
+TOLERANCE_PROFILES: dict[str, dict[str, float]] = {
+    "strict": {
+        "entry_pair_sec": 180.0,
+        "entry_time_sec": 2.0,
+        "exit_time_sec": 5.0,
+        "price_tol": 0.05,
+        "pair_price_tol": 3.0,
+        "volume_tol": 0.001,
+    },
+    "aligned": {
+        "entry_pair_sec": 180.0,
+        "entry_time_sec": 5.0,
+        "exit_time_sec": 5.0,
+        "price_tol": 0.50,
+        "pair_price_tol": 3.0,
+        "volume_tol": 0.001,
+    },
+}
+
+
+def tolerance_profile(name: str) -> dict[str, float]:
+    if name not in TOLERANCE_PROFILES:
+        raise ValueError(f"неизвестный профиль сверки: {name}")
+    return dict(TOLERANCE_PROFILES[name])
+
+
 def _in_window(moment: datetime, start: datetime | None, end: datetime | None) -> bool:
     if start is not None and moment < start:
         return False

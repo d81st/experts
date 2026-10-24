@@ -34,13 +34,14 @@ def align_open(time_msc: int, tf_ms: int) -> int:
 
 
 class BarBuilder:
-    def __init__(self, timeframes: list[str]):
+    def __init__(self, timeframes: list[str], source: str = "ticks"):
         unknown = [tf for tf in timeframes if tf not in TF_MS]
         if unknown:
             raise DataError(f"неизвестный таймфрейм: {unknown}")
         # Стабильный порядок: сначала старшие, чтобы на общей границе
         # стратегия увидела закрытый старший бар раньше младшего.
         self.timeframes = sorted(timeframes, key=lambda tf: -TF_MS[tf])
+        self.source = source
         self._sec = {tf: TF_MS[tf] for tf in self.timeframes}
         self._cur: dict[str, dict] = {}
         self.closed: dict[str, list[Bar]] = {tf: [] for tf in self.timeframes}
@@ -69,7 +70,10 @@ class BarBuilder:
             open_msc = align_open(tick.time_msc, period)
             cur = self._cur.get(tf)
             if cur is None:
-                self._cur[tf] = _new(tf, open_msc, tick)
+                closed_before = self.closed[tf]
+                if closed_before and open_msc < closed_before[-1].time_msc + period:
+                    raise DataError(f"{tf}: тик попал в уже закрытый прогретый бар")
+                self._cur[tf] = _new(tf, open_msc, tick, self.source)
                 continue
             if open_msc < cur["open"]:
                 raise DataError(f"{tf}: тик попал в уже закрытый бар")
@@ -77,13 +81,13 @@ class BarBuilder:
                 bar = _freeze(cur)
                 self.closed[tf].append(bar)
                 closed_now.append(bar)
-                self._cur[tf] = _new(tf, open_msc, tick)
+                self._cur[tf] = _new(tf, open_msc, tick, self.source)
             else:
                 _update(cur, tick)
         return closed_now
 
 
-def _new(tf: str, open_msc: int, tick: Tick) -> dict:
+def _new(tf: str, open_msc: int, tick: Tick, source: str) -> dict:
     return {
         "tf": tf,
         "open": open_msc,
@@ -97,6 +101,7 @@ def _new(tf: str, open_msc: int, tick: Tick) -> dict:
         "ask_c": tick.ask,
         "n": 1,
         "vol": tick.volume,
+        "source": source,
     }
 
 
@@ -125,6 +130,7 @@ def _freeze(cur: dict) -> Bar:
         ask_close=cur["ask_c"],
         tick_count=cur["n"],
         volume=cur["vol"],
+        source=cur.get("source", "ticks"),
     )
 
 
@@ -153,6 +159,7 @@ def aggregate_bars(bars: list[Bar], tf: str) -> list[Bar]:
                 "ask_c": bar.ask_close,
                 "n": bar.tick_count,
                 "vol": bar.volume,
+                "source": bar.source,
             }
         else:
             cur["bid_h"] = max(cur["bid_h"], bar.high)
@@ -163,6 +170,8 @@ def aggregate_bars(bars: list[Bar], tf: str) -> list[Bar]:
             cur["ask_c"] = bar.ask_close
             cur["n"] += bar.tick_count
             cur["vol"] += bar.volume
+            if cur["source"] != bar.source:
+                cur["source"] = "mixed"
     if cur is not None:
         out.append(_freeze(cur))
     return out

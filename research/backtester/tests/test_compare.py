@@ -10,8 +10,8 @@ from pathlib import Path
 import pytest
 
 from backtester.cli import main
-from backtester.compare import compare_trades, load_our_csv
-from backtester.mt5report import load_mt5, parse_mt5_html
+from backtester.compare import OurTrade, compare_trades, load_our_csv, tolerance_profile
+from backtester.mt5report import Mt5Trade, load_mt5, parse_mt5_html
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mt5_min.htm"
 
@@ -86,6 +86,25 @@ def test_json_deals(tmp_path: Path):
     assert trades[0].side == 1
     assert trades[0].sl == 99.0
     assert trades[0].profit == 10
+
+
+def test_aligned_profile_ignores_subsecond_price_noise():
+    moment = datetime(2026, 6, 1, 7, 0, tzinfo=timezone.utc)
+    ours = [
+        OurTrade(moment, moment, -1, 0.02, 4502.30, 4487.40, None, 1.0, "time", "HAL"),
+    ]
+    mt5 = [
+        Mt5Trade(moment.replace(second=4), moment, -1, 0.02, 4501.95, 4487.03, None, 0.0, 0.0, 1.0, "HAL", ""),
+    ]
+    strict = compare_trades(ours, mt5, **tolerance_profile("strict"))
+    aligned = compare_trades(ours, mt5, **tolerance_profile("aligned"))
+    assert strict["exact"] == 0
+    assert "entry_price" in strict["pairs"][0]["reasons"]
+    assert "entry_time" in strict["pairs"][0]["reasons"]
+    assert aligned["exact"] == 1
+    assert tolerance_profile("aligned")["entry_time_sec"] == 5.0
+    assert tolerance_profile("aligned")["price_tol"] == 0.5
+    assert tolerance_profile("aligned")["exit_time_sec"] == 5.0
 
 
 def test_cli_module_answers_help():

@@ -46,10 +46,13 @@ class EngineConfig:
     swap_long_per_lot: float = 0.0
     swap_short_per_lot: float = 0.0
     triple_swap_weekday: int = 2
+    # 7 множителей, понедельник = 0. None — прежняя схема triple_swap_weekday.
+    swap_multipliers: tuple[float, ...] | None = None
     trading_from_msc: int | None = None
     close_at_end: bool = False
     check_margin: bool = True
     sample_tf: str | None = None
+    bar_source: str = "ticks"
 
     def __post_init__(self) -> None:
         if self.deposit <= 0.0:
@@ -58,6 +61,8 @@ class EngineConfig:
             raise ConfigError("latency_ms < 0")
         if self.limit_penetration < 0.0:
             raise ConfigError("limit_penetration < 0")
+        if self.swap_multipliers is not None and len(self.swap_multipliers) != 7:
+            raise ConfigError("swap_multipliers: нужно 7 чисел, понедельник = 0")
 
 
 @dataclass
@@ -203,7 +208,7 @@ class Engine:
         tfs = list(strategy.required_timeframes())
         if config.sample_tf and config.sample_tf not in tfs:
             tfs.append(config.sample_tf)
-        self.bars = BarBuilder(tfs)
+        self.bars = BarBuilder(tfs, source=config.bar_source)
         self.balance = config.deposit
         self.positions: list[_Position] = []
         self.orders: list[_Order] = []
@@ -278,6 +283,15 @@ class Engine:
             sl = None
         if tp is not None and tp <= 0.0:
             tp = None
+        # 0 в выгрузке — ограничения нет. Ненулевой уровень отсекает слишком близкий SL/TP.
+        min_dist = self.spec.stops_level * self.spec.point
+        if min_dist > 0.0:
+            if sl is not None and abs(price - sl) + 1e-9 < min_dist:
+                self._reject("stops_level")
+                return None
+            if tp is not None and abs(price - tp) + 1e-9 < min_dist:
+                self._reject("stops_level")
+                return None
         pen = self.cfg.limit_penetration if penetration is None else penetration
         if pen < 0.0:
             raise ConfigError("penetration < 0")
@@ -479,6 +493,7 @@ class Engine:
                 pos.entry_time_msc,
                 pos.last_swap_msc,
                 triple_weekday=self.cfg.triple_swap_weekday,
+                multipliers=self.cfg.swap_multipliers,
             )
             if not charges:
                 continue

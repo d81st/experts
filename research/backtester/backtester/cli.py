@@ -13,13 +13,22 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from .compare import compare_trades, load_our_csv, load_mt5
+from .bars import BarBuilder, aggregate_bars
+from .compare import compare_trades, load_mt5, load_our_csv, tolerance_profile
+from .dukascopy_bars import (
+    cut_before_live,
+    estimate_bid_offset,
+    in_session,
+    load_m1_tree,
+    shift_bars,
+)
 from .engine import Engine, EngineConfig
 from .metrics import compute_metrics, format_metrics_ru
 from .session import ExnessGoldSession
 from .strategies.alchemist import AlchemistConfig, AlchemistStrategy, h1_x12_st
+from .symbol_spec import CapturedSymbol, load_xauusdm
 from .ticks import iter_ticks
-from .types import Bar, Trade, xauusd_exness
+from .types import Bar, Trade
 
 HOLDOUT_START = datetime(2026, 10, 16, tzinfo=timezone.utc)
 HOLDOUT_MSC = int(HOLDOUT_START.timestamp() * 1000)
@@ -33,6 +42,12 @@ def _day_start(text: str) -> int:
 def _day_end_exclusive(text: str) -> int:
     dt = datetime.strptime(text, "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(days=1)
     return int(dt.timestamp() * 1000)
+
+
+def _period_of(bar: Bar) -> int:
+    from .bars import TF_MS
+
+    return TF_MS[bar.tf]
 
 
 def _iso(time_msc: int) -> str:
@@ -116,10 +131,38 @@ def _load_warmup_m1(path: Path, before_msc: int) -> list[Bar]:
             bid_l = float(row["low"])
             bid_c = float(row["close"])
             bars.append(
-                Bar("M1", time_msc, bid_o, bid_h, bid_l, bid_c, bid_o, bid_h, bid_l, bid_c, 1, 0.0)
+                Bar("M1", time_msc, bid_o, bid_h, bid_l, bid_c, bid_o, bid_h, bid_l, bid_c, 1, 0.0, "csv")
             )
     closed = [bar for bar in bars if bar.time_msc + TF_MS["M1"] <= before_msc]
     return closed
+
+
+def _session(args: argparse.Namespace, captured: CapturedSymbol) -> ExnessGoldSession:
+    return ExnessGoldSession(shift=args.session_shift, ranges=captured.trade_ranges)
+
+
+def _swap_from_args(args: argparse.Namespace, captured: CapturedSymbol) -> dict:
+    """Пропущенная ставка берётся из пунктов спецификации. Явная — как передали.
+
+    --triple-swap-weekday возвращает старую схему 1/3 и отключает таблицу файла.
+    """
+    long_rate = captured.swap_long_per_lot if args.swap_long is None else args.swap_long
+    short_rate = captured.swap_short_per_lot if args.swap_short is None else args.swap_short
+    if args.triple_swap_weekday is None:
+        return {
+            "swap_long_per_lot": long_rate,
+            "swap_short_per_lot": short_rate,
+            "triple_swap_weekday": captured.triple_swap_weekday,
+            "swap_multipliers": captured.swap_multipliers,
+            "swap_schedule": "symbol-spec",
+        }
+    return {
+        "swap_long_per_lot": long_rate,
+        "swap_short_per_lot": short_rate,
+        "triple_swap_weekday": args.triple_swap_weekday,
+        "swap_multipliers": None,
+        "swap_schedule": "triple-weekday",
+    }
 
 
 def _cmd_alchemist(args: argparse.Namespace) -> int:
@@ -129,7 +172,10 @@ def _cmd_alchemist(args: argparse.Namespace) -> int:
     data_from = _day_start(args.data_from) if args.data_from else None
     if trade_from is not None and trade_from >= HOLDOUT_MSC and not args.allow_holdout:
         raise SystemExit("Отказ: trade-from попадает в холдаут с 2026-10-16.")
-    spec = xauusd_exness(leverage=args.leverage)
+    captured = load_xauusdm(leverage=args.leverage)
+    spec = captured.spec
+    costs = _swap_from_args(args, captured)
+    session = _session(args, captured)
     cfg = h1_x12_st()
     if args.risk_basis:
         cfg = AlchemistConfig(**{**cfg.__dict__, "risk_basis": args.risk_basis})
@@ -141,27 +187,47 @@ def _cmd_alchemist(args: argparse.Namespace) -> int:
             latency_ms=args.latency_ms,
             limit_penetration=args.limit_penetration,
             commission_per_lot_side=-abs(args.commission_per_lot_side),
-            swap_long_per_lot=args.swap_long,
-            swap_short_per_lot=args.swap_short,
-            triple_swap_weekday=args.triple_swap_weekday,
+            swap_long_per_lot=costs["swap_long_per_lot"],
+            swap_short_per_lot=costs["swap_short_per_lot"],
+            triple_swap_weekday=costs["triple_swap_weekday"],
+            swap_multipliers=costs["swap_multipliers"],
             trading_from_msc=trade_from,
             close_at_end=not args.no_close_at_end,
             sample_tf=cfg.timeframe,
+            bar_source=args.source,
         ),
         strategy,
-        session=ExnessGoldSession(),
+        session=session,
         max_risk_overshoot=cfg.max_risk_overshoot,
     )
+    if args.warmup_m1 and args.warmup_dukascopy:
+        raise SystemExit("Нужен один прогрев: --warmup-m1 или --warmup-dukascopy.")
+    warmup_m1: list[Bar] = []
+    warmup_note: dict | None = None
     if args.warmup_m1:
         before = data_from if data_from is not None else (trade_from or end_msc)
         seed = _load_warmup_m1(Path(args.warmup_m1), before)
-        from .bars import TF_MS, aggregate_bars
+        from .bars import TF_MS
 
         for tf in strategy.required_timeframes():
             period = TF_MS[tf]
             ready = [bar for bar in aggregate_bars(seed, tf) if bar.time_msc + period <= before]
             if ready:
                 engine.bars.seed_closed(ready)
+    elif args.warmup_dukascopy:
+        if args.warmup_offset is None:
+            raise SystemExit("Для прогрева Dukascopy нужен --warmup-offset (медиана с пересечения).")
+        loaded = shift_bars(in_session(load_m1_tree(args.warmup_dukascopy), session), args.warmup_offset)
+        warmup_m1 = loaded
+        warmup_note = {
+            "source": "dukascopy",
+            "offset": args.warmup_offset,
+            "m1": len(loaded),
+            "method": (
+                "Медиана (M1 bid close Exness − M1 bid close Dukascopy) на общих минутах "
+                "пересечения. OHLC прогрева сдвинуты на эту величину. Торговля по прогреву не идёт."
+            ),
+        }
     ticks = iter_ticks(
         args.ticks,
         args.source,
@@ -175,7 +241,23 @@ def _cmd_alchemist(args: argparse.Namespace) -> int:
 
     def ticking():
         nonlocal seen
+        seeded = False
         for tick in ticks:
+            if not seeded and warmup_m1:
+                counts = {}
+                for tf in strategy.required_timeframes():
+                    ready = cut_before_live(aggregate_bars(warmup_m1, tf), tick.time_msc, engine.session)
+                    engine.bars.seed_closed(ready)
+                    counts[tf] = {
+                        "bars": len(ready),
+                        "first": _iso(ready[0].time_msc),
+                        "last_close": _iso(ready[-1].time_msc + _period_of(ready[-1])),
+                        "source": ready[0].source,
+                    }
+                if warmup_note is not None:
+                    warmup_note["bars"] = counts
+                    warmup_note["first_tick"] = _iso(tick.time_msc)
+                seeded = True
             seen += 1
             if seen % 500_000 == 0:
                 print(f"… {seen} тиков, {_iso(tick.time_msc)}", file=sys.stderr)
@@ -195,25 +277,45 @@ def _cmd_alchemist(args: argparse.Namespace) -> int:
     )
     metrics["symbol"] = spec.name
     metrics["spec"] = {
+        "path": captured.path,
+        "captured_at": captured.captured_at,
+        "captured_date": captured.captured_date,
         "digits": spec.digits,
         "point": spec.point,
         "contract_size": spec.contract_size,
         "tick_size": spec.tick_size,
         "tick_value": spec.tick_value,
         "volume_min": spec.volume_min,
+        "volume_max": spec.volume_max,
         "volume_step": spec.volume_step,
+        "stops_level": spec.stops_level,
+        "freeze_level": spec.freeze_level,
         "money_per_price": spec.money_per_price,
-        "note": "допущение Exness Standard, не выгрузка SymbolInfo",
+        "swap_mode": captured.swap_mode,
+        "swap_long_points": captured.swap_long_points,
+        "swap_short_points": captured.swap_short_points,
+        "swap_rollover3days": captured.swap_rollover3days,
+        "session_shift": args.session_shift,
+        "note": (
+            "выгрузка терминала 2026-10-24, летнее время США; "
+            "зимние окна сессии могут сдвинуться на час, см. session_shift"
+        ),
     }
     metrics["costs"] = {
         "latency_ms": args.latency_ms,
         "spread_addon": args.spread_addon,
         "spread_multiplier": args.spread_multiplier,
         "price_offset": args.price_offset,
-        "swap_long_per_lot": args.swap_long,
-        "swap_short_per_lot": args.swap_short,
+        "swap_long_per_lot": costs["swap_long_per_lot"],
+        "swap_short_per_lot": costs["swap_short_per_lot"],
+        "swap_long_points": captured.swap_long_points,
+        "swap_short_points": captured.swap_short_points,
+        "swap_schedule": costs["swap_schedule"],
+        "triple_swap_weekday": costs["triple_swap_weekday"],
         "commission_per_lot_side": -abs(args.commission_per_lot_side),
     }
+    if warmup_note is not None:
+        metrics["warmup"] = warmup_note
     metrics["strategy_counts"] = result.strategy_counts
     metrics["rejected"] = result.rejected
     metrics["open_positions"] = len(result.open_positions)
@@ -232,6 +334,19 @@ def _cmd_alchemist(args: argparse.Namespace) -> int:
     return 0
 
 
+def _compare_kwargs(args: argparse.Namespace, profile: str | None) -> dict:
+    if profile:
+        chosen = tolerance_profile(profile)
+        return chosen
+    return {
+        "entry_pair_sec": args.entry_pair_sec,
+        "entry_time_sec": args.entry_time_sec,
+        "exit_time_sec": args.exit_time_sec,
+        "price_tol": args.price_tol,
+        "pair_price_tol": args.pair_price_tol,
+    }
+
+
 def _cmd_compare(args: argparse.Namespace) -> int:
     start = datetime.strptime(args.start, "%Y-%m-%d").replace(tzinfo=timezone.utc) if args.start else None
     end = None
@@ -239,41 +354,70 @@ def _cmd_compare(args: argparse.Namespace) -> int:
         end = datetime.strptime(args.end, "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(days=1)
         if end > HOLDOUT_START and not args.allow_holdout:
             raise SystemExit("Отказ: окно сверки захватывает холдаут с 2026-10-16.")
-    report = compare_trades(
-        load_our_csv(args.ours),
-        load_mt5(args.mt5),
-        start=start,
-        end=end,
-        entry_pair_sec=args.entry_pair_sec,
-        entry_time_sec=args.entry_time_sec,
-        exit_time_sec=args.exit_time_sec,
-        price_tol=args.price_tol,
-        pair_price_tol=args.pair_price_tol,
-    )
-    printable = {k: v for k, v in report.items() if k not in ("pairs", "ours_only_trades", "mt5_only_trades")}
-    text = json.dumps(printable, ensure_ascii=False, indent=2)
+    ours = load_our_csv(args.ours)
+    mt5 = load_mt5(args.mt5)
+    names = ["strict", "aligned"] if args.profile == "both" else [args.profile]
+    reports = {}
+    for name in names:
+        report = compare_trades(ours, mt5, start=start, end=end, **_compare_kwargs(args, name))
+        if name:
+            report["profile"] = name
+        reports[name or "custom"] = report
+    report = reports[names[-1] or "custom"] if len(reports) == 1 else None
+    payload = reports if len(reports) > 1 else next(iter(reports.values()))
+    printable_one = payload if len(reports) == 1 else {
+        name: {k: v for k, v in row.items() if k not in ("pairs", "ours_only_trades", "mt5_only_trades")}
+        for name, row in reports.items()
+    }
+    if len(reports) == 1:
+        printable_one = {k: v for k, v in payload.items() if k not in ("pairs", "ours_only_trades", "mt5_only_trades")}
+    text = json.dumps(printable_one, ensure_ascii=False, indent=2)
     print(text)
     if args.out:
-        Path(args.out).write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(
-        f"Пар: {report['paired']}, из них без расхождений: {report['exact']}, "
-        f"с причинами: {report['paired_with_mismatch']}. "
-        f"Только у нас: {report['ours_only']}. Только в MT5: {report['mt5_only']}."
-    )
-    shown = 0
-    for row in report["pairs"]:
-        if row["match"]:
-            continue
+        Path(args.out).write_text(json.dumps(payload if len(reports) == 1 else reports, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    for name, row in reports.items():
+        label = name or "custom"
         print(
-            f"  {row['mt5']['entry_time']} {row['mt5']['side']} "
-            f"причины={','.join(row['reasons'])} "
-            f"dPвх={row['entry_price_delta']:.3f} dPвых={row['exit_price_delta']:.3f} "
-            f"dTвх={row['entry_time_delta_sec']:.1f}s"
+            f"[{label}] Пар: {row['paired']}, без расхождений: {row['exact']}, "
+            f"с причинами: {row['paired_with_mismatch']}. "
+            f"Только у нас: {row['ours_only']}. Только в MT5: {row['mt5_only']}."
         )
-        shown += 1
-        if shown >= 15:
-            break
-    return 0 if report["mt5"] == 0 or report["paired"] else 0
+        shown = 0
+        for item in row["pairs"]:
+            if item["match"]:
+                continue
+            print(
+                f"  {item['mt5']['entry_time']} {item['mt5']['side']} "
+                f"причины={','.join(item['reasons'])} "
+                f"dPвх={item['entry_price_delta']:.3f} dPвых={item['exit_price_delta']:.3f} "
+                f"dTвх={item['entry_time_delta_sec']:.1f}s"
+            )
+            shown += 1
+            if shown >= 15:
+                break
+    return 0
+
+
+def _cmd_offset(args: argparse.Namespace) -> int:
+    """Медиана bid M1: Exness минус Dukascopy на пересечении, без холдаута."""
+    start = _day_start(args.start)
+    end = _day_end_exclusive(args.to)
+    _refuse_holdout(end, args.allow_holdout)
+    captured = load_xauusdm()
+    session = _session(args, captured)
+    duk = [bar for bar in in_session(load_m1_tree(args.dukascopy), session) if start <= bar.time_msc < end]
+    builder = BarBuilder(["M1"], source="exness")
+    for tick in iter_ticks(args.ticks, "exness", start_msc=start, end_msc=end):
+        if tick.time_msc >= HOLDOUT_MSC and not args.allow_holdout:
+            raise SystemExit("Отказ: в поток попал тик холдаута. Чтение остановлено.")
+        builder.add(tick)
+    exness = in_session(builder.closed["M1"], session)
+    stats = estimate_bid_offset(exness, duk)
+    stats["start"] = args.start
+    stats["to"] = args.to
+    stats["method"] = "median Exness M1 bid close minus Dukascopy M1 bid close, session minutes only"
+    print(json.dumps(stats, ensure_ascii=False, indent=2))
+    return 0
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -293,12 +437,30 @@ def main(argv: list[str] | None = None) -> None:
     run.add_argument("--spread-addon", type=float, default=0.0)
     run.add_argument("--spread-multiplier", type=float, default=1.0)
     run.add_argument("--price-offset", type=float, default=0.0)
-    run.add_argument("--swap-long", type=float, default=0.0, help="USD на 1 лот за ночь, знак MT5")
-    run.add_argument("--swap-short", type=float, default=0.0)
-    run.add_argument("--triple-swap-weekday", type=int, default=2, help="0=пн … 2=ср")
+    run.add_argument(
+        "--swap-long",
+        type=float,
+        default=None,
+        help="USD на 1 лот за ночь, знак MT5; по умолчанию пункты из спецификации",
+    )
+    run.add_argument("--swap-short", type=float, default=None)
+    run.add_argument(
+        "--triple-swap-weekday",
+        type=int,
+        default=None,
+        help="0=пн … 2=ср. Если задан, таблица множителей файла не используется",
+    )
+    run.add_argument(
+        "--session-shift",
+        choices=("captured", "winter", "auto"),
+        default="captured",
+        help="captured — окна дампа 2026-10-24; winter — +1ч на границах паузы; auto — +1ч вне летнего времени США",
+    )
     run.add_argument("--commission-per-lot-side", type=float, default=0.0, help="положительное число вычитается")
     run.add_argument("--risk-basis", choices=("balance", "equity"), default=None)
     run.add_argument("--warmup-m1", default=None, help="CSV M1 bid для прогрева баров до тиков")
+    run.add_argument("--warmup-dukascopy", default=None, help="каталог YYYY/MM/DD.bi5, свечи BID M1")
+    run.add_argument("--warmup-offset", type=float, default=None, help="сдвиг Dukascopy к уровню Exness, USD")
     run.add_argument("--bootstrap", type=int, default=2000)
     run.add_argument("--seed", type=int, default=1)
     run.add_argument("--no-close-at-end", action="store_true")
@@ -316,9 +478,28 @@ def main(argv: list[str] | None = None) -> None:
     cmp.add_argument("--exit-time-sec", type=float, default=5.0)
     cmp.add_argument("--price-tol", type=float, default=0.05)
     cmp.add_argument("--pair-price-tol", type=float, default=3.0)
+    cmp.add_argument(
+        "--profile",
+        choices=("strict", "aligned", "both"),
+        default=None,
+        help="strict: 2 с и 0.05; aligned: вход 5 с и 0.50 цены; both печатает оба",
+    )
     cmp.add_argument("--allow-holdout", action="store_true")
     cmp.add_argument("--out", default=None)
     cmp.set_defaults(func=_cmd_compare)
+
+    off = sub.add_parser("offset", help="медиана сдвига Exness − Dukascopy по M1 bid")
+    off.add_argument("--dukascopy", required=True)
+    off.add_argument("--ticks", nargs="+", required=True)
+    off.add_argument("--start", required=True)
+    off.add_argument("--to", required=True, help="последний день включительно")
+    off.add_argument(
+        "--session-shift",
+        choices=("captured", "winter", "auto"),
+        default="captured",
+    )
+    off.add_argument("--allow-holdout", action="store_true")
+    off.set_defaults(func=_cmd_offset)
 
     args = parser.parse_args(argv)
     raise SystemExit(args.func(args))

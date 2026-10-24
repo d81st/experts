@@ -110,7 +110,7 @@ def test_signal_uses_closed_bar_and_exits_after_n_bars():
 
 
 def test_pending_signal_waits_for_session_and_is_not_cleared_by_flat_bar():
-    """Зимой час 22 закрыт. Сигнал часа 21 ждёт 23:00 и не затирается нулём на часе 22."""
+    """Пауза дампа закрывает 22:00. Сигнал, закрывшийся в этот тик, ждёт 23:00."""
     day = msc(2026, 1, 15)
     ticks = [tick(day + hour * H1, 100.0) for hour in range(0, 21)]
     ticks.append(tick(day + 21 * H1, 110.0))

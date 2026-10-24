@@ -322,23 +322,52 @@ def test_swap_wednesday_triple_and_weekend_once():
     assert result.open_positions[0]["swap"] == pytest.approx(-1.56)
 
 
-def test_session_follows_new_york_break():
+def test_session_uses_captured_trade_windows():
+    """Дамп 2026-10-24, летние окна. По умолчанию зимний сдвиг не применяется."""
     session = ExnessGoldSession()
-    assert session.is_open(msc(2026, 1, 15, 21, 30))  # зима, пауза с 22:00
-    assert not session.is_open(msc(2026, 1, 15, 22, 30))
-    assert session.is_open(msc(2026, 1, 15, 23, 30))
-    assert not session.is_open(msc(2026, 6, 15, 21, 30))  # лето, пауза 21:00–22:00
-    assert session.is_open(msc(2026, 6, 15, 22, 30))
-    assert not session.is_open(msc(2026, 6, 13, 12))  # суббота
-    assert not session.is_open(msc(2026, 6, 14, 21, 30))  # воскресенье до открытия
-    assert session.is_open(msc(2026, 6, 14, 22, 30))
-    assert not session.is_open(msc(2026, 1, 18, 22, 30))  # зимнее воскресенье
-    assert session.is_open(msc(2026, 1, 18, 23, 30))
-    assert session.is_open(msc(2026, 3, 6, 21, 30))  # пятница ещё зима
-    assert not session.is_open(msc(2026, 3, 6, 22, 30))
-    assert not session.is_open(msc(2026, 3, 9, 21, 30))  # понедельник уже лето
+    # Понедельник 15 июня: открыто до 20:58, пауза до 22:01.
+    assert session.is_open(msc(2026, 6, 15, 20, 57))
+    assert not session.is_open(msc(2026, 6, 15, 20, 58))
+    assert not session.is_open(msc(2026, 6, 15, 22, 0))
+    assert session.is_open(msc(2026, 6, 15, 22, 1))
+    assert session.is_open(msc(2026, 6, 15, 0, 0))
+    # Пятница до 20:58, суббота закрыта, воскресенье с 22:05.
+    assert session.is_open(msc(2026, 6, 12, 20, 57))
+    assert not session.is_open(msc(2026, 6, 12, 20, 58))
+    assert not session.is_open(msc(2026, 6, 12, 22, 30))
+    assert not session.is_open(msc(2026, 6, 13, 12))
+    assert not session.is_open(msc(2026, 6, 14, 22, 4))
+    assert session.is_open(msc(2026, 6, 14, 22, 5))
+    # Январь при сдвиге captured остаётся в летних окнах дампа.
+    assert not session.is_open(msc(2026, 1, 15, 21, 30))
+    assert not session.is_open(msc(2026, 1, 15, 22, 0))
+    assert session.is_open(msc(2026, 1, 15, 22, 1))
     known = datetime(2026, 1, 15, tzinfo=timezone.utc)
     assert weekday_mon0(int(known.timestamp() * 1000)) == known.weekday()
+
+
+def test_session_winter_shift_moves_halt_edges_only():
+    winter = ExnessGoldSession(shift="winter")
+    assert winter.is_open(msc(2026, 1, 15, 0, 0))
+    assert winter.is_open(msc(2026, 1, 15, 21, 57))
+    assert not winter.is_open(msc(2026, 1, 15, 21, 58))
+    assert not winter.is_open(msc(2026, 1, 15, 23, 0))
+    assert winter.is_open(msc(2026, 1, 15, 23, 1))
+    assert not winter.is_open(msc(2026, 1, 18, 23, 4))  # воскресенье
+    assert winter.is_open(msc(2026, 1, 18, 23, 5))
+    assert winter.is_open(msc(2026, 1, 16, 21, 57))  # пятница
+    assert not winter.is_open(msc(2026, 1, 16, 21, 58))
+    assert not winter.is_open(msc(2026, 1, 17, 12))  # суббота
+
+    auto = ExnessGoldSession(shift="auto")
+    assert not auto.is_open(msc(2026, 1, 15, 22, 30))
+    assert auto.is_open(msc(2026, 1, 15, 23, 30))
+    assert not auto.is_open(msc(2026, 6, 15, 21, 30))
+    assert auto.is_open(msc(2026, 6, 15, 22, 30))
+    assert auto.is_open(msc(2026, 3, 6, 21, 30))  # пятница ещё зима США
+    assert not auto.is_open(msc(2026, 3, 6, 21, 58))
+    assert not auto.is_open(msc(2026, 3, 9, 20, 58))  # понедельник уже лето
+    assert auto.is_open(msc(2026, 3, 9, 22, 1))
 
 
 def test_indicators_hand_values():
