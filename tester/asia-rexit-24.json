@@ -1,0 +1,73 @@
+{
+  "expert": "hybrid/hybrid-asia-breakout_v1.1",
+  "symbols": [
+    "XAUUSDm",
+    "XAUUSD"
+  ],
+  "period": "M1",
+  "from": "2024.01.02",
+  "to": "2024.12.31",
+  "model": 1,
+  "delay": 200,
+  "deposit": 10000,
+  "currency": "USD",
+  "leverage": 2000,
+  "inputs": {
+    "RiskPercent": 1.0,
+    "EntryMode": 1,
+    "StopMode": 0,
+    "TradingTimeframe": 15
+  },
+  "variants": [
+    {
+      "name": "default-rr1.5-close20",
+      "inputs": {
+        "RiskReward": 1.5,
+        "CloseHour": 20
+      }
+    },
+    {
+      "name": "close20-notp",
+      "inputs": {
+        "RiskReward": 0,
+        "CloseHour": 20
+      }
+    },
+    {
+      "name": "tp3-hold120",
+      "inputs": {
+        "RiskReward": 3,
+        "CloseHour": 0,
+        "MaxHoldHours": 120
+      }
+    },
+    {
+      "name": "tp5-hold120",
+      "inputs": {
+        "RiskReward": 5,
+        "CloseHour": 0,
+        "MaxHoldHours": 120
+      }
+    },
+    {
+      "name": "part2-6be-hold120",
+      "inputs": {
+        "RiskReward": 6,
+        "CloseHour": 0,
+        "MaxHoldHours": 120,
+        "UsePartialClose": true,
+        "PartialAtRR": 2,
+        "PartialFraction": 0.5,
+        "PartialMoveToBE": true
+      }
+    },
+    {
+      "name": "tp5-nohold",
+      "inputs": {
+        "RiskReward": 5,
+        "CloseHour": 0,
+        "MaxHoldHours": 0
+      }
+    }
+  ]
+}
