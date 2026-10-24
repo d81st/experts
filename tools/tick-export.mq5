@@ -38,6 +38,8 @@ int    g_splits;
 int    g_handle;
 bool   g_history_ended;
 string g_history_ended_at;
+ulong  g_earliest_msc;
+ulong  g_probed_msc;
 
 //+------------------------------------------------------------------+
 string Ascii(const string s)
@@ -126,6 +128,7 @@ void WriteInfo(const bool ok, const string err)
    body += "point=" + point + "\n";
    body += "columns=" + COLUMNS + "\n";
    body += "history_ended_at=" + g_history_ended_at + "\n";
+   body += "earliest_tick_msc=" + (g_earliest_msc > 0 ? IntegerToString((long)g_earliest_msc) : "") + "\n";
    body += g_month_lines;
    const int h = FileOpen(INFO_FILE, FILE_WRITE | FILE_TXT | FILE_ANSI | FILE_COMMON);
    if(h == INVALID_HANDLE)
@@ -255,15 +258,19 @@ int CopyStable(const string sym, const ulong from_msc, const ulong to_msc,
   }
 
 //+------------------------------------------------------------------+
-// Первый тик с from_msc до конца истории брокера. 0 — тиков дальше нет.
+// Первый тик с from_msc до конца истории брокера.
+// 1 — тик найден, 0 — дальше тиков нет, -1 — ответ так и не стабилизировался.
+// Ноль сразу после старта часто значит «база ещё не пришла», поэтому
+// принимаем его только после нескольких одинаковых чтений.
 int ProbeFirst(const string sym, const ulong from_msc, ulong &found_msc)
   {
    found_msc = 0;
    int prev_n = -1;
    ulong prev_ms = 0;
    bool have_prev = false;
+   int zeros = 0;
    MqlTick ticks[];
-   for(int i = 0; i < 6; i++)
+   for(int i = 0; i < 16; i++)
      {
       ArrayFree(ticks);
       ResetLastError();
@@ -271,6 +278,8 @@ int ProbeFirst(const string sym, const ulong from_msc, ulong &found_msc)
       const int err = GetLastError();
       if(n < 0 || err != 0)
         {
+         zeros = 0;
+         have_prev = false;
          Sleep(2000);
          continue;
         }
@@ -279,18 +288,33 @@ int ProbeFirst(const string sym, const ulong from_msc, ulong &found_msc)
          ms = (ulong)ticks[0].time_msc;
       if(n > 0 && ms < from_msc)
         {
+         zeros = 0;
+         have_prev = false;
          Sleep(1000);
          continue;
         }
+      if(n == 0)
+        {
+         zeros++;
+         have_prev = false;
+         if(zeros >= 6)
+           {
+            found_msc = 0;
+            return 0;
+           }
+         Sleep(2000);
+         continue;
+        }
+      zeros = 0;
       if(have_prev && n == prev_n && ms == prev_ms)
         {
          found_msc = ms;
-         return n;
+         return 1;
         }
       prev_n = n;
       prev_ms = ms;
       have_prev = true;
-      Sleep(1500);
+      Sleep(1000);
      }
    return -1;
   }
@@ -396,6 +420,8 @@ void RememberMonth(const string month, const string file)
    g_month_lines += prefix + "empty_chunks=" + IntegerToString(g_empty) + "\n";
    g_month_lines += prefix + "splits=" + IntegerToString(g_splits) + "\n";
    g_month_lines += prefix + "file=" + file + "\n";
+   if(g_probed_msc > 0)
+      g_month_lines += prefix + "probed_first_msc=" + IntegerToString((long)g_probed_msc) + "\n";
   }
 
 //+------------------------------------------------------------------+
@@ -423,6 +449,7 @@ void ExportMonth(const datetime range_from, const datetime range_to_excl, const 
    g_errors = 0;
    g_empty = 0;
    g_splits = 0;
+   g_probed_msc = 0;
    const string file = "ticks_" + g_symbol + "_" + month + ".csv";
    if(!OpenMonth(file))
      {
@@ -444,6 +471,8 @@ void ExportMonth(const datetime range_from, const datetime range_to_excl, const 
       if(probe == 0 || (probe == 1 && found > to_msc))
         {
          g_empty++;
+         if(probe == 1 && found > to_msc)
+            g_probed_msc = found;
          if(probe == 0)
            {
             g_history_ended = true;
@@ -484,6 +513,8 @@ void OnStart()
    g_month_lines = "";
    g_history_ended = false;
    g_history_ended_at = "";
+   g_earliest_msc = 0;
+   g_probed_msc = 0;
    g_digits = 0;
    g_handle = INVALID_HANDLE;
    FolderCreate(OUT_DIR, FILE_COMMON);
@@ -529,6 +560,19 @@ void OnStart()
       Finish(false, "symbol_not_selected");
       return;
      }
+   // Сначала будим базу недавним тиком, затем спрашиваем самый старый тик с 2000 года.
+   // Это граница реальной истории, она может быть раньше запрошенного диапазона.
+   ulong wake_msc = 0;
+   datetime wake = TimeGMT() - 10 * 86400;
+   if(wake < D'2000.01.01')
+      wake = D'2000.01.01';
+   ProbeFirst(g_symbol, (ulong)wake * 1000, wake_msc);
+   ulong earliest = 0;
+   const ulong deep_from = (ulong)D'2000.01.01' * 1000;
+   const int earliest_rc = ProbeFirst(g_symbol, deep_from, earliest);
+   if(earliest_rc == 1 && earliest >= deep_from)
+      g_earliest_msc = earliest;
+   PrintFormat("tick-export: earliest_tick_msc=%I64u rc=%d", g_earliest_msc, earliest_rc);
    datetime cur = g_from;
    int guard = 0;
    while(cur < g_to_excl && guard < 120)

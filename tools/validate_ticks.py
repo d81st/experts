@@ -43,6 +43,7 @@ INFO_KEYS = {
     "point",
     "columns",
     "history_ended_at",
+    "earliest_tick_msc",
 }
 MONTH_FIELDS = {
     "rows",
@@ -52,6 +53,7 @@ MONTH_FIELDS = {
     "empty_chunks",
     "splits",
     "file",
+    "probed_first_msc",
 }
 SAFE_ERRORS = {
     "",
@@ -264,14 +266,13 @@ def validate_csv(path, month, symbol, gap_minutes, clip_start, clip_end):
                         stats["normal_closures"] += 1
                     elif kind == "anomaly":
                         stats["gap_anomalies"] += 1
-                        if len(stats["gap_examples"]) < 20:
-                            stats["gap_examples"].append(
-                                {
-                                    "from": format_server_time(prev_ms),
-                                    "to": format_server_time(ms),
-                                    "minutes": round((ms - prev_ms) / 60000, 3),
-                                }
-                            )
+                        stats["gap_examples"].append(
+                            {
+                                "from": format_server_time(prev_ms),
+                                "to": format_server_time(ms),
+                                "minutes": round((ms - prev_ms) / 60000, 3),
+                            }
+                        )
             if bid <= 0 or ask <= 0:
                 stats["nonpositive_price"] += 1
             elif bid > ask:
@@ -362,6 +363,15 @@ def package(raw_dir, out_dir, symbol, date_from, date_to, gap_minutes):
         digits = None
     else:
         digits = int(digits)
+    earliest_msc = None
+    earliest_tick = None
+    raw_earliest = info.get("earliest_tick_msc", "")
+    if raw_earliest != "":
+        if not re.fullmatch(r"\d+", raw_earliest):
+            failures.append("earliest_tick_msc is not a number")
+        else:
+            earliest_msc = int(raw_earliest)
+            earliest_tick = format_server_time(earliest_msc)
 
     months = []
     seen_data = False
@@ -389,6 +399,13 @@ def package(raw_dir, out_dir, symbol, date_from, date_to, gap_minutes):
             value = _int_field(reported, month, field, []) if reported else None
             if value is not None:
                 stats[field] = value
+        probed = reported.get(month, {}).get("probed_first_msc", "")
+        if probed != "":
+            if not re.fullmatch(r"\d+", probed):
+                failures.append(f"{month}: probed_first_msc is not a number")
+            else:
+                stats["probed_first_msc"] = int(probed)
+                stats["probed_first_timestamp"] = format_server_time(int(probed))
         first = reported.get(month, {}).get("first_time_msc", "")
         last = reported.get(month, {}).get("last_time_msc", "")
         if stats["row_count"] and first not in ("", str(stats["first_time_msc"])):
@@ -476,6 +493,8 @@ def package(raw_dir, out_dir, symbol, date_from, date_to, gap_minutes):
         "warnings": warnings,
         "terminal_build": build,
         "broker_company": terminal["broker_company"],
+        "earliest_tick_msc": earliest_msc,
+        "earliest_tick": earliest_tick,
         "months": months,
     }
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="ascii")
@@ -485,7 +504,7 @@ def package(raw_dir, out_dir, symbol, date_from, date_to, gap_minutes):
     return validation
 
 
-def _write_info(path, symbol, date_from, date_to, months, build=4120):
+def _write_info(path, symbol, date_from, date_to, months, build=4120, earliest=""):
     excl = datetime.strptime(date_to, "%Y-%m-%d") + timedelta(days=1)
     lines = [
         "complete=1",
@@ -504,6 +523,8 @@ def _write_info(path, symbol, date_from, date_to, months, build=4120):
         "columns=" + HEADER,
         "history_ended_at=",
     ]
+    if earliest != "":
+        lines.append("earliest_tick_msc=" + str(earliest))
     for month, rows, first, last in months:
         lines.append(f"month.{month}.rows={rows}")
         lines.append(f"month.{month}.first_time_msc={'' if first is None else first}")
@@ -583,9 +604,17 @@ def self_test():
         _csv(raw / f"ticks_{symbol}_{month}.csv", rows)
         first = at(wed, 20, 56, 0)
         last = at(wed, 22, 2, 30)
-        _write_info(raw / "export_info.txt", symbol, "2026-09-01", "2026-09-30", [(month, len(rows), first, last)])
+        _write_info(
+            raw / "export_info.txt",
+            symbol,
+            "2026-09-01",
+            "2026-09-30",
+            [(month, len(rows), first, last)],
+            earliest=1788220800106,
+        )
         result = package(raw, out, symbol, "2026-09-01", "2026-09-30", 5)
         _expect(result["ok"], "clean month should pass: " + "; ".join(result["hard_failures"]))
+        _expect(result["earliest_tick"] == "2026-09-01 00:00:00.106", "earliest tick is formatted")
         _expect(result["months"][0]["gap_anomalies"] == 0, "closures are not anomalies")
         _expect(result["months"][0]["normal_closures"] == 1, "daily break")
         _expect(result["months"][0]["repeated_time_msc"] == 1, "same millisecond, different price")
@@ -596,6 +625,27 @@ def self_test():
         _expect(manifest["files"][0]["row_count"] == len(rows), "manifest rows")
         _expect(manifest["terminal_build"] == 4120, "build")
         _expect("login" not in (out / "manifest.json").read_text(encoding="ascii"), "no login field")
+
+        gap_rows = []
+        cursor_ms = at(wed, 12, 0)
+        for _ in range(22):
+            gap_rows.append(_tick(cursor_ms))
+            cursor_ms += 10 * 60 * 1000
+        raw_g = root / "rawg"
+        out_g = root / "outg"
+        raw_g.mkdir()
+        _csv(raw_g / f"ticks_{symbol}_{month}.csv", gap_rows)
+        _write_info(
+            raw_g / "export_info.txt",
+            symbol,
+            "2026-09-01",
+            "2026-09-30",
+            [(month, len(gap_rows), int(gap_rows[0].split(",")[0]), int(gap_rows[-1].split(",")[0]))],
+        )
+        listed = package(raw_g, out_g, symbol, "2026-09-01", "2026-09-30", 5)
+        _expect(listed["ok"], "gap list still validates: " + "; ".join(listed["hard_failures"]))
+        _expect(listed["months"][0]["gap_anomalies"] == 21, "21 intraday gaps")
+        _expect(len(listed["months"][0]["gap_examples"]) == 21, "every gap is kept")
 
         raw2 = root / "raw2"
         out2 = root / "out2"

@@ -310,12 +310,15 @@ jobs:
             if ($v.ok) { $lines.Add("**Validation passed.**") } else { $lines.Add("**Validation failed.**") }
             $lines.Add("")
             if ($v.history_starts) { $lines.Add("First month with ticks: ``$($v.history_starts)``.") }
+            if ($v.earliest_tick) { $lines.Add("Earliest tick returned from 2000-01-01: ``$($v.earliest_tick)``.") }
             if ($v.terminal_build) { $lines.Add("Terminal build: $($v.terminal_build). Broker: $($v.broker_company).") }
             $lines.Add("")
-            $lines.Add("| Month | Rows | First | Last | bid>ask | zero | identical | gaps |")
-            $lines.Add("|---|---:|---|---|---:|---:|---:|---:|")
+            $lines.Add("| Month | Rows | First | Last | bid>ask | zero | identical | gaps | repeated ms |")
+            $lines.Add("|---|---:|---|---|---:|---:|---:|---:|---:|")
             foreach ($m in @($v.months)) {
-              $lines.Add("| $($m.month) | $($m.row_count) | $($m.first_timestamp) | $($m.last_timestamp) | $($m.bid_gt_ask) | $($m.nonpositive_price) | $($m.identical_rows) | $($m.gap_anomalies) |")
+              $first = $m.first_timestamp
+              if (-not $first -and $m.probed_first_timestamp) { $first = "probe $($m.probed_first_timestamp)" }
+              $lines.Add("| $($m.month) | $($m.row_count) | $first | $($m.last_timestamp) | $($m.bid_gt_ask) | $($m.nonpositive_price) | $($m.identical_rows) | $($m.gap_anomalies) | $($m.repeated_time_msc) |")
             }
             $lines.Add("")
             $lines.Add("SHA-256 is of the gzip bytes:")
@@ -340,12 +343,10 @@ jobs:
             $gapShown = 0
             foreach ($m in @($v.months)) {
               foreach ($g in @($m.gap_examples)) {
-                if ($gapShown -eq 0) { $lines.Add(""); $lines.Add("Gap examples (server clock):") }
+                if ($gapShown -eq 0) { $lines.Add(""); $lines.Add("Gaps outside normal closures (server clock):") }
                 $lines.Add("- $($m.month) $($g.from) -> $($g.to) ($($g.minutes) min)")
                 $gapShown++
-                if ($gapShown -ge 15) { break }
               }
-              if ($gapShown -ge 15) { break }
             }
           }
           $lines.Add("")

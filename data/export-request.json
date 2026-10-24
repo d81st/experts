@@ -1,9 +1,9 @@
 {
   "run": true,
   "symbol": "XAUUSDm",
-  "from": "2026-09-01",
-  "to": "2026-09-30",
+  "from": "2024-01-01",
+  "to": "2024-01-31",
   "gap_minutes": 5,
   "publish_release": false,
-  "note": "september-2026"
+  "note": "discover-earliest"
 }
