@@ -25,7 +25,7 @@ from .dukascopy_bars import (
 from .engine import Engine, EngineConfig
 from .metrics import compute_metrics, format_metrics_ru, period_metrics
 from .session import ExnessGoldSession
-from .strategies.alchemist import AlchemistConfig, AlchemistStrategy, h1_x12_st
+from .strategies.alchemist import AlchemistConfig, AlchemistStrategy, h1_x12_st, long_x24
 from .strategies.asia_breakout import AsiaBreakoutStrategy, code_defaults, trend_filter
 from .symbol_spec import CapturedSymbol, load_xauusdm
 from .ticks import iter_ticks, load_hour_spread
@@ -260,10 +260,15 @@ def _cmd_alchemist(args: argparse.Namespace) -> int:
         sample_tf = cfg.timeframe
         overshoot = cfg.max_risk_overshoot
     else:
-        cfg = h1_x12_st()
+        cfg = long_x24() if getattr(args, "preset", "defaults") == "long-x24" else h1_x12_st()
         if args.risk_basis:
             cfg = AlchemistConfig(**{**cfg.__dict__, "risk_basis": args.risk_basis})
-        strategy = AlchemistStrategy(cfg, digits=spec.digits, adjusted_point=spec.adjusted_point)
+        guard = None
+        if getattr(args, "risk_guard", False):
+            from .risk_guard import RiskGuard
+
+            guard = RiskGuard(store_path=args.risk_guard_file)
+        strategy = AlchemistStrategy(cfg, digits=spec.digits, adjusted_point=spec.adjusted_point, guard=guard)
         sample_tf = cfg.timeframe
         overshoot = cfg.max_risk_overshoot
     engine = Engine(
@@ -412,6 +417,35 @@ def _cmd_alchemist(args: argparse.Namespace) -> int:
         warmup_note["d1"] = _d1_history_note(engine, warmup_m1, trade_from, end_msc)
         metrics["warmup"] = warmup_note
     metrics["strategy_counts"] = result.strategy_counts
+    if args.cmd != "asia":
+        from .risk_guard import (
+            BEAR_SMA_PERIOD,
+            DAILY_LOSS_PERCENT,
+            MAX_DRAWDOWN_PERCENT,
+            RISK_PERCENT,
+            SPREAD_MEDIAN_MULT,
+            SPREAD_MEDIAN_SAMPLES,
+            STALE_QUOTE_SECONDS,
+        )
+
+        enabled = bool(getattr(args, "risk_guard", False))
+        metrics["risk_guard"] = {
+            "enabled": enabled,
+            "preset": getattr(args, "preset", "defaults"),
+            "trade_side": cfg.trade_side,
+            "exit_bars": cfg.exit_bars,
+            "risk_percent_input": cfg.risk_percent,
+            "rules": None if not enabled else {
+                "risk_percent": RISK_PERCENT,
+                "refuse_below_min_lot": True,
+                "daily_loss_percent": DAILY_LOSS_PERCENT,
+                "max_drawdown_percent": MAX_DRAWDOWN_PERCENT,
+                "bear_sma_period": BEAR_SMA_PERIOD,
+                "spread_median_mult": SPREAD_MEDIAN_MULT,
+                "spread_median_samples": SPREAD_MEDIAN_SAMPLES,
+                "stale_quote_seconds": STALE_QUOTE_SECONDS,
+            },
+        }
     if hasattr(strategy, "decisions"):
         metrics["decisions"] = [
             {"time": _iso(row["time_msc"]), "event": row["event"], "sig": row["sig"], "day": row["day"]}
@@ -647,6 +681,9 @@ def main(argv: list[str] | None = None) -> None:
         help="auto — зима/лето по DST США; captured — окна дампа как есть; winter — всегда +1ч",
     )
     run.add_argument("--commission-per-lot-side", type=float, default=0.0, help="положительное число вычитается")
+    run.add_argument("--preset", choices=("defaults", "long-x24"), default="defaults")
+    run.add_argument("--risk-guard", action="store_true", help="включить страж счёта с фиксированными порогами")
+    run.add_argument("--risk-guard-file", default=None, help="файл kill/пика/суток стража")
     run.add_argument("--risk-basis", choices=("balance", "equity"), default=None)
     run.add_argument("--warmup-m1", default=None, help="CSV M1 bid для прогрева баров до тиков")
     run.add_argument("--warmup-dukascopy", default=None, help="каталог YYYY/MM/DD.bi5, свечи BID M1")

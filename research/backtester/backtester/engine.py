@@ -176,8 +176,13 @@ class _Context:
     def equity(self) -> float:
         return self._engine._equity(self._engine.tick)
 
+    @property
+    def symbol(self):
+        return self._engine.spec
+
     def size_for_risk(
-        self, stop_distance: float, risk_percent: float, basis: str = "equity", max_risk_overshoot: float | None = None,
+        self, stop_distance: float, risk_percent: float, basis: str = "equity",
+        max_risk_overshoot: float | None = None, refuse_below_min: bool = False,
     ) -> float:
         if basis == "equity":
             capital = self.equity
@@ -197,6 +202,7 @@ class _Context:
             volume_max=spec.volume_max,
             volume_step=spec.volume_step,
             max_risk_overshoot=overshoot,
+            refuse_below_min=refuse_below_min,
         )
 
     def buy_market(self, volume, sl, tp, comment=""):

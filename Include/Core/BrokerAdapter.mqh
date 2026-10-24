@@ -103,11 +103,15 @@ ENUM_ORDER_TYPE_FILLING BrokerGetFillType(void);
 //    maxRiskOvershoot > 0: если даже минимальный
 //    лот рискует больше riskMoney * maxRiskOvershoot — возвращается 0,
 //    и вызывающий EA должен пропустить сделку. 0 — проверка выключена.
+//    refuseBelowMin: пол до шага ниже минимального лота не поднимается
+//    до минимума, возвращается 0. По умолчанию выключено — старые боты
+//    по-прежнему поднимают лот до минимума.
 double BrokerCalcLot(const BrokerContext     &ctx,
                      const double             riskPercent,
                      const double             slPoints,
                      const ENUM_LOT_STRATEGY  strategy,
-                     const double             maxRiskOvershoot = 0.0);
+                     const double             maxRiskOvershoot = 0.0,
+                     const bool               refuseBelowMin = false);
 
 //--- Принуждение минимальной SL-дистанции.
 //    Если |entry - sl| < ctx.minBrokerDistance — модифицирует
@@ -206,7 +210,8 @@ double BrokerCalcLot(const BrokerContext     &ctx,
                      const double             riskPercent,
                      const double             slPoints,
                      const ENUM_LOT_STRATEGY  strategy,
-                     const double             maxRiskOvershoot)
+                     const double             maxRiskOvershoot,
+                     const bool               refuseBelowMin)
   {
    const double balance   = AccountInfoDouble(ACCOUNT_BALANCE);
    const double riskMoney = balance * riskPercent / 100.0;
@@ -223,10 +228,10 @@ double BrokerCalcLot(const BrokerContext     &ctx,
       //--- защита от деления на 0 / невалидного SL.
       //    Возврат volMin.
       if(slPoints <= 0.0 || tickValue == 0.0 || tickSize == 0.0)
-         return volMin;
+         return refuseBelowMin ? 0.0 : volMin;
       const double moneyPerLot = (slPoints * ctx.adjustedPoint / tickSize) * tickValue;
       if(moneyPerLot <= 0.0)
-         return volMin;
+         return refuseBelowMin ? 0.0 : volMin;
       lot = riskMoney / moneyPerLot;
 
       //--- минимальный лот рискует слишком много — сделку пропускаем.
@@ -248,7 +253,12 @@ double BrokerCalcLot(const BrokerContext     &ctx,
    //    меньше volMin, его необходимо поднять обратно до volMin.
    if(volStep > 0.0)
       lot = MathFloor(lot / volStep) * volStep;
-   if(lot < volMin) lot = volMin;
+   if(lot < volMin)
+     {
+      if(refuseBelowMin)
+         return 0.0;
+      lot = volMin;
+     }
    if(lot > volMax) lot = volMax;
    return lot;
   }

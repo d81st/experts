@@ -58,6 +58,7 @@ jobs:
           $failed = 0
           $summary = @("| Файл | Ошибки | Предупреждения |", "|---|---|---|")
           # Боты в корне и в папках hybrid/ (рабочие) и archive/ (старые).
+          # tools/risk-guard.mq5 тянет Include/Core/RiskGuard.mqh: это проверка компиляции стража.
           $files = @(Get-ChildItem $env:GITHUB_WORKSPACE -Filter *.mq5)
           foreach ($d in @("hybrid", "archive", "tools")) { $files += @(Get-ChildItem "$env:GITHUB_WORKSPACE\$d" -Filter *.mq5 -ErrorAction SilentlyContinue) }
           foreach ($f in $files) {

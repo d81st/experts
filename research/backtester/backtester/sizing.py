@@ -10,6 +10,8 @@
 Если минимальный лот рискует больше, чем risk * max_risk_overshoot,
 возвращается 0 — сделку надо пропустить, как делает советник.
 max_risk_overshoot <= 0 отключает эту проверку (в MQL порог строго > 0).
+refuse_below_min не поднимает пол до шага до минимального лота: такой
+лот — 0. По умолчанию выключено, старый подъём до минимума сохраняется.
 """
 
 from __future__ import annotations
@@ -34,6 +36,7 @@ def size_by_risk(
     volume_max: float,
     volume_step: float,
     max_risk_overshoot: float = 1.5,
+    refuse_below_min: bool = False,
 ) -> float:
     values = {
         "capital": capital,
@@ -72,6 +75,8 @@ def size_by_risk(
     steps = math.floor(raw / volume_step + 1e-8)
     lot = steps * volume_step
     if lot < volume_min:
+        if refuse_below_min:
+            return 0.0
         lot = volume_min
     if lot > volume_max:
         lot = volume_max

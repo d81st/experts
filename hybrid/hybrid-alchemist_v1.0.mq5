@@ -21,6 +21,7 @@
 #include "../Include/Core/PositionGuard.mqh"
 #include "../Include/Core/TradeExecutor.mqh"
 #include "../Include/Core/AccountRisk.mqh"
+#include "../Include/Core/RiskGuard.mqh"
 #include "../Include/Exits/Trailing/SyncTrail.mqh"
 #include "../Include/Exits/Trailing/BreakevenTrail.mqh"
 #include "../Include/Exits/Trailing/TrailingDispatcher.mqh"
@@ -100,6 +101,10 @@ input double MaxSpreadToSL    = 0.10;
 input double MaxSlippageToSL  = 0.10;
 input bool   CloseOnSlippage  = false; // Вход по рынку исполнился хуже допуска — сразу закрыть
 
+input group "── Страж счёта (по умолчанию выключен) ──"
+input bool   UseRiskGuard   = false; // 0.5%, сутки −2%, kill −15%, D1<SMA200, отказ на плохой котировке
+input bool   RiskGuardReset = false; // Один запуск: снять kill. Пик не сдвигается. Потом вернуть false.
+
 input group "── Трейлинг (по умолчанию выключен) ──"
 input ENUM_TRAILING_MODE_EX TrailingMode          = TRAILING_OFF_EX;
 input double                TrailingStartFactor   = 0.5;
@@ -118,7 +123,7 @@ bool               g_pending = false;   // новый бар есть, но ры
 int                g_pendSig = 0;
 int                g_pendDay = 0;       // тренд D1 на закрытии сигнального бара
 int                g_atr     = INVALID_HANDLE;
-int g_cntSignals = 0, g_cntBusy = 0, g_cntSide = 0, g_cntRegime = 0, g_cntNews = 0, g_cntTrades = 0, g_cntDay = 0, g_cntAcct = 0;
+int g_cntSignals = 0, g_cntBusy = 0, g_cntSide = 0, g_cntRegime = 0, g_cntNews = 0, g_cntTrades = 0, g_cntDay = 0, g_cntAcct = 0, g_cntGuard = 0;
 int g_cntExitBars = 0, g_cntExitOpp = 0;
 
 void Enter(const int dir)
@@ -131,10 +136,27 @@ void Enter(const int dir)
    const double dist  = MathMax(StopAtrMult * atr[0], MinSLPoints * pt);
    const double sl    = NormalizeDouble(entry - dir * dist, _Digits);
    const double tp    = (RiskReward > 0.0) ? NormalizeDouble(entry + dir * RiskReward * dist, _Digits) : 0.0;
-   const double lot   = BrokerCalcLot(g_broker, RiskPercent, dist / pt, LOT_BY_TICK_VALUE, MaxRiskOvershoot);
+   if(UseRiskGuard)
+     {
+      const int block = RiskGuardBlock(dir, entry, sl);
+      if(block != RG_OK)
+        {
+         g_cntGuard++;
+         PrintFormat("⏭ Страж: %s", RiskGuardReason(block));
+         return;
+        }
+     }
+   const double riskPct = UseRiskGuard ? RG_RISK_PERCENT : RiskPercent;
+   const double lot     = BrokerCalcLot(g_broker, riskPct, dist / pt, LOT_BY_TICK_VALUE, MaxRiskOvershoot, UseRiskGuard);
    if(lot <= 0.0)
      {
-      PrintFormat("⏭ Пропуск: стоп %.2f USD — мин. лот рискует > %.1f%% баланса", dist, RiskPercent * MaxRiskOvershoot);
+      if(UseRiskGuard)
+        {
+         g_cntGuard++;
+         Print("⏭ Страж: лот ниже минимального, подъёма до минимума нет");
+        }
+      else
+         PrintFormat("⏭ Пропуск: стоп %.2f USD — мин. лот рискует > %.1f%% баланса", dist, RiskPercent * MaxRiskOvershoot);
       return;
      }
    double openPct, newPct;
@@ -227,15 +249,26 @@ int OnInit()
    g_regime.threshold = RegimeThreshold;
    if(AvoidNewsMinutes > 0)
       NewsBuildList(NewsNFP, NewsCPI, NewsFOMC, NewsISM, NewsExtraTimes, g_news);
+   if(UseRiskGuard)
+     {
+      RiskGuardConfigure(MagicNumber, _Symbol);
+      RiskGuardLoad();
+      if(RiskGuardReset)
+        {
+         RiskGuardResetKill();
+         Print("Страж: kill снят вручную, пик не сдвинут");
+        }
+     }
 
-   PrintFormat("✅ Hybrid Alchemist v1.0 | Magic:%d TF:%s | SMA%d%s%s%s%s | выход %d бар%s | стоп %.1f×ATR(%d) | новости ±%d мин",
+   PrintFormat("✅ Hybrid Alchemist v1.0 | Magic:%d TF:%s | SMA%d%s%s%s%s | выход %d бар%s | стоп %.1f×ATR(%d) | новости ±%d мин%s",
                MagicNumber, EnumToString(TradingTimeframe), MaPeriod,
                UseHma ? StringFormat(" + HMA%d", HmaPeriod) : "",
                UseCci ? StringFormat(" + CCI%d ±%.0f", CciPeriod, CciLevel) : "",
                UseHtf ? StringFormat(" + %s EMA%d", EnumToString(HtfTimeframe), HtfEmaPeriod) : "",
                DayTrendFilter == DAY_TREND_STRUCTURE ? StringFormat(" + структура D1 (%d)", DayStructureLen) :
                DayTrendFilter == DAY_TREND_EMA ? StringFormat(" + D1 EMA%d", DayEmaPeriod) : "",
-               ExitBars, ExitOnOpposite ? " / встречный сигнал" : "", StopAtrMult, AtrPeriod, AvoidNewsMinutes);
+               ExitBars, ExitOnOpposite ? " / встречный сигнал" : "", StopAtrMult, AtrPeriod, AvoidNewsMinutes,
+               UseRiskGuard ? " | страж вкл." : "");
    return INIT_SUCCEEDED;
   }
 
@@ -245,6 +278,8 @@ void OnDeinit(const int reason)
                "новостями: %d, общим риском счёта: %d | сделок: %d | выходов через N баров: %d, по встречному сигналу: %d",
                g_cntSignals, g_cntBusy, g_cntDay, g_cntSide, g_cntRegime, g_cntNews, g_cntAcct, g_cntTrades,
                g_cntExitBars, g_cntExitOpp);
+   if(UseRiskGuard)
+      PrintFormat("📊 Страж отклонил входов: %d", g_cntGuard);
    AlchemistRelease(g_sig);
    if(g_atr != INVALID_HANDLE)
       IndicatorRelease(g_atr);
@@ -257,6 +292,8 @@ void OnDeinit(const int reason)
 
 void OnTick()
   {
+   if(UseRiskGuard)
+      RiskGuardOnTick();
    TrailingManage(g_trade_adapter, g_broker, MagicNumber, g_trail_cfg);
    // Сигнал считаем на каждом новом баре, даже если торговля закрыта (котировки золота идут
    // до ~22:00, а торговая сессия закрывается около 21:00): вход — на первом тике после открытия.

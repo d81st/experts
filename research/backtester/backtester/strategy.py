@@ -38,8 +38,12 @@ class Context(Protocol):
     @property
     def equity(self) -> float: ...
 
+    @property
+    def symbol(self): ...
+
     def size_for_risk(
-        self, stop_distance: float, risk_percent: float, basis: str = "equity", max_risk_overshoot: float | None = None,
+        self, stop_distance: float, risk_percent: float, basis: str = "equity",
+        max_risk_overshoot: float | None = None, refuse_below_min: bool = False,
     ) -> float: ...
 
     def buy_market(self, volume: float, sl: float | None, tp: float | None, comment: str = "") -> int | None: ...

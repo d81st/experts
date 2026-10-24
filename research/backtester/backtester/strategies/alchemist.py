@@ -25,6 +25,9 @@
 Сознательно не включено, потому что у h1-x12-st это выключено и код бы
 притворился, что фильтр работает: режим рынка, новости, трейлинг,
 закрытие по проскальзыванию. Если их включить в конфиге, порт падает.
+
+Страж счёта (risk_guard.py) по умолчанию не подключён. С флагом прогона
+он режет только новые входы и не закрывает позицию.
 """
 
 from __future__ import annotations
@@ -35,6 +38,7 @@ import bisect
 
 from ..bars import TF_MS, align_open
 from ..indicators import cci_at, ema_series, hma_last_two, sma_at, sma_atr_last
+from ..risk_guard import RISK_PERCENT, MarketView, RiskGuard
 from ..structure import d1_trend
 from ..types import ConfigError, round_price
 from ..strategy import Context
@@ -96,6 +100,14 @@ def h1_x12_st() -> AlchemistConfig:
     return AlchemistConfig()
 
 
+def long_x24() -> AlchemistConfig:
+    """Кандидат: заводские параметры, кроме стороны LONG и выхода через 24 бара.
+
+    Страж к пресету не пришит: его включает отдельный флаг прогона.
+    """
+    return AlchemistConfig(trade_side="long", exit_bars=24)
+
+
 def bar_age(closed_opens: list[int], forming_open: int | None, entry_msc: int, tf_ms: int) -> int:
     """iBarShift(время входа): сколько баров отделяют текущий бар от бара входа."""
     entry_open = align_open(entry_msc, tf_ms)
@@ -105,10 +117,17 @@ def bar_age(closed_opens: list[int], forming_open: int | None, entry_msc: int, t
 
 
 class AlchemistStrategy:
-    def __init__(self, config: AlchemistConfig | None = None, digits: int = 3, adjusted_point: float = 0.001):
+    def __init__(
+        self,
+        config: AlchemistConfig | None = None,
+        digits: int = 3,
+        adjusted_point: float = 0.001,
+        guard: RiskGuard | None = None,
+    ):
         self.cfg = config if config is not None else h1_x12_st()
         self.digits = digits
         self.adjusted_point = adjusted_point
+        self.guard = guard
         self.pending = False
         self.pending_sig = 0
         self.pending_day = 0
@@ -123,6 +142,8 @@ class AlchemistStrategy:
             out.append(self.cfg.htf)
         if self.cfg.day_trend != "off" and "D1" not in out:
             out.append("D1")
+        if self.guard is not None and "D1" not in out:
+            out.append("D1")
         return out
 
     def on_start(self, ctx: Context) -> None:
@@ -134,8 +155,27 @@ class AlchemistStrategy:
         self._on_new_bar(ctx)
 
     def on_tick(self, ctx: Context, tick) -> None:
+        if self.guard is not None:
+            self.guard.observe(ctx.now_msc(), ctx.equity, tick.bid, tick.ask)
         if self.pending:
             self._try_act(ctx)
+
+    def _market_view(self, ctx: Context) -> MarketView:
+        spec = ctx.symbol
+        tick = ctx.tick()
+        return MarketView(
+            point=spec.point,
+            contract_size=spec.contract_size,
+            tick_size=spec.tick_size,
+            tick_value=spec.tick_value,
+            volume_min=spec.volume_min,
+            volume_max=spec.volume_max,
+            volume_step=spec.volume_step,
+            stops_level=spec.stops_level,
+            freeze_level=spec.freeze_level,
+            bid=tick.bid,
+            ask=tick.ask,
+        )
 
     def _bump(self, name: str) -> None:
         self.counts[name] = self.counts.get(name, 0) + 1
@@ -242,19 +282,36 @@ class AlchemistStrategy:
         tp = None
         if self.cfg.risk_reward > 0.0:
             tp = round_price(entry + direction * self.cfg.risk_reward * dist, self.digits)
+        risk_percent = self.cfg.risk_percent
+        refuse_below_min = False
+        if self.guard is not None:
+            decision = self.guard.decision(
+                self._market_view(ctx),
+                side=direction,
+                entry=entry,
+                sl=sl,
+                d1_closes=[bar.close for bar in ctx.bars("D1")],
+            )
+            if not decision.allowed or decision.close:
+                self._bump("guard_" + decision.reason)
+                self._note(ctx, "guard_" + decision.reason, direction)
+                return
+            risk_percent = RISK_PERCENT
+            refuse_below_min = True
         try:
             lot = ctx.size_for_risk(
                 dist,
-                self.cfg.risk_percent,
+                risk_percent,
                 basis=self.cfg.risk_basis,
                 max_risk_overshoot=self.cfg.max_risk_overshoot,
+                refuse_below_min=refuse_below_min,
             )
         except Exception:
             self._bump("sizing_error")
             raise
         if lot <= 0.0:
-            self._bump("sizing")
-            self._note(ctx, "sizing", direction)
+            self._bump("guard_lot" if self.guard is not None else "sizing")
+            self._note(ctx, "guard_lot" if self.guard is not None else "sizing", direction)
             return
         if direction == 1:
             order_id = ctx.buy_market(lot, sl, tp, self.cfg.comment)
