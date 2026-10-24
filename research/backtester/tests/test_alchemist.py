@@ -110,16 +110,24 @@ def test_signal_uses_closed_bar_and_exits_after_n_bars():
 
 
 def test_time_exit_reenters_on_the_same_tick_while_close_is_latent():
-    """ExitBars и новый сигнал в одном OnTick. Задержка сдвигает обе цены.
+    """ExitBars и новый сигнал в одном OnTick. Задержки идут одна за другой.
 
-    MQL: PositionClose, затем PositionGuardHasOpen. В тестере закрытие
-    возвращается до проверки, поэтому busy не съедает повторный вход.
-    Цена и время обеих сделок — первый тик не раньше submit+latency.
+    MQL: PositionClose, затем PositionGuardHasOpen. Закрытие возвращается
+    до проверки, поэтому busy не съедает повторный вход. Цена закрытия —
+    котировка строго раньше submit+latency. Вход отсчитывает ещё одну
+    задержку от этого срока, а стоп переносится на котировку закрытия.
     """
     base = msc(2026, 6, 1)
     prices = (100, 100, 110, 110, 120, 120, 130)
     ticks = []
+    open5 = base + 5 * H1
     for hour, bid in enumerate(prices):
+        if hour == 5:
+            # Заявка на +0. Закрытие в +200 по тику +100, вход в +400 по тику +350.
+            # Тики +250 и +450 только проявляют срок и в цену не входят.
+            for offset, step_bid in ((0, 120), (100, 121), (250, 122), (350, 125), (450, 129)):
+                ticks.append(tick(open5 + offset, step_bid))
+            continue
         ticks.append(tick(base + hour * H1, bid))
         ticks.append(tick(base + hour * H1 + 200, bid))
 
@@ -140,13 +148,15 @@ def test_time_exit_reenters_on_the_same_tick_while_close_is_latent():
     assert closed.side == 1
     assert closed.exit_reason == "time"
     assert closed.entry_time_msc == base + 3 * H1 + 200
-    assert closed.exit_time_msc == base + 5 * H1 + 200
-    assert closed.exit_price == 120
+    assert closed.exit_time_msc == open5 + 200
+    assert closed.exit_price == 121
     assert len(result.open_positions) == 1
     opened = result.open_positions[0]
     assert opened["side"] == 1
-    assert opened["entry_time_msc"] == base + 5 * H1 + 200
-    assert opened["entry_price"] == 120.2
+    assert opened["entry_time_msc"] == open5 + 400
+    assert opened["entry_price"] == 125.2
+    # Стоп посчитан от ask 120.2 (дистанция 10) и перенесён на ask 121.2.
+    assert opened["sl"] == pytest.approx(111.2)
     assert strategy.counts.get("busy", 0) == 0
     assert strategy.counts.get("trades") == 2
     assert strategy.counts.get("exit_bars") == 1

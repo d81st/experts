@@ -6,11 +6,14 @@
 2. Своп за полночи между предыдущим тиком и этой пачкой (только уже открытые).
 3. SL/TP позиций, открытых раньше. Отрезок от прошлой цены до всех цен пачки.
    Если достижимы и стоп, и тейк — стоп.
-4. По каждому тику пачки: добрать заявки, которым вышел срок задержки;
-   отдать стратегии закрытые бары (на первом тике) и on_tick;
-   добрать заявки с нулевой задержкой по этой же котировке;
-   проверить SL/TP у только что открытых — только по ценам начиная с тика входа,
-   без отрезка «до позиции».
+4. По каждому тику пачки: добрать заявки, у которых submit+latency уже наступил.
+   Рынок и PositionClose исполняются по последней котировке строго раньше
+   этого срока, ещё до применения самого тика. Второй OrderSend в том же
+   тике считает свою задержку от исполнения первого: так PositionClose
+   возвращается, и Enter читает уже сдвинутую котировку.
+   Дальше — закрытые бары (на первом тике) и on_tick, затем заявки
+   с нулевой задержкой по этой же котировке, затем SL/TP только что
+   открытых по ценам начиная с тика входа.
 5. Просадка по средствам обновляется на каждом тике и не зависит от того,
    какие точки кривой записаны на диск.
 """
@@ -33,6 +36,7 @@ from .types import (
     SymbolSpec,
     Tick,
     Trade,
+    round_price,
 )
 
 
@@ -103,6 +107,10 @@ class _Order:
     penetration: float
     close_pos_id: int | None = None
     close_reason: str = ""
+    # Котировка, от которой стратегия посчитала SL/TP. После PositionClose
+    # тестер читает Bid/Ask заново, и стоп переносится на эту дистанцию.
+    anchor: float | None = None
+    reanchor: bool = False
 
 
 @dataclass
@@ -142,11 +150,13 @@ class _Context:
     def position(self) -> _View | None:
         """Открытая позиция, как PositionsTotal после возврата из OrderSend.
 
-        Закрытие уже отправленное в этом тике сюда не попадает: в тестере
-        PositionClose возвращает управление, когда позиции уже нет, а цена
-        исполнения берётся с тика после задержки. Пока заявка на выход
-        ждёт этой цены, стратегия видит счёт без этой позиции и может
-        открыть следующую в том же OnTick.
+        Закрытие, уже отправленное в этом тике, сюда не попадает.
+        PositionClose в тестере возвращает управление после своей задержки,
+        когда позиции уже нет. Цена этого закрытия — последняя котировка
+        строго раньше submit+latency, а не тик, который пришёл позже.
+        Следующий OrderSend в том же OnTick отсчитывает новую задержку
+        от этого момента и заново читает Bid/Ask. Пока заявка на выход
+        ждёт, стратегия видит счёт без позиции и может открыть следующую.
         """
         closing = self._engine._closing_ids()
         for pos in self._engine.positions:
@@ -242,6 +252,9 @@ class Engine:
         self.curve: list[EquityPoint] = [EquityPoint(0, config.deposit, config.deposit, "start")]
         self.ctx = _Context(self)
         self._last_tick: Tick | None = None
+        self._quote: Tick | None = None
+        self._send_clock: int = 0
+        self._upcoming: list[Tick] = []
         self.tick_count = 0
 
     def _reject(self, reason: str) -> None:
@@ -309,6 +322,16 @@ class Engine:
         pen = self.cfg.limit_penetration if penetration is None else penetration
         if pen < 0.0:
             raise ConfigError("penetration < 0")
+        # Второй OrderSend в том же тике стартует от времени, куда тестер
+        # уже сдвинулся первым. Enter после PositionClose — этот случай.
+        shifted = self._send_clock > self.tick.time_msc
+        activate = self._send_clock + self.cfg.latency_ms
+        self._send_clock = activate
+        anchor = None
+        reanchor = False
+        if kind.endswith("market"):
+            anchor = self.tick.ask if kind.startswith("buy") else self.tick.bid
+            reanchor = shifted
         order = _Order(
             id=self._seq,
             kind=kind,
@@ -316,21 +339,25 @@ class Engine:
             price=price,
             sl=sl,
             tp=tp,
-            activate_msc=self.tick.time_msc + self.cfg.latency_ms,
+            activate_msc=activate,
             expiry_msc=expiry,
             comment=comment,
             magic=0,
             penetration=pen,
+            anchor=anchor,
+            reanchor=reanchor,
         )
         self._seq += 1
         self.orders.append(order)
         if self.cfg.latency_ms == 0:
-            self._fill_due(self.tick)
+            self._fill_due(self.tick, self.tick, self._upcoming or [self.tick])
             if kind.endswith("market") and not any(pos.id == order.id for pos in self.positions):
                 return None
         return order.id
 
     def _submit_close(self, pos_id: int, reason: str) -> None:
+        activate = self._send_clock + self.cfg.latency_ms
+        self._send_clock = activate
         order = _Order(
             id=self._seq,
             kind="close",
@@ -338,7 +365,7 @@ class Engine:
             price=0.0,
             sl=None,
             tp=None,
-            activate_msc=self.tick.time_msc + self.cfg.latency_ms,
+            activate_msc=activate,
             expiry_msc=None,
             comment="",
             magic=0,
@@ -349,7 +376,7 @@ class Engine:
         self._seq += 1
         self.orders.append(order)
         if self.cfg.latency_ms == 0:
-            self._fill_due(self.tick)
+            self._fill_due(self.tick, self.tick, self._upcoming or [self.tick])
 
     def _closing_ids(self) -> set[int]:
         return {order.close_pos_id for order in self.orders if order.close_pos_id is not None}
@@ -431,7 +458,40 @@ class Engine:
         self.orders = [o for o in self.orders if o.close_pos_id != pos.id]
         self._update_dd(tick, reason)
 
-    def _fill_due(self, tick: Tick) -> None:
+    def _reanchor(self, quote: Tick) -> None:
+        """Перенести SL/TP на котировку момента, когда PositionClose уже вернулся."""
+        digits = self.spec.digits
+        for order in self.orders:
+            if not order.reanchor or order.anchor is None:
+                continue
+            new_anchor = quote.ask if order.kind.startswith("buy") else quote.bid
+            if order.sl is not None:
+                order.sl = round_price(new_anchor + (order.sl - order.anchor), digits)
+            if order.tp is not None:
+                order.tp = round_price(new_anchor + (order.tp - order.anchor), digits)
+            order.anchor = new_anchor
+            order.reanchor = False
+
+    def _fill_market(self, order: _Order, quote: Tick, when_msc: int, upcoming: list[Tick]) -> None:
+        kind = order.kind
+        side = 1 if kind == "buy_market" else -1
+        price = quote.ask if side == 1 else quote.bid
+        fill = Tick(when_msc, quote.bid, quote.ask)
+        pos = self._open(side, order, price, fill)
+        if pos is None:
+            return
+        # Гэп от котировки исполнения до тика, который эту заявку «проявил».
+        self._protect([pos], quote.bid, quote.ask, upcoming)
+        if pos in self.positions:
+            pos.entry_batch_checked = True
+
+    def _fill_due(self, tick: Tick, market_quote: Tick | None, upcoming: list[Tick]) -> None:
+        """Заявки со сроком не позже tick.
+
+        market_quote — котировка рынка и закрытия. Для задержки это последняя
+        котировка строго раньше срока (тик с этим временем ещё не применён).
+        При нулевой задержке это сам тик отправки.
+        """
         kept: list[_Order] = []
         for order in self.orders:
             if order.expiry_msc is not None and tick.time_msc >= order.expiry_msc:
@@ -440,12 +500,27 @@ class Engine:
             if tick.time_msc < order.activate_msc:
                 kept.append(order)
                 continue
-            if order.close_pos_id is not None:
-                pos = self._find(order.close_pos_id)
-                if pos is None:
+            market = order.kind.endswith("market") or order.close_pos_id is not None
+            if market:
+                if market_quote is None:
+                    kept.append(order)
                     continue
-                price = tick.bid if pos.side == 1 else tick.ask
-                self._close(pos, price, tick, order.close_reason, False)
+                # Срок наступил между котировками. Тик ровно на сроке — уже
+                # следующий OnTick, его цена в это исполнение не входит.
+                if market_quote.time_msc >= order.activate_msc and market_quote is not tick:
+                    kept.append(order)
+                    continue
+                when = order.activate_msc if market_quote.time_msc < order.activate_msc else market_quote.time_msc
+                if order.close_pos_id is not None:
+                    pos = self._find(order.close_pos_id)
+                    if pos is None:
+                        continue
+                    price = market_quote.bid if pos.side == 1 else market_quote.ask
+                    fill = Tick(when, market_quote.bid, market_quote.ask)
+                    self._close(pos, price, fill, order.close_reason, False)
+                    self._reanchor(market_quote)
+                    continue
+                self._fill_market(order, market_quote, when, upcoming)
                 continue
             if self._fill_entry(order, tick):
                 continue
@@ -535,13 +610,19 @@ class Engine:
         self._protect(before, self._prev_bid, self._prev_ask, batch)
         for i, tick in enumerate(batch):
             self.tick = tick
-            self._fill_due(tick)
+            self._upcoming = batch[i:]
+            self._fill_due(tick, self._quote, self._upcoming)
+            self._send_clock = tick.time_msc
             if i == 0 and self.strategy is not None:
                 for bar in closed:
                     self.strategy.on_bar_close(self.ctx, bar)
             if self.strategy is not None:
                 self.strategy.on_tick(self.ctx, tick)
-            self._fill_due(tick)
+            # Нулевая задержка исполняется по котировке отправки. Ненулевая
+            # уже стоит в очереди и не должна взять цену этого же тика.
+            if self.cfg.latency_ms == 0:
+                self._fill_due(tick, tick, self._upcoming)
+            self._quote = tick
             born = [p for p in self.positions if p.entry_time_msc == tick.time_msc and not p.entry_batch_checked]
             for pos in born:
                 pos.entry_batch_checked = True

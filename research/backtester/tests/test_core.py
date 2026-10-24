@@ -95,16 +95,21 @@ def test_market_buy_fills_at_ask_sell_at_bid():
     assert sell.exit_price == pytest.approx(103.3)  # закрытие шорта по ask
 
 
-def test_latency_uses_later_tick():
+def test_latency_fills_from_the_quote_before_the_deadline():
+    """Срок — submit+latency. Тик ровно на сроке в эту цену не входит.
+
+    Заявка в 0, задержка 500. Котировка строго раньше 500 — тик 400 (11.1).
+    Тик 500 только проявляет, что срок уже прошёл; его ask 12.1 не цена входа.
+    """
+
     def on_tick(ctx, tick):
         if tick.time_msc == 0:
             ctx.buy_market(1, sl=1, tp=None)
 
-    ticks = [T(0, 10, 10.1), T(400, 11, 11.1), T(500, 12, 12.1), T(800, 12, 12.1)]
+    ticks = [T(0, 10, 10.1), T(400, 11, 11.1), T(500, 12, 12.1), T(800, 13, 13.1)]
     result = run(ticks, on_tick=on_tick, latency_ms=500)
-    # На 800 мс позиция ещё открыта: закрываем проверкой цены входа.
     assert result.trades == []
-    assert result.open_positions[0]["entry_price"] == pytest.approx(12.1)
+    assert result.open_positions[0]["entry_price"] == pytest.approx(11.1)
     assert result.open_positions[0]["entry_time_msc"] == 500
 
 
