@@ -17,6 +17,7 @@ time_msc — часы сервера брокера (миллисекунды с
 import gzip
 import hashlib
 import json
+import os
 import re
 import shutil
 import sys
@@ -674,12 +675,177 @@ def self_test():
             raise AssertionError("login field must be rejected")
         except ValueError as exc:
             _expect("login" not in str(exc), "rejection must not echo unexpected contents")
+
+    today = datetime(2026, 10, 24)
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "export-request.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "run": True,
+                    "symbol": "XAUUSDm",
+                    "from": "2026-09-01",
+                    "to": "2026-09-30",
+                    "gap_minutes": 5,
+                    "publish_release": False,
+                }
+            ),
+            encoding="utf-8",
+        )
+        got = resolve_request("push", {}, path, today)
+        _expect(got["run"] is True, "armed request runs")
+        _expect(got["to_excl_dot"] == "2026.10.01", "exclusive end is the next day")
+        _expect(got["publish_release"] == "false", "release stays off")
+        path.write_text('{"run": false}\n', encoding="utf-8")
+        parked = resolve_request("push", {}, path, today)
+        _expect(parked["run"] is False, "run false does not export")
+        path.unlink()
+        missing = resolve_request("push", {}, path, today)
+        _expect(missing["run"] is False, "deleted request does not export")
+        path.write_text('{"run": true, "symbol": "XAUUSDm", "login": "1"}\n', encoding="utf-8")
+        try:
+            resolve_request("push", {}, path, today)
+            raise AssertionError("unexpected request field must fail")
+        except ValueError as exc:
+            _expect("login" not in str(exc), "request rejection must not echo the field")
+        dispatched = resolve_request(
+            "workflow_dispatch",
+            {"symbol": "XAUUSDm", "from": "2026-09-01", "to": "latest", "gap_minutes": "5", "publish_release": "false"},
+            path,
+            today,
+        )
+        _expect(dispatched["date_to"] == "2026-10-24", "latest is the UTC day passed in")
+        _expect(dispatched["run"] is True, "dispatch ignores run:false in the file")
     print("validate_ticks self-test passed")
+
+
+def resolve_request(event, dispatch, request_path, today):
+    """Decide whether a workflow run may start the MT5 export.
+
+    A push runs only when data/export-request.json exists and has "run": true.
+    Removing the file, or any other commit, must not fall through to the
+    2024-latest default. workflow_dispatch uses its own inputs and ignores the file.
+    """
+    if event == "push":
+        path = Path(request_path)
+        if not path.is_file():
+            return {"run": False, "reason": "request file is absent"}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError("request file is not valid JSON") from exc
+        if not isinstance(data, dict):
+            raise ValueError("request file must be an object")
+        extra = set(data) - {"run", "symbol", "from", "to", "gap_minutes", "publish_release"}
+        if extra:
+            raise ValueError("request file has an unexpected field")
+        if data.get("run") is not True:
+            return {"run": False, "reason": "run is not true"}
+        symbol = data.get("symbol")
+        date_from = data.get("from")
+        date_to = data.get("to")
+        gap = data.get("gap_minutes", 5)
+        release = data.get("publish_release", False)
+        if not isinstance(release, bool):
+            raise ValueError("publish_release must be a boolean")
+    elif event == "workflow_dispatch":
+        symbol = dispatch.get("symbol") or "XAUUSDm"
+        date_from = dispatch.get("from") or "2024-01-01"
+        date_to = dispatch.get("to") or "latest"
+        gap = dispatch.get("gap_minutes") or "5"
+        release = str(dispatch.get("publish_release", "")).lower() == "true"
+        if date_to == "latest":
+            date_to = today.strftime("%Y-%m-%d")
+    else:
+        return {"run": False, "reason": "event does not export"}
+
+    if not isinstance(symbol, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9._]{0,31}", symbol):
+        raise ValueError("symbol is invalid")
+    if not isinstance(date_from, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_from):
+        raise ValueError("from must be YYYY-MM-DD")
+    if not isinstance(date_to, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_to):
+        raise ValueError("to must be YYYY-MM-DD")
+    start = datetime.strptime(date_from, "%Y-%m-%d")
+    end = datetime.strptime(date_to, "%Y-%m-%d")
+    if start > end:
+        raise ValueError("from is after to")
+    if start < datetime(2000, 1, 1) or end > datetime(2099, 12, 31):
+        raise ValueError("date is outside 2000-2099")
+    if isinstance(gap, bool) or not isinstance(gap, (int, str)):
+        raise ValueError("gap_minutes must be an integer")
+    if isinstance(gap, str):
+        if not re.fullmatch(r"\d+", gap):
+            raise ValueError("gap_minutes must be an integer")
+        gap = int(gap)
+    if gap < 1 or gap > 240:
+        raise ValueError("gap_minutes must be from 1 to 240")
+    exclusive = end + timedelta(days=1)
+    months = (end.year - start.year) * 12 + (end.month - start.month) + 1
+    return {
+        "run": True,
+        "symbol": symbol,
+        "date_from": start.strftime("%Y-%m-%d"),
+        "date_to": end.strftime("%Y-%m-%d"),
+        "from_dot": start.strftime("%Y.%m.%d"),
+        "to_excl_dot": exclusive.strftime("%Y.%m.%d"),
+        "gap": str(gap),
+        "publish_release": "true" if release else "false",
+        "months": months,
+    }
+
+
+def write_github_output(result):
+    path = os.environ.get("GITHUB_OUTPUT")
+    if not path:
+        raise RuntimeError("GITHUB_OUTPUT is not set")
+    fields = ("run", "symbol", "date_from", "date_to", "from_dot", "to_excl_dot", "gap", "publish_release")
+    lines = []
+    for key in fields:
+        if key == "run":
+            value = "true" if result.get("run") else "false"
+        else:
+            value = "" if not result.get("run") else str(result.get(key, ""))
+        if "\n" in value or "\r" in value:
+            raise RuntimeError("refusing to write a multiline output")
+        lines.append(f"{key}={value}")
+    with open(path, "a", encoding="utf-8") as handle:
+        handle.write("\n".join(lines) + "\n")
 
 
 def main(argv):
     if "--self-test" in argv:
         self_test()
+        return 0
+    if "--resolve-request" in argv:
+        slot = argv.index("--resolve-request")
+        if slot + 1 >= len(argv):
+            raise SystemExit("missing request file path")
+        today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        result = resolve_request(
+            os.environ.get("EXPORT_EVENT", ""),
+            {
+                "symbol": os.environ.get("EXPORT_SYMBOL", ""),
+                "from": os.environ.get("EXPORT_FROM", ""),
+                "to": os.environ.get("EXPORT_TO", ""),
+                "gap_minutes": os.environ.get("EXPORT_GAP", ""),
+                "publish_release": os.environ.get("EXPORT_RELEASE", ""),
+            },
+            argv[slot + 1],
+            today,
+        )
+        if result.get("run") and result.get("months", 0) > 3:
+            print(
+                f"::warning::Requested {result['months']} months. Artifact storage on GitHub Free is 500 MB, "
+                "public artifacts expire within 90 days, and the job is killed at 6 hours."
+            )
+        reason = result.get("reason", "")
+        if reason:
+            print(reason)
+        else:
+            print(
+                f"Export {result.get('symbol', '')} {result.get('date_from', '')} .. {result.get('date_to', '')}"
+            )
+        write_github_output(result)
         return 0
     args = {}
     tokens = argv[1:]

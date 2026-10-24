@@ -1,10 +1,18 @@
 name: Export ticks
 
-# Ручной съём реальных тиков Exness (CopyTicksRange, COPY_TICKS_ALL).
+# Съём реальных тиков Exness (CopyTicksRange, COPY_TICKS_ALL).
 # Логин — как в backtest.yml: тот же установщик, /portable и секреты MT5_*.
 # В артефакт попадают только gzip CSV, manifest, validation и export_info.
 # Журналы терминала, номер счёта, сервер и IP туда не кладутся и не печатаются.
+#
+# workflow_dispatch с ветки grok GitHub не принимает, пока файла нет на default branch.
+# Поэтому пуш в grok запускает съём только если изменился data/export-request.json
+# и в нём "run": true. Обычный коммит этот путь не трогает и съём не стартует.
 on:
+  push:
+    branches: [grok]
+    paths:
+      - 'data/export-request.json'
   workflow_dispatch:
     inputs:
       symbol:
@@ -37,54 +45,55 @@ permissions:
   contents: write
   actions: write
 
+concurrency:
+  group: export-ticks-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  export-ticks:
-    runs-on: windows-latest
-    timeout-minutes: 360
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      run: ${{ steps.resolve.outputs.run }}
+      symbol: ${{ steps.resolve.outputs.symbol }}
+      date_from: ${{ steps.resolve.outputs.date_from }}
+      date_to: ${{ steps.resolve.outputs.date_to }}
+      from_dot: ${{ steps.resolve.outputs.from_dot }}
+      to_excl_dot: ${{ steps.resolve.outputs.to_excl_dot }}
+      gap: ${{ steps.resolve.outputs.gap }}
+      publish_release: ${{ steps.resolve.outputs.publish_release }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Self-test the tick validator
-        shell: pwsh
-        run: python tools/validate_ticks.py --self-test
+        run: python3 tools/validate_ticks.py --self-test
 
-      - name: Check inputs
-        shell: pwsh
+      - name: Resolve export request
+        id: resolve
         env:
-          REQ_SYMBOL: ${{ github.event.inputs.symbol }}
-          REQ_FROM: ${{ github.event.inputs.from }}
-          REQ_TO: ${{ github.event.inputs.to }}
-          REQ_GAP: ${{ github.event.inputs.gap_minutes }}
-        run: |
-          if ($env:REQ_SYMBOL -notmatch '^[A-Za-z][A-Za-z0-9._]{0,31}$') { throw "Symbol must be 1-32 letters, digits, dot or underscore" }
-          if ($env:REQ_FROM -notmatch '^\d{4}-\d{2}-\d{2}$') { throw "from must be YYYY-MM-DD" }
-          $culture = [Globalization.CultureInfo]::InvariantCulture
-          $from = [datetime]::ParseExact($env:REQ_FROM, 'yyyy-MM-dd', $culture)
-          if ($env:REQ_TO -eq 'latest') {
-            $to = [datetime]::UtcNow.Date
-          } else {
-            if ($env:REQ_TO -notmatch '^\d{4}-\d{2}-\d{2}$') { throw "to must be YYYY-MM-DD or latest" }
-            $to = [datetime]::ParseExact($env:REQ_TO, 'yyyy-MM-dd', $culture)
-          }
-          if ($from -gt $to) { throw "from is after to" }
-          if ($from -lt [datetime]'2000-01-01' -or $to -gt [datetime]'2099-12-31') { throw "date is outside 2000-2099" }
-          if ($env:REQ_GAP -notmatch '^\d+$') { throw "gap_minutes must be an integer" }
-          $gap = [int]$env:REQ_GAP
-          if ($gap -lt 1 -or $gap -gt 240) { throw "gap_minutes must be from 1 to 240" }
-          $months = ($to.Year - $from.Year) * 12 + ($to.Month - $from.Month) + 1
-          if ($months -gt 3) {
-            Write-Host "::warning::Requested $months months. A full XAU tick month is tens to hundreds of MB gzipped. GitHub Free includes 500 MB of artifact storage, public artifacts expire within 90 days, and this job is killed at 6 hours. Dispatch a few months at a time, or set publish_release for a versioned Release."
-          }
-          $excl = $to.AddDays(1)
-          @(
-            "TICK_SYMBOL=$($env:REQ_SYMBOL)",
-            "TICK_FROM=$($from.ToString('yyyy-MM-dd'))",
-            "TICK_TO=$($to.ToString('yyyy-MM-dd'))",
-            "TICK_FROM_DOT=$($from.ToString('yyyy.MM.dd'))",
-            "TICK_TO_EXCL_DOT=$($excl.ToString('yyyy.MM.dd'))",
-            "TICK_GAP=$gap"
-          ) | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          Write-Host "Export $($env:REQ_SYMBOL) $($from.ToString('yyyy-MM-dd')) .. $($to.ToString('yyyy-MM-dd')) ($months month(s)), gap ${gap} min"
+          EXPORT_EVENT: ${{ github.event_name }}
+          EXPORT_SYMBOL: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.symbol || '' }}
+          EXPORT_FROM: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.from || '' }}
+          EXPORT_TO: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.to || '' }}
+          EXPORT_GAP: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.gap_minutes || '' }}
+          EXPORT_RELEASE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.publish_release || '' }}
+        run: python3 tools/validate_ticks.py --resolve-request data/export-request.json
+
+  export-ticks:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 360
+    env:
+      TICK_SYMBOL: ${{ needs.gate.outputs.symbol }}
+      TICK_FROM: ${{ needs.gate.outputs.date_from }}
+      TICK_TO: ${{ needs.gate.outputs.date_to }}
+      TICK_FROM_DOT: ${{ needs.gate.outputs.from_dot }}
+      TICK_TO_EXCL_DOT: ${{ needs.gate.outputs.to_excl_dot }}
+      TICK_GAP: ${{ needs.gate.outputs.gap }}
+      TICK_RELEASE: ${{ needs.gate.outputs.publish_release }}
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Install MetaTrader 5 (Exness build)
         shell: pwsh
@@ -334,7 +343,7 @@ jobs:
           [System.IO.File]::AppendAllText($env:GITHUB_STEP_SUMMARY, (($lines -join "`n") + "`n"))
 
       - name: Publish GitHub Release
-        if: success() && steps.package.outputs.ok == 'true' && (inputs.publish_release == true || inputs.publish_release == 'true')
+        if: success() && steps.package.outputs.ok == 'true' && env.TICK_RELEASE == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
