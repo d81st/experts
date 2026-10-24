@@ -10,7 +10,7 @@
   manual_reset. Пик при сбросе не двигается, и если просадка ещё 15%,
   следующий тик снова ставит kill. Флаг пишется в файл, если он задан;
 - не открывает лонг, пока закрытие D1 ниже SMA200 закрытий D1.
-  Меньше 200 закрытий — тоже запрет;
+  Меньше 200 закрытий — тоже запрет, причина bear_history;
 - отказывает при битом символе, tick value, стопе, спреде выше 3 медиан
   128 предыдущих положительных спредов или котировке старше 60 секунд.
   Пока 128 спредов нет и на первой котировке без предшественника — отказ.
@@ -43,15 +43,21 @@ def _bad(value: float) -> bool:
     return isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value))
 
 
-def bear_blocks_long(closes: list[float], period: int = BEAR_SMA_PERIOD) -> bool:
-    """True, если лонг запрещён: истории мало или последнее закрытие ниже SMA."""
+def bear_block_reason(closes: list[float], period: int = BEAR_SMA_PERIOD) -> str | None:
+    """Почему лонг запрещён. Мало истории — отдельная причина, не «ниже SMA»."""
     if period < 1 or len(closes) < period:
-        return True
+        return "bear_history"
     window = closes[-period:]
     if any(_bad(price) or price <= 0.0 for price in window):
-        return True
+        return "bear_history"
     sma = sum(window) / period
-    return window[-1] < sma
+    if window[-1] < sma:
+        return "bear"
+    return None
+
+
+def bear_blocks_long(closes: list[float], period: int = BEAR_SMA_PERIOD) -> bool:
+    return bear_block_reason(closes, period) is not None
 
 
 def median_spread(samples: list[float]) -> float | None:
@@ -213,8 +219,10 @@ class RiskGuard:
             return GuardDecision(False, "kill")
         if self.day_equity is None or self.day_blocked:
             return GuardDecision(False, "daily")
-        if side == 1 and bear_blocks_long(d1_closes):
-            return GuardDecision(False, "bear")
+        if side == 1:
+            bear = bear_block_reason(d1_closes)
+            if bear:
+                return GuardDecision(False, bear)
         stop = stop_block_reason(side, entry, sl, view)
         if stop:
             return GuardDecision(False, stop)

@@ -214,6 +214,9 @@ def test_bear_regime_blocks_new_longs_only():
     below = flat[:-1] + [99.0]
     assert bear_blocks_long(below) is True
     assert bear_blocks_long(flat[:-1]) is True
+    from backtester.risk_guard import bear_block_reason
+    assert bear_block_reason(flat[:-1]) == "bear_history"
+    assert bear_block_reason(below) == "bear"
 
     guard = RiskGuard()
     last = warm(guard, msc(2026, 6, 2, 0, 0, 1))

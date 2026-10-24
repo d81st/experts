@@ -37,6 +37,7 @@
 #define RG_KILL         6
 #define RG_DAILY        7
 #define RG_BEAR         8
+#define RG_BEAR_HISTORY 9
 
 int      g_rgMagic = 0;
 string   g_rgSymbol;
@@ -191,22 +192,24 @@ void RiskGuardOnTick(void)
    RiskGuardPushSpread(ask - bid);
   }
 
-bool RiskGuardBear(void)
+int RiskGuardBear(void)
   {
    double closes[];
    ArraySetAsSeries(closes, true);
    const int got = CopyClose(g_rgSymbol, PERIOD_D1, 1, RG_BEAR_PERIOD, closes);
    if(got < RG_BEAR_PERIOD)
-      return true;
+      return RG_BEAR_HISTORY;
    double sum = 0.0;
    for(int i = 0; i < RG_BEAR_PERIOD; i++)
      {
       if(!(closes[i] > 0.0))
-         return true;
+         return RG_BEAR_HISTORY;
       sum += closes[i];
      }
    const double sma = sum / RG_BEAR_PERIOD;
-   return closes[0] < sma;
+   if(closes[0] < sma)
+      return RG_BEAR;
+   return RG_OK;
   }
 
 int RiskGuardBlock(const int direction, const double entry, const double sl)
@@ -241,8 +244,12 @@ int RiskGuardBlock(const int direction, const double entry, const double sl)
       return RG_KILL;
    if(!g_rgDayKnown || g_rgDayBlocked)
       return RG_DAILY;
-   if(direction > 0 && RiskGuardBear())
-      return RG_BEAR;
+   if(direction > 0)
+     {
+      const int bear = RiskGuardBear();
+      if(bear != RG_OK)
+         return bear;
+     }
    if(!(sl > 0.0) || !(entry > 0.0))
       return RG_STOPS;
    const double dist = direction > 0 ? entry - sl : sl - entry;
@@ -262,6 +269,7 @@ string RiskGuardReason(const int code)
    if(code == RG_KILL) return "kill";
    if(code == RG_DAILY) return "daily";
    if(code == RG_BEAR) return "bear";
+   if(code == RG_BEAR_HISTORY) return "bear_history";
    return "ok";
   }
 
