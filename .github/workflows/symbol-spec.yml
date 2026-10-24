@@ -1,0 +1,201 @@
+name: Symbol spec
+
+# Снимает SymbolInfo* для одного символа в JSON.
+# Пуш в grok запускает это только если изменился data/symbol-spec-request.json
+# и в нём "run": true. data/export-request.json не читается, съём тиков не стартует.
+# В артефакт попадает только JSON спецификации. Журнал терминала, счёт, логин,
+# сервер и IP не печатаются и не кладутся в файл.
+on:
+  push:
+    branches: [grok]
+    paths:
+      - 'data/symbol-spec-request.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: symbol-spec-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    if: github.ref == 'refs/heads/grok'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      run: ${{ steps.resolve.outputs.run }}
+      symbol: ${{ steps.resolve.outputs.symbol }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Self-test the spec checker
+        run: python3 tools/check_symbol_spec.py --self-test
+
+      - name: Resolve symbol spec request
+        id: resolve
+        run: python3 tools/check_symbol_spec.py --resolve-request data/symbol-spec-request.json
+
+  symbol-spec:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 40
+    env:
+      SPEC_SYMBOL: ${{ needs.gate.outputs.symbol }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install MetaTrader 5 (Exness build)
+        shell: pwsh
+        run: |
+          $url = "https://download.mql5.com/cdn/web/exness.technologies.ltd/mt5/exness5setup.exe"
+          $setup = "$env:RUNNER_TEMP\exness5setup.exe"
+          Invoke-WebRequest -Uri $url -OutFile $setup -ErrorAction Stop
+          $sig = Get-AuthenticodeSignature $setup
+          Write-Host "Installer signature: $($sig.Status) | $($sig.SignerCertificate.Subject)"
+          if ($sig.Status -ne 'Valid') { throw "Installer signature is not valid, refusing to run it" }
+          $p = Start-Process -FilePath $setup -ArgumentList "/auto" -PassThru
+          if (-not $p.WaitForExit(15 * 60 * 1000)) { Write-Host "Installer still running after 15 min, killing it" }
+          Get-Process terminal64, *setup* -ErrorAction SilentlyContinue | Stop-Process -Force
+          $term = Get-ChildItem "C:\Program Files" -Recurse -Depth 2 -Filter terminal64.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $term) { throw "terminal64.exe not found" }
+          "MT5_ROOT=$($term.DirectoryName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Compile symbol spec script
+        shell: pwsh
+        run: |
+          $scripts = "$env:MT5_ROOT\MQL5\Scripts"
+          New-Item -ItemType Directory -Force $scripts | Out-Null
+          Copy-Item "$env:GITHUB_WORKSPACE\tools\symbol-spec.mq5" "$scripts\symbol-spec.mq5" -Force
+          $log = "$env:RUNNER_TEMP\symbol-spec.compile.log"
+          Start-Process -FilePath "$env:MT5_ROOT\metaeditor64.exe" -ArgumentList "/compile:`"$scripts\symbol-spec.mq5`"", "/log:`"$log`"" -Wait
+          if (-not (Test-Path $log)) { throw "Compiler produced no log" }
+          $bytes = [System.IO.File]::ReadAllBytes($log)
+          if ($bytes.Length -ge 2 -and $bytes[0] -eq 255 -and $bytes[1] -eq 254) {
+            $text = [System.Text.Encoding]::Unicode.GetString($bytes)
+          } else {
+            $text = [System.Text.Encoding]::UTF8.GetString($bytes)
+          }
+          $result = ($text -split "`n" | Where-Object { $_ -match 'Result:' } | Select-Object -Last 1)
+          Write-Host "Compile: $($result.Trim())"
+          if ($text -notmatch '0 errors' -or -not (Test-Path "$scripts\symbol-spec.ex5")) {
+            Write-Host $text
+            throw "symbol-spec.mq5 failed to compile"
+          }
+
+      - name: First login (terminal update and symbol sync)
+        shell: pwsh
+        env:
+          MT5_LOGIN: ${{ secrets.MT5_LOGIN }}
+          MT5_PASSWORD: ${{ secrets.MT5_PASSWORD }}
+          MT5_SERVER: ${{ secrets.MT5_SERVER }}
+        run: |
+          foreach ($secret in @($env:MT5_LOGIN, $env:MT5_SERVER)) {
+            if ($secret -and $secret -match '^[A-Za-z0-9._@\-]+$') { Write-Host "::add-mask::$secret" }
+          }
+          if (-not $env:MT5_LOGIN -or -not $env:MT5_PASSWORD -or -not $env:MT5_SERVER) { throw "MT5_LOGIN / MT5_PASSWORD / MT5_SERVER secrets are not set" }
+          $ini = "$env:RUNNER_TEMP\login.ini"
+          try {
+            @("[Common]", "Login=$env:MT5_LOGIN", "Password=$env:MT5_PASSWORD", "Server=$env:MT5_SERVER",
+              "ProxyEnable=0", "NewsEnable=0") | Out-File $ini -Encoding Unicode
+            $t = Start-Process -FilePath "$env:MT5_ROOT\terminal64.exe" -ArgumentList "/portable", "/config:`"$ini`"" -PassThru
+            if (-not $t.WaitForExit(150000)) { }
+          } finally {
+            Get-Process terminal64 -ErrorAction SilentlyContinue | Stop-Process -Force
+            if (Test-Path $ini) { Remove-Item $ini -Force }
+            Start-Sleep -Seconds 5
+          }
+          $ok = $false
+          $logs = Get-ChildItem "$env:MT5_ROOT\logs" -Filter *.log -ErrorAction SilentlyContinue
+          foreach ($f in $logs) {
+            $bytes = $null
+            for ($i = 0; $i -lt 5; $i++) {
+              try {
+                $bytes = [System.IO.File]::ReadAllBytes($f.FullName)
+                break
+              } catch {
+                Start-Sleep -Seconds 2
+              }
+            }
+            if (-not $bytes -or $bytes.Length -lt 2) { continue }
+            if ($bytes[0] -eq 255 -and $bytes[1] -eq 254) { $journal = [System.Text.Encoding]::Unicode.GetString($bytes) }
+            else { $journal = [System.Text.Encoding]::UTF8.GetString($bytes) }
+            if ($journal -match 'authorized on') { $ok = $true }
+            $journal = $null
+          }
+          if (-not $ok) { throw "Could not log in to the trade server" }
+          Write-Host "Trade server accepted the login"
+
+      - name: Dump symbol spec
+        shell: pwsh
+        env:
+          MT5_LOGIN: ${{ secrets.MT5_LOGIN }}
+          MT5_PASSWORD: ${{ secrets.MT5_PASSWORD }}
+          MT5_SERVER: ${{ secrets.MT5_SERVER }}
+        run: |
+          foreach ($secret in @($env:MT5_LOGIN, $env:MT5_SERVER)) {
+            if ($secret -and $secret -match '^[A-Za-z0-9._@\-]+$') { Write-Host "::add-mask::$secret" }
+          }
+          if ($env:SPEC_SYMBOL -notmatch '^[A-Za-z][A-Za-z0-9._]{0,31}$') { throw "symbol is invalid" }
+          $common = "$env:APPDATA\MetaQuotes\Terminal\Common\Files"
+          New-Item -ItemType Directory -Force $common | Out-Null
+          $job = Join-Path $common "symbol-spec-job.txt"
+          @("symbol=$env:SPEC_SYMBOL") | Out-File $job -Encoding ascii
+          $out = Join-Path $common "symbol-spec\$env:SPEC_SYMBOL.json"
+          $ini = "$env:RUNNER_TEMP\symbol-spec.ini"
+          try {
+            @("[Common]", "Login=$env:MT5_LOGIN", "Password=$env:MT5_PASSWORD", "Server=$env:MT5_SERVER",
+              "ProxyEnable=0", "NewsEnable=0",
+              "[StartUp]",
+              "Script=symbol-spec",
+              "Symbol=$env:SPEC_SYMBOL",
+              "Period=M1",
+              "ShutdownTerminal=1") | Out-File $ini -Encoding Unicode
+            $proc = Start-Process -FilePath "$env:MT5_ROOT\terminal64.exe" -ArgumentList "/portable", "/config:`"$ini`"" -PassThru
+            $deadline = (Get-Date).AddMinutes(10)
+            while ((Get-Date) -lt $deadline) {
+              if (Test-Path $out) {
+                Start-Sleep -Seconds 2
+                break
+              }
+              if ($proc.HasExited) {
+                Start-Sleep -Seconds 5
+                if (Test-Path $out) { break }
+                throw "Terminal exited before the spec script wrote JSON"
+              }
+              Start-Sleep -Seconds 5
+            }
+            if (-not (Test-Path $out)) { throw "Symbol spec did not finish within the wait limit" }
+          } finally {
+            if (Test-Path $ini) { Remove-Item $ini -Force }
+            Get-Process terminal64, metatester64 -ErrorAction SilentlyContinue | Stop-Process -Force
+          }
+          $dest = "$env:GITHUB_WORKSPACE\symbol-spec-artifact"
+          New-Item -ItemType Directory -Force $dest | Out-Null
+          Copy-Item $out (Join-Path $dest "$env:SPEC_SYMBOL.json") -Force
+          Write-Host "Wrote $env:SPEC_SYMBOL.json ($((Get-Item $out).Length) bytes)"
+
+      - name: Check spec JSON
+        shell: pwsh
+        env:
+          MT5_LOGIN: ${{ secrets.MT5_LOGIN }}
+          MT5_PASSWORD: ${{ secrets.MT5_PASSWORD }}
+          MT5_SERVER: ${{ secrets.MT5_SERVER }}
+        run: |
+          foreach ($secret in @($env:MT5_LOGIN, $env:MT5_SERVER)) {
+            if ($secret -and $secret -match '^[A-Za-z0-9._@\-]+$') { Write-Host "::add-mask::$secret" }
+          }
+          $file = "$env:GITHUB_WORKSPACE\symbol-spec-artifact\$env:SPEC_SYMBOL.json"
+          python "$env:GITHUB_WORKSPACE\tools\check_symbol_spec.py" --check $file --symbol $env:SPEC_SYMBOL
+          if ($LASTEXITCODE -ne 0) { throw "Symbol spec JSON failed the checker" }
+
+      - name: Upload symbol spec
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: symbol-spec-${{ env.SPEC_SYMBOL }}
+          path: symbol-spec-artifact/${{ env.SPEC_SYMBOL }}.json
+          retention-days: 90
+          if-no-files-found: error
+          include-hidden-files: false
