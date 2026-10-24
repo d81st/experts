@@ -44,3 +44,5 @@ HTML лежит в артефакте `candidate-alch-long24`. Терминал 
 ## Сделки
 
 `deals/window-a.csv` и `deals/window-b.csv`: `time,type,direction,volume,price,commission,swap,profit,net`. Только закрывающие сделки.
+
+Страж счёта в эти прогоны тестера не входил: `UseRiskGuard` по умолчанию выключен. Его эффект на том же кандидате, в питоновском бэктестере, записан в `research/backtester/README.md`, раздел «Страж счёта, кандидат long-x24».
