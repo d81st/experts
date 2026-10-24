@@ -40,7 +40,7 @@ jobs:
     needs: gate
     if: needs.gate.outputs.run == 'true'
     runs-on: windows-latest
-    timeout-minutes: 240
+    timeout-minutes: 360
     strategy:
       fail-fast: false
       matrix:
@@ -63,42 +63,6 @@ jobs:
           $term = Get-ChildItem "C:\Program Files" -Recurse -Depth 2 -Filter terminal64.exe -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $term) { throw "terminal64.exe not found" }
           "MT5_ROOT=$($term.DirectoryName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
-      - name: Compile batch experts
-        shell: pwsh
-        run: |
-          $raw = python "$env:GITHUB_WORKSPACE\tools\robot_audit.py" --emit-batch "${{ matrix.batch }}"
-          if ($LASTEXITCODE -ne 0) { throw "batch plan rejected" }
-          $presets = @($raw | ConvertFrom-Json)
-          $dst = "$env:MT5_ROOT\MQL5\Experts\experts"
-          New-Item -ItemType Directory -Force $dst | Out-Null
-          Copy-Item "$env:GITHUB_WORKSPACE\Include" $dst -Recurse -Force
-          foreach ($d in @("hybrid", "archive")) {
-            Copy-Item "$env:GITHUB_WORKSPACE\$d" $dst -Recurse -Force
-          }
-          $bad = New-Object System.Collections.Generic.List[string]
-          foreach ($preset in $presets) {
-            $rel = ($preset.expert -replace '/', '\')
-            $mq5 = Join-Path $dst "$rel.mq5"
-            $log = "$env:RUNNER_TEMP\$($preset.id).compile.log"
-            Start-Process -FilePath "$env:MT5_ROOT\metaeditor64.exe" -ArgumentList "/compile:`"$mq5`"", "/log:`"$log`"", "/inc:`"$env:MT5_ROOT\MQL5`"" -Wait
-            if (-not (Test-Path $log)) { Write-Host "$($preset.id): compiler produced no log"; $bad.Add($preset.id); continue }
-            $bytes = [System.IO.File]::ReadAllBytes($log)
-            if ($bytes.Length -ge 2 -and $bytes[0] -eq 255 -and $bytes[1] -eq 254) {
-              $text = [System.Text.Encoding]::Unicode.GetString($bytes)
-            } else {
-              $text = [System.Text.Encoding]::UTF8.GetString($bytes)
-            }
-            $result = ($text -split "`n" | Where-Object { $_ -match 'Result:' } | Select-Object -Last 1)
-            Write-Host "$($preset.id): $($result.Trim())"
-            $ex5 = Join-Path $dst "$rel.ex5"
-            if ($text -notmatch '0 errors' -or -not (Test-Path $ex5)) {
-              Write-Host $text
-              $bad.Add($preset.id)
-            }
-          }
-          $bad -join "`n" | Out-File "$env:RUNNER_TEMP\compile-failed.txt" -Encoding ascii
-          Write-Host "compile failures: $($bad.Count)"
 
       - name: First login (terminal update and symbol sync)
         shell: pwsh
@@ -143,6 +107,63 @@ jobs:
           if (-not $ok) { throw "Could not log in to the trade server" }
           Write-Host "Trade server accepted the login"
 
+      - name: Compile batch experts
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          function Find-Trade {
+            Get-ChildItem $env:MT5_ROOT, "$env:APPDATA\MetaQuotes" -Recurse -Filter Trade.mqh -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match '\\Include\\Trade\\Trade\.mqh$' } |
+              Select-Object -First 1
+          }
+          $trade = Find-Trade
+          if (-not $trade) {
+            Write-Host "Standard library missing, opening the terminal once more"
+            $again = Start-Process -FilePath "$env:MT5_ROOT\terminal64.exe" -ArgumentList "/portable" -PassThru
+            if (-not $again.WaitForExit(90000)) { }
+            Get-Process terminal64 -ErrorAction SilentlyContinue | Stop-Process -Force
+            Start-Sleep -Seconds 3
+            $trade = Find-Trade
+          }
+          if (-not $trade) { throw "Trade.mqh not found after login" }
+          $mql5 = $trade.Directory.Parent.Parent.FullName
+          Write-Host "MQL5 include root found"
+          $raw = python "$env:GITHUB_WORKSPACE\tools\robot_audit.py" --emit-batch "${{ matrix.batch }}"
+          if ($LASTEXITCODE -ne 0) { throw "batch plan rejected" }
+          $presets = @($raw | ConvertFrom-Json)
+          $dst = "$env:MT5_ROOT\MQL5\Experts\experts"
+          New-Item -ItemType Directory -Force $dst | Out-Null
+          Copy-Item "$env:GITHUB_WORKSPACE\Include" $dst -Recurse -Force
+          foreach ($d in @("hybrid", "archive")) {
+            Copy-Item "$env:GITHUB_WORKSPACE\$d" $dst -Recurse -Force
+          }
+          $bad = New-Object System.Collections.Generic.List[string]
+          foreach ($preset in $presets) {
+            $rel = ($preset.expert -replace '/', '\')
+            $mq5 = Join-Path $dst "$rel.mq5"
+            $log = "$env:RUNNER_TEMP\$($preset.id).compile.log"
+            Start-Process -FilePath "$env:MT5_ROOT\metaeditor64.exe" -ArgumentList "/compile:`"$mq5`"", "/log:`"$log`"", "/inc:`"$mql5`"" -Wait
+            if (-not (Test-Path $log)) { Write-Host "$($preset.id): compiler produced no log"; $bad.Add($preset.id); continue }
+            $bytes = [System.IO.File]::ReadAllBytes($log)
+            if ($bytes.Length -ge 2 -and $bytes[0] -eq 255 -and $bytes[1] -eq 254) {
+              $text = [System.Text.Encoding]::Unicode.GetString($bytes)
+            } else {
+              $text = [System.Text.Encoding]::UTF8.GetString($bytes)
+            }
+            $result = ($text -split "`n" | Where-Object { $_ -match 'Result:|Результат:' } | Select-Object -Last 1)
+            $resultLine = "$result".Trim()
+            Write-Host "$($preset.id): $resultLine"
+            $ex5 = Join-Path $dst "$rel.ex5"
+            if ($resultLine -notmatch '(?<!\d)0 errors' -or -not (Test-Path $ex5)) {
+              $errors = ($text -split "`n" | Where-Object { $_ -match 'error' } | Select-Object -First 20)
+              Write-Host ($errors -join "`n")
+              $bad.Add($preset.id)
+            }
+          }
+          $bad -join "`n" | Out-File "$env:RUNNER_TEMP\compile-failed.txt" -Encoding ascii
+          Write-Host "compile failures: $($bad.Count)"
+          cmd /c exit 0
+
       - name: Run confirmation tests
         shell: pwsh
         env:
@@ -150,6 +171,7 @@ jobs:
           MT5_PASSWORD: ${{ secrets.MT5_PASSWORD }}
           MT5_SERVER: ${{ secrets.MT5_SERVER }}
         run: |
+          $PSNativeCommandUseErrorActionPreference = $false
           foreach ($secret in @($env:MT5_LOGIN, $env:MT5_SERVER)) {
             if ($secret -and $secret -match '^[A-Za-z0-9._@\-]+$') { Write-Host "::add-mask::$secret" }
           }
@@ -225,7 +247,7 @@ jobs:
               }
               Write-Host "=== $id $($preset.expert) $($preset.period) 2026.01.01-2026.10.15 model 4 delay 200 deposit 10000 ==="
               $proc = Start-Process -FilePath "$env:MT5_ROOT\terminal64.exe" -ArgumentList "/portable", "/config:`"$ini`"" -PassThru
-              $finished = $proc.WaitForExit(50 * 60 * 1000)
+              $finished = $proc.WaitForExit(90 * 60 * 1000)
               if (-not $finished) {
                 $reason = "timeout"
               } else {
@@ -239,13 +261,14 @@ jobs:
                   if (Test-Path $xml) { $sanitizeArgs += @("--xml", $xml) }
                   python @sanitizeArgs
                   if ($LASTEXITCODE -eq 3) { $reason = "holdout" }
+                  elseif ($LASTEXITCODE -eq 4) { $reason = "no_history" }
                   elseif ($LASTEXITCODE -ne 0) { $reason = "sanitize" }
                 }
               }
             } finally {
               if (Test-Path $ini) { Remove-Item $ini -Force }
               Get-Process terminal64, metatester64 -ErrorAction SilentlyContinue | Stop-Process -Force
-              Start-Sleep -Seconds 2
+              Start-Sleep -Seconds 5
             }
             if ($reason) { $failed.Add("$id|$reason") }
           }
@@ -254,7 +277,7 @@ jobs:
           foreach ($row in $failed) {
             $parts = "$row".Split("|")
             if ($parts.Count -ne 2) { throw "failure record is invalid" }
-            if ($parts[1] -notin @("compile", "no_report", "timeout", "holdout", "sanitize")) { throw "failure reason is invalid" }
+            if ($parts[1] -notin @("compile", "no_report", "timeout", "holdout", "sanitize", "no_history")) { throw "failure reason is invalid" }
             $items += [ordered]@{ id = $parts[0]; reason = $parts[1] }
           }
           if ($items.Count -eq 0) {
@@ -265,6 +288,8 @@ jobs:
           }
           [System.IO.File]::WriteAllText($failPath, $json.Trim() + "`n")
           Write-Host "preset failures: $($failed.Count)"
+          $global:LASTEXITCODE = 0
+          cmd /c exit 0
 
       - name: Scan audit artifacts
         shell: pwsh

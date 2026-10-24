@@ -107,6 +107,19 @@ def drop_secret_rows(rows):
     return kept
 
 
+def redact_text(text):
+    server = os.environ.get("MT5_SERVER", "")
+    login = os.environ.get("MT5_LOGIN", "")
+    password = os.environ.get("MT5_PASSWORD", "")
+    if server and len(server) >= 4 and re.search(r"[A-Za-z]", server):
+        text = text.replace(server, "[redacted]")
+    if login and re.fullmatch(r"\d{5,}", login):
+        text = re.sub(rf"(?<!\d){re.escape(login)}(?!\d)", "[redacted]", text)
+    if password and len(password) >= 8 and re.search(r"[A-Za-z]", password):
+        text = text.replace(password, "[redacted]")
+    return IP_RE.sub("[redacted]", text)
+
+
 def rows_to_html(rows):
     lines = ["<!DOCTYPE html>", "<html><body><table>"]
     for row in rows:
@@ -153,6 +166,30 @@ def _quality(text):
     if not match:
         return ""
     return re.sub(r"\s+", "", match.group(1)).replace(",", ".")
+
+
+def _quality_value(rows, text):
+    for row in rows:
+        for index, cell in enumerate(row):
+            if _label(cell) not in ("history quality", "качество истории"):
+                continue
+            match = re.search(r"([0-9]+(?:[.,][0-9]+)?\s*%|n/a)", " ".join(row[index:]), re.I)
+            if match:
+                return re.sub(r"\s+", "", match.group(1)).replace(",", ".")
+    return _quality(text)
+
+
+def _real_ticks(quality):
+    if not quality or quality.lower() == "n/a":
+        return False
+    if re.fullmatch(r"0+(?:\.0+)?%", quality):
+        return False
+    return True
+
+
+def _covers_window(text):
+    normalized = text.replace("-", ".")
+    return DATE_FROM in normalized and DATE_TO in normalized
 
 
 def _build(text):
@@ -254,14 +291,19 @@ def scrub_xml(text):
         "",
         text,
     )
-    return IP_RE.sub("[redacted]", cleaned)
+    return redact_text(cleaned)
 
 
 def summarize(text):
-    rows = drop_secret_rows(html_rows(text))
+    rows = [[redact_text(cell) for cell in row] for row in drop_secret_rows(html_rows(text))]
     body = rows_to_html(rows)
     plain = "\n".join(" ".join(row) for row in rows)
     scan_text(body + "\n" + plain)
+    if not (_covers_window(text) or _covers_window(plain)):
+        _fail("history window is incomplete")
+    quality = _quality_value(rows, text)
+    if not _real_ticks(quality):
+        _fail("history quality is not from real ticks")
     metrics = _metrics(rows)
     deals = closing_deals(_deals(rows))
     months = month_nets(deals)
@@ -288,7 +330,7 @@ def summarize(text):
             "equity_dd_abs": metrics.get("equity_dd_abs", ""),
             "equity_dd_max": metrics.get("equity_dd_max", ""),
             "equity_dd_rel": metrics.get("equity_dd_rel", ""),
-            "history_quality": _quality(text),
+            "history_quality": quality,
             "terminal_build": _build(text),
             "months": months,
         },
@@ -316,8 +358,7 @@ def write_sanitized(text, spec_id, out_dir, xml_text=None):
     summary["id"] = spec_id
     json_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     if xml_text is not None:
-        scan_text(xml_text)
-        cleaned = IP_RE.sub("[redacted]", xml_text)
+        cleaned = redact_text(xml_text)
         scan_text(cleaned)
         (out / f"{spec_id}.xml").write_text(cleaned, encoding="utf-8")
     return summary
@@ -454,7 +495,9 @@ def scan_dir(path):
 def _sample_report():
     return """<!DOCTYPE html><body><table>
 <tr><td>Account:</td><td>12345678</td><td>Server:</td><td>Exness-MT5Trial9</td></tr>
+<tr><td>Broker-Live01</td><td>10.1.2.3</td></tr>
 <tr><td>Name:</td><td>Trader Name</td><td>Company:</td><td>Exness Technologies Ltd</td></tr>
+<tr><td>Period:</td><td>M1 (2026.01.01 - 2026.10.15)</td></tr>
 <tr><td colspan="2">History Quality:</td><td><b>100%</b></td></tr>
 <tr><td>Build</td><td>6283</td></tr>
 <tr><td>Total Net Profit:</td><td>150.50</td><td>Balance Drawdown Absolute:</td><td>40.00</td><td>Equity Drawdown Absolute:</td><td>55.25</td></tr>
@@ -499,6 +542,17 @@ def self_test():
         raise AssertionError("months")
     if parsed["summary"]["months"]["2026-02"] != 0:
         raise AssertionError("empty month")
+    if "10.1.2.3" in parsed["html"]:
+        raise AssertionError("address survived")
+    os.environ["MT5_SERVER"] = "Broker-Live01"
+    try:
+        hidden = summarize(sample)
+        if "Broker-Live01" in hidden["html"] or "10.1.2.3" in hidden["html"]:
+            raise AssertionError("server cell survived")
+        if "[redacted]" not in hidden["html"]:
+            raise AssertionError("server cell was not redacted")
+    finally:
+        os.environ.pop("MT5_SERVER", None)
     leaked = sample.replace("2026.10.15 20:57:00", "2026.10.16 00:00:01")
     try:
         summarize(leaked)
@@ -506,6 +560,20 @@ def self_test():
     except ValueError as exc:
         if "holdout" not in str(exc):
             raise
+    short = sample.replace("2026.01.01", "2025.06.01", 1)
+    try:
+        summarize(short)
+        raise AssertionError("short window must fail")
+    except ValueError as exc:
+        if "history" not in str(exc):
+            raise
+    for marker in ("0%", "n/a"):
+        try:
+            summarize(sample.replace("<b>100%</b>", f"<b>{marker}</b>", 1))
+            raise AssertionError("empty history must fail")
+        except ValueError as exc:
+            if "history" not in str(exc):
+                raise
     print("robot_audit self-test passed")
 
 
@@ -587,4 +655,6 @@ if __name__ == "__main__":
         print("failure: " + message)
         if "holdout" in message:
             sys.exit(3)
+        if "history" in message:
+            sys.exit(4)
         sys.exit(2)
