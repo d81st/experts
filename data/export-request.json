@@ -1,9 +1,9 @@
 {
   "run": true,
   "symbol": "XAUUSDm",
-  "from": "2026-04-01",
-  "to": "2026-06-30",
+  "from": "2026-07-01",
+  "to": "2026-09-30",
   "gap_minutes": 5,
   "publish_release": false,
-  "note": "batch-2026-04-to-2026-06"
+  "note": "batch-2026-07-to-2026-09"
 }
