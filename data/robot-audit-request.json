@@ -1,0 +1,5 @@
+{
+  "run": true,
+  "note": "confirm-2026-all",
+  "batches": ["a", "b", "c", "d", "e", "f"]
+}
