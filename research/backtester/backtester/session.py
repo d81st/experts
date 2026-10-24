@@ -1,26 +1,20 @@
-"""Торговая сессия XAUUSDm по выгрузке терминала.
+"""Сессия XAUUSDm: пауза Нью-Йорка, торговля с первого тика после неё.
 
-Окна берутся из sessions.trade файла data/symbol-spec/XAUUSDm.json,
-серверное время UTC+0. Дамп снят 2026-10-24, в летнее время США:
+Сервер Exness — UTC+0 и своё летнее время не переводит. Дыра в тиках
+идёт за Америкой/Нью-Йорк:
 
-- понедельник–четверг: 00:00–20:58 и 22:01–24:00;
-- пятница: 00:00–20:58;
-- воскресенье: с 22:05;
-- суббота закрыта.
+- последний тик около 16:58 ET;
+- первый тик после паузы — медиана 18:00:32 ET (p95 +158 с от 18:00).
+  Летом это 22:00:30 UTC, зимой около 23:01 UTC.
 
-Полночь (00:00 и 24:00) — якорь суток и при сдвиге не двигается.
-Сдвигаются только внутренние границы паузы.
+Ворота по умолчанию открыты с 18:00 ET, то есть с 22:00 UTC летом и
+с 23:00 UTC зимой (`--session-shift auto`). Тик 22:00:30 уже внутри
+сессии: номинальные 22:01 из `sessions.trade` (дамп 2026-10-24) его
+не держат. Таблица trade остаётся режимом `--session-gate trade`.
 
-- captured, сдвиг 0: окна как в файле. Окно сверки июнь–октябрь 2026
-  целиком в летнем времени США, для него это и есть расписание.
-- winter, сдвиг +1 час: воскресенье с 23:05, пн–чт 00:00–21:58 и
-  23:01–24:00, пятница до 21:58. Это гипотеза на зиму, дамп её не содержит.
-- auto: +1 час, когда в США зимнее время (до второго воскресенья марта
-  07:00 UTC и с первого воскресенья ноября 06:00 UTC). Тоже не проверено
-  отдельной зимней выгрузкой.
-
-Котировочные сессии (они чуть шире) воротами входа не являются.
-Праздники не моделируются. SL и TP обрабатываются на любом тике.
+Закрыто [16:58, 18:00) ET в понедельник–четверг. Пятница закрывается
+в 16:58 ET до воскресенья 18:00 ET. Суббота закрыта. Полночь UTC не
+сдвигается. Праздники не моделируются. SL и TP — на любом тике.
 """
 
 from __future__ import annotations
@@ -47,6 +41,27 @@ def _nth_sunday(year: int, month: int, n: int) -> int:
         if d.month == month and d.weekday() == 6
     ]
     return sundays[n - 1].day
+
+
+_DST: dict[int, tuple[int, int]] = {}
+
+
+def us_dst_bounds_msc(year: int) -> tuple[int, int]:
+    cached = _DST.get(year)
+    if cached is not None:
+        return cached
+    start = datetime(year, 3, _nth_sunday(year, 3, 2), 7, tzinfo=timezone.utc)
+    end = datetime(year, 11, _nth_sunday(year, 11, 1), 6, tzinfo=timezone.utc)
+    bounds = (int(start.timestamp() * 1000), int(end.timestamp() * 1000))
+    _DST[year] = bounds
+    return bounds
+
+
+def is_us_dst(time_msc: int) -> bool:
+    """Летнее время США. Сервер Exness его не переводит."""
+    year = datetime.fromtimestamp(time_msc / 1000.0, timezone.utc).year
+    start, end = us_dst_bounds_msc(year)
+    return start <= time_msc < end
 
 
 def shift_edge(seconds: int, hours: int) -> int:
@@ -79,36 +94,27 @@ class AlwaysOpen:
 class ExnessGoldSession:
     def __init__(
         self,
-        shift: Shift = "captured",
+        shift: Shift = "auto",
         ranges: tuple[tuple[tuple[int, int], ...], ...] | None = None,
+        gate: str = "quote",
     ) -> None:
+        if gate not in ("quote", "trade"):
+            raise ValueError("gate должен быть quote или trade")
+        self.gate = gate
         if ranges is None:
             from .symbol_spec import load_xauusdm
 
-            ranges = load_xauusdm().trade_ranges
+            captured = load_xauusdm()
+            ranges = captured.quote_ranges if gate == "quote" else captured.trade_ranges
         if len(ranges) != 7:
             raise ValueError("сессия: нужно 7 дней, понедельник = 0")
         self.base = tuple(tuple(day) for day in ranges)
         self.shift = shift
-        self._dst: dict[int, tuple[int, int]] = {}
         self._day: int | None = None
         self._ranges: list[tuple[int, int]] = []
 
-    def _dst_bounds_msc(self, year: int) -> tuple[int, int]:
-        cached = self._dst.get(year)
-        if cached is not None:
-            return cached
-        start = datetime(year, 3, _nth_sunday(year, 3, 2), 7, tzinfo=timezone.utc)
-        end = datetime(year, 11, _nth_sunday(year, 11, 1), 6, tzinfo=timezone.utc)
-        bounds = (int(start.timestamp() * 1000), int(end.timestamp() * 1000))
-        self._dst[year] = bounds
-        return bounds
-
     def is_dst(self, time_msc: int) -> bool:
-        """Летнее время США. Сервер Exness его не переводит; это только режим auto."""
-        year = datetime.fromtimestamp(time_msc / 1000.0, timezone.utc).year
-        start, end = self._dst_bounds_msc(year)
-        return start <= time_msc < end
+        return is_us_dst(time_msc)
 
     def shift_hours(self, time_msc: int) -> int:
         if self.shift == "captured":

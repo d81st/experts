@@ -45,6 +45,11 @@ def test_loaded_spec_matches_terminal_dump():
     assert captured.swap_rollover3days == "WEDNESDAY"
     assert captured.swap_multipliers == (1.0, 1.0, 3.0, 1.0, 1.0, 0.0, 0.0)
     assert captured.captured_date == "2026-10-24"
+    # Понедельник: quote открывается в 22:00, trade в 22:01. Воскресенье 22:00 и 22:05.
+    assert captured.quote_ranges[0][1][0] == 22 * 3600
+    assert captured.trade_ranges[0][1][0] == 22 * 3600 + 60
+    assert captured.quote_ranges[6][0][0] == 22 * 3600
+    assert captured.trade_ranges[6][0][0] == 22 * 3600 + 5 * 60
     assert captured.path == "data/symbol-spec/XAUUSDm.json"
     assert captured.server_utc_offset_seconds == 0
 

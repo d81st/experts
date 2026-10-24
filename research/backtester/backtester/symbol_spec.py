@@ -36,6 +36,7 @@ class CapturedSymbol:
     triple_swap_weekday: int
     swap_multipliers: tuple[float, ...]
     trade_ranges: tuple[tuple[tuple[int, int], ...], ...]
+    quote_ranges: tuple[tuple[tuple[int, int], ...], ...]
     server_utc_offset_seconds: int
 
 
@@ -68,15 +69,15 @@ def _end_seconds(raw: int) -> int:
     return raw
 
 
-def _trade_ranges(sessions: dict) -> tuple[tuple[tuple[int, int], ...], ...]:
-    trade = sessions.get("trade")
-    if not isinstance(trade, dict):
-        raise ConfigError("в спецификации нет sessions.trade")
+def _session_ranges(sessions: dict, kind: str) -> tuple[tuple[tuple[int, int], ...], ...]:
+    table = sessions.get(kind)
+    if not isinstance(table, dict):
+        raise ConfigError(f"в спецификации нет sessions.{kind}")
     by_mt5: list[tuple[tuple[int, int], ...]] = []
     for name in MT5_DAYS:
-        rows = trade.get(name)
+        rows = table.get(name)
         if not isinstance(rows, list):
-            raise ConfigError(f"sessions.trade.{name} не список")
+            raise ConfigError(f"sessions.{kind}.{name} не список")
         windows: list[tuple[int, int]] = []
         for row in rows:
             start = int(row["from_seconds"])
@@ -86,6 +87,10 @@ def _trade_ranges(sessions: dict) -> tuple[tuple[tuple[int, int], ...], ...]:
             windows.append((start, end))
         by_mt5.append(tuple(windows))
     return tuple(by_mt5[index] for index in MON0_FROM_MT5)
+
+
+def _trade_ranges(sessions: dict) -> tuple[tuple[tuple[int, int], ...], ...]:
+    return _session_ranges(sessions, "trade")
 
 
 def _multipliers(raw: dict) -> tuple[float, ...]:
@@ -185,7 +190,8 @@ def load_xauusdm(leverage: float = 2000.0, path: Path | None = None) -> Captured
         swap_rollover3days=str(rollover.get("name", "")),
         triple_swap_weekday=triple,
         swap_multipliers=multipliers,
-        trade_ranges=_trade_ranges(raw.get("sessions") or {}),
+        trade_ranges=_session_ranges(raw.get("sessions") or {}, "trade"),
+        quote_ranges=_session_ranges(raw.get("sessions") or {}, "quote"),
         server_utc_offset_seconds=offset,
     )
 

@@ -48,6 +48,8 @@ class EngineConfig:
     triple_swap_weekday: int = 2
     # 7 множителей, понедельник = 0. None — прежняя схема triple_swap_weekday.
     swap_multipliers: tuple[float, ...] | None = None
+    # exness — 17:00 ET; tester — полночь UTC, как отчёт MT5.
+    swap_clock: str = "exness"
     trading_from_msc: int | None = None
     close_at_end: bool = False
     check_margin: bool = True
@@ -63,6 +65,8 @@ class EngineConfig:
             raise ConfigError("limit_penetration < 0")
         if self.swap_multipliers is not None and len(self.swap_multipliers) != 7:
             raise ConfigError("swap_multipliers: нужно 7 чисел, понедельник = 0")
+        if self.swap_clock not in ("exness", "tester"):
+            raise ConfigError("swap_clock должен быть exness или tester")
 
 
 @dataclass
@@ -494,6 +498,7 @@ class Engine:
                 pos.last_swap_msc,
                 triple_weekday=self.cfg.triple_swap_weekday,
                 multipliers=self.cfg.swap_multipliers,
+                clock=self.cfg.swap_clock,
             )
             if not charges:
                 continue

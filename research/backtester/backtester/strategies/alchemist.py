@@ -106,6 +106,7 @@ class AlchemistStrategy:
         self.pending_sig = 0
         self.pending_day = 0
         self.counts: dict[str, int] = {}
+        self.decisions: list[dict] = []
         self._ema: list[float] | None = None
         self._ema_n = -1
 
@@ -131,6 +132,16 @@ class AlchemistStrategy:
 
     def _bump(self, name: str) -> None:
         self.counts[name] = self.counts.get(name, 0) + 1
+
+    def _note(self, ctx: Context, event: str, sig: int) -> None:
+        self.decisions.append(
+            {
+                "time_msc": ctx.now_msc(),
+                "event": event,
+                "sig": sig,
+                "day": self.pending_day,
+            }
+        )
 
     def _on_new_bar(self, ctx: Context) -> None:
         fresh = self._signal(ctx)
@@ -173,6 +184,7 @@ class AlchemistStrategy:
             else:
                 if sig != 0:
                     self._bump("busy")
+                    self._note(ctx, "busy", sig)
                 return
         elif sig != 0:
             self._bump("signals")
@@ -180,6 +192,7 @@ class AlchemistStrategy:
             return
         if self.cfg.day_trend != "off" and self.pending_day != sig:
             self._bump("day")
+            self._note(ctx, "day", sig)
             return
         if (self.cfg.trade_side == "long" and sig != 1) or (self.cfg.trade_side == "short" and sig != -1):
             self._bump("side")
@@ -216,6 +229,7 @@ class AlchemistStrategy:
         spread = tick.ask - tick.bid
         if self.cfg.max_spread_to_sl > 0.0 and spread > self.cfg.max_spread_to_sl * dist:
             self._bump("spread")
+            self._note(ctx, "spread", direction)
             return
         sl = round_price(entry - direction * dist, self.digits)
         tp = None
@@ -233,6 +247,7 @@ class AlchemistStrategy:
             raise
         if lot <= 0.0:
             self._bump("sizing")
+            self._note(ctx, "sizing", direction)
             return
         if direction == 1:
             order_id = ctx.buy_market(lot, sl, tp, self.cfg.comment)
@@ -240,6 +255,7 @@ class AlchemistStrategy:
             order_id = ctx.sell_market(lot, sl, tp, self.cfg.comment)
         if order_id is not None:
             self._bump("trades")
+            self._note(ctx, "trade", direction)
 
     def _signal(self, ctx: Context) -> int:
         h1 = ctx.bars(self.cfg.timeframe)

@@ -87,7 +87,7 @@ def test_stitch_has_no_gap_no_overlap_and_keeps_source():
 
 
 def test_session_halt_is_not_a_boundary_gap_but_a_missing_open_hour_is():
-    # Понедельник 15 июня, пауза дампа 20:58–22:01. Тик 22:05 открывает час 22:00.
+    # Понедельник 15 июня, пауза котировок 20:58–22:00. Тик 22:05 открывает час 22:00.
     day = msc(2026, 6, 15)
     session = ExnessGoldSession()
     bars = [bar("H1", day + 19 * H1, 100.0, "dukascopy"), bar("H1", day + 20 * H1, 101.0, "dukascopy")]

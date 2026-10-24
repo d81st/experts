@@ -137,8 +137,83 @@ def _load_warmup_m1(path: Path, before_msc: int) -> list[Bar]:
     return closed
 
 
+def _median(values: list[float]) -> float:
+    ordered = sorted(values)
+    mid = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[mid]
+    return (ordered[mid - 1] + ordered[mid]) / 2.0
+
+
+def _d1_history_note(engine, warmup_m1: list[Bar], trade_from: int | None, end_msc: int) -> dict:
+    """Сколько фильтров D1 меняет прогрев и насколько OHLC Dukascopy расходится с Exness.
+
+    Пересечение — только сутки до конца прогона. Холдаут сюда не входит:
+    вызывающий уже отрезал тики.
+    """
+    from .structure import d1_trend
+
+    d1 = list(engine.bars.closed.get("D1", []))
+    h1 = list(engine.bars.closed.get("H1", []))
+    period = _period_of(h1[0]) if h1 else 3_600_000
+    live = [bar for bar in d1 if bar.source != "dukascopy"]
+    flips: list[str] = []
+    checked = 0
+    for bar in h1:
+        as_of = bar.time_msc + period
+        if trade_from is not None and as_of < trade_from:
+            continue
+        if as_of >= end_msc:
+            continue
+        checked += 1
+        if d1_trend(d1, as_of, "structure", 5) != d1_trend(live, as_of, "structure", 5):
+            flips.append(_iso(as_of))
+    duka_d1 = {bar.time_msc: bar for bar in aggregate_bars(warmup_m1, "D1")}
+    overlap_close: list[float] = []
+    overlap_high: list[float] = []
+    overlap_low: list[float] = []
+    replaced: list[Bar] = []
+    for bar in d1:
+        other = duka_d1.get(bar.time_msc)
+        if other is None or bar.source == "dukascopy":
+            replaced.append(bar)
+            continue
+        if bar.time_msc >= end_msc:
+            replaced.append(bar)
+            continue
+        overlap_close.append(abs(bar.close - other.close))
+        overlap_high.append(abs(bar.high - other.high))
+        overlap_low.append(abs(bar.low - other.low))
+        replaced.append(other)
+    ohlc_flips: list[str] = []
+    if overlap_close:
+        for bar in h1:
+            as_of = bar.time_msc + period
+            if trade_from is not None and as_of < trade_from:
+                continue
+            if as_of >= end_msc:
+                continue
+            if d1_trend(d1, as_of, "structure", 5) != d1_trend(replaced, as_of, "structure", 5):
+                ohlc_flips.append(_iso(as_of))
+    return {
+        "d1_bars": len(d1),
+        "d1_dukascopy": sum(1 for bar in d1 if bar.source == "dukascopy"),
+        "d1_live": len(live),
+        "h1_checked": checked,
+        "trend_flips_vs_live_only": len(flips),
+        "flip_asof": flips,
+        "overlap_days": len(overlap_close),
+        "overlap_median_abs_close": None if not overlap_close else _median(overlap_close),
+        "overlap_median_abs_high": None if not overlap_high else _median(overlap_high),
+        "overlap_median_abs_low": None if not overlap_low else _median(overlap_low),
+        "trend_flips_if_overlap_uses_dukascopy": len(ohlc_flips),
+        "ohlc_flip_asof": ohlc_flips,
+    }
+
+
 def _session(args: argparse.Namespace, captured: CapturedSymbol) -> ExnessGoldSession:
-    return ExnessGoldSession(shift=args.session_shift, ranges=captured.trade_ranges)
+    ranges = captured.quote_ranges if args.session_gate == "quote" else captured.trade_ranges
+    return ExnessGoldSession(shift=args.session_shift, ranges=ranges, gate=args.session_gate)
 
 
 def _swap_from_args(args: argparse.Namespace, captured: CapturedSymbol) -> dict:
@@ -155,6 +230,7 @@ def _swap_from_args(args: argparse.Namespace, captured: CapturedSymbol) -> dict:
             "triple_swap_weekday": captured.triple_swap_weekday,
             "swap_multipliers": captured.swap_multipliers,
             "swap_schedule": "symbol-spec",
+            "swap_clock": args.swap_clock,
         }
     return {
         "swap_long_per_lot": long_rate,
@@ -162,6 +238,7 @@ def _swap_from_args(args: argparse.Namespace, captured: CapturedSymbol) -> dict:
         "triple_swap_weekday": args.triple_swap_weekday,
         "swap_multipliers": None,
         "swap_schedule": "triple-weekday",
+        "swap_clock": args.swap_clock,
     }
 
 
@@ -191,6 +268,7 @@ def _cmd_alchemist(args: argparse.Namespace) -> int:
             swap_short_per_lot=costs["swap_short_per_lot"],
             triple_swap_weekday=costs["triple_swap_weekday"],
             swap_multipliers=costs["swap_multipliers"],
+            swap_clock=costs["swap_clock"],
             trading_from_msc=trade_from,
             close_at_end=not args.no_close_at_end,
             sample_tf=cfg.timeframe,
@@ -295,6 +373,7 @@ def _cmd_alchemist(args: argparse.Namespace) -> int:
         "swap_long_points": captured.swap_long_points,
         "swap_short_points": captured.swap_short_points,
         "swap_rollover3days": captured.swap_rollover3days,
+        "session_gate": args.session_gate,
         "session_shift": args.session_shift,
         "note": (
             "выгрузка терминала 2026-10-24, летнее время США; "
@@ -311,12 +390,19 @@ def _cmd_alchemist(args: argparse.Namespace) -> int:
         "swap_long_points": captured.swap_long_points,
         "swap_short_points": captured.swap_short_points,
         "swap_schedule": costs["swap_schedule"],
+        "swap_clock": costs["swap_clock"],
         "triple_swap_weekday": costs["triple_swap_weekday"],
         "commission_per_lot_side": -abs(args.commission_per_lot_side),
     }
     if warmup_note is not None:
+        warmup_note["d1"] = _d1_history_note(engine, warmup_m1, trade_from, end_msc)
         metrics["warmup"] = warmup_note
     metrics["strategy_counts"] = result.strategy_counts
+    if hasattr(strategy, "decisions"):
+        metrics["decisions"] = [
+            {"time": _iso(row["time_msc"]), "event": row["event"], "sig": row["sig"], "day": row["day"]}
+            for row in strategy.decisions
+        ]
     metrics["rejected"] = result.rejected
     metrics["open_positions"] = len(result.open_positions)
     metrics["tick_count"] = result.tick_count
@@ -451,10 +537,22 @@ def main(argv: list[str] | None = None) -> None:
         help="0=пн … 2=ср. Если задан, таблица множителей файла не используется",
     )
     run.add_argument(
+        "--swap-clock",
+        choices=("exness", "tester"),
+        default="exness",
+        help="exness — своп в 17:00 ET; tester — полночь UTC, как отчёт MT5",
+    )
+    run.add_argument(
+        "--session-gate",
+        choices=("quote", "trade"),
+        default="quote",
+        help="quote — открыто с 18:00 ET, первый тик после паузы уже торгуется; trade — номинальные 22:01 из дампа",
+    )
+    run.add_argument(
         "--session-shift",
         choices=("captured", "winter", "auto"),
-        default="captured",
-        help="captured — окна дампа 2026-10-24; winter — +1ч на границах паузы; auto — +1ч вне летнего времени США",
+        default="auto",
+        help="auto — зима/лето по DST США; captured — окна дампа как есть; winter — всегда +1ч",
     )
     run.add_argument("--commission-per-lot-side", type=float, default=0.0, help="положительное число вычитается")
     run.add_argument("--risk-basis", choices=("balance", "equity"), default=None)
@@ -494,9 +592,14 @@ def main(argv: list[str] | None = None) -> None:
     off.add_argument("--start", required=True)
     off.add_argument("--to", required=True, help="последний день включительно")
     off.add_argument(
+        "--session-gate",
+        choices=("quote", "trade"),
+        default="quote",
+    )
+    off.add_argument(
         "--session-shift",
         choices=("captured", "winter", "auto"),
-        default="captured",
+        default="auto",
     )
     off.add_argument("--allow-holdout", action="store_true")
     off.set_defaults(func=_cmd_offset)

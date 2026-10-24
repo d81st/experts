@@ -126,7 +126,7 @@ def test_pending_signal_waits_for_session_and_is_not_cleared_by_flat_bar():
     engine = Engine(
         EngineConfig(symbol=spec, deposit=10_000, latency_ms=0, close_at_end=False),
         strategy,
-        session=ExnessGoldSession(),
+        session=ExnessGoldSession(gate="trade", shift="captured"),
     )
     result = engine.run(ticks)
     assert result.trades == []
