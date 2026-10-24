@@ -59,9 +59,39 @@ def us_dst_bounds_msc(year: int) -> tuple[int, int]:
 
 def is_us_dst(time_msc: int) -> bool:
     """Летнее время США. Сервер Exness его не переводит."""
-    year = datetime.fromtimestamp(time_msc / 1000.0, timezone.utc).year
-    start, end = us_dst_bounds_msc(year)
+    start, end = us_dst_bounds_msc(_utc_year(time_msc))
     return start <= time_msc < end
+
+
+_YEAR_CACHE = [0, 0, 0]
+
+
+def _utc_year(time_msc: int) -> int:
+    """Год UTC. Границы года считаются один раз, не на каждый тик."""
+    year, start, end = _YEAR_CACHE
+    if start <= time_msc < end and year:
+        return year
+    year = datetime.fromtimestamp(time_msc / 1000.0, timezone.utc).year
+    start = int(datetime(year, 1, 1, tzinfo=timezone.utc).timestamp() * 1000)
+    end = int(datetime(year + 1, 1, 1, tzinfo=timezone.utc).timestamp() * 1000)
+    _YEAR_CACHE[:] = [year, start, end]
+    return year
+
+
+def et_hour_minute(time_msc: int) -> tuple[int, int]:
+    """Час и минута Нью-Йорка. Лето UTC−4, зима UTC−5, по тем же границам, что и сессия."""
+    start, end = us_dst_bounds_msc(_utc_year(time_msc))
+    offset_s = 4 * 3600 if start <= time_msc < end else 5 * 3600
+    sec = (time_msc // 1000 - offset_s) % DAY_S
+    return sec // 3600, (sec % 3600) // 60
+
+
+def in_reopen_stale_window(time_msc: int, minutes: int = 2) -> bool:
+    """Первые минуты после 18:00 ET. У Dukascopy там часто висит допаузная цена."""
+    if minutes <= 0:
+        return False
+    hour, minute = et_hour_minute(time_msc)
+    return hour == 18 and minute < minutes
 
 
 def shift_edge(seconds: int, hours: int) -> int:

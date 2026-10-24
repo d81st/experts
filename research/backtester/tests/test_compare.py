@@ -10,7 +10,15 @@ from pathlib import Path
 import pytest
 
 from backtester.cli import main
-from backtester.compare import OurTrade, compare_trades, load_our_csv, tolerance_profile
+from backtester.compare import (
+    CloseDeal,
+    OurTrade,
+    compare_closes,
+    compare_trades,
+    load_closing_deals,
+    load_our_csv,
+    tolerance_profile,
+)
 from backtester.mt5report import Mt5Trade, load_mt5, parse_mt5_html
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mt5_min.htm"
@@ -107,6 +115,47 @@ def test_aligned_profile_ignores_subsecond_price_noise():
     assert tolerance_profile("aligned")["exit_time_sec"] == 5.0
 
 
+def test_closing_deals_pair_on_exit_price_when_the_second_is_shared():
+    """Два выхода в 20:00 различаются ценой, а не порядком строк."""
+    when = datetime(2026, 1, 5, 20, tzinfo=timezone.utc)
+    other = datetime(2026, 1, 6, 15, 6, 12, tzinfo=timezone.utc)
+
+    def our(exit_time, price, volume, net):
+        return OurTrade(exit_time, exit_time, 1, volume, price - 10, price, None, net, "time", "")
+
+    def deal(exit_time, price, volume, net):
+        return CloseDeal(exit_time, 1, volume, price, 0, 0, net, net)
+
+    ours = [our(when, 4760.6, 0.04, 168), our(when, 4439.7, 0.04, 38), our(other, 4341.0, 0.07, -289)]
+    deals = [deal(when, 4439.7, 0.04, 38), deal(when, 4760.6, 0.04, 168), deal(other, 4341.076, 0.07, -289)]
+    strict = compare_closes(
+        ours, deals, pair_sec=180, exit_time_sec=5, price_tol=0.05, pair_price_tol=3, volume_tol=0.001,
+    )
+    aligned = compare_closes(
+        ours, deals, pair_sec=180, exit_time_sec=5, price_tol=0.50, pair_price_tol=3, volume_tol=0.001,
+    )
+    assert strict["paired"] == 3
+    assert strict["exact"] == 2
+    assert strict["mt5_only"] == 0
+    assert aligned["exact"] == 3
+    assert aligned["ours_only"] == 0
+
+
+def test_load_closing_deals_reads_sell_out_as_long(tmp_path: Path):
+    path = tmp_path / "deals.csv"
+    path.write_text(
+        "time,type,direction,volume,price,commission,swap,profit,net\n"
+        "2026.01.02 15:06:12,sell,out,0.07,4341.076,0.00,0.00,-289.06,-289.06\n"
+        "2026.01.05 20:00:00,buy,out,0.04,4439.707,0.00,-1.00,38.18,37.18\n",
+        encoding="utf-8",
+    )
+    deals = load_closing_deals(path)
+    assert deals[0].side == 1
+    assert deals[1].side == -1
+    assert deals[1].swap == -1
+    assert deals[1].net == 37.18
+
+
 def test_cli_module_answers_help():
     proc = subprocess.run(
         [sys.executable, "-m", "backtester.cli", "--help"],
@@ -116,6 +165,7 @@ def test_cli_module_answers_help():
     )
     assert proc.returncode == 0
     assert "alchemist" in proc.stdout
+    assert "asia" in proc.stdout
 
 
 def test_cli_refuses_holdout():

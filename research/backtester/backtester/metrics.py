@@ -11,7 +11,7 @@ import math
 import random
 from typing import Iterable
 
-from .types import Drawdown, Trade
+from .types import Drawdown, EquityPoint, Trade
 
 
 def _pf(values: list[float]) -> float | None:
@@ -86,6 +86,7 @@ def compute_metrics(
     pf_r = _pf(rs) if rs else None
     avg_r = sum(rs) / len(rs) if rs else None
     net_r = sum(rs) if rs else None
+    avg_net = sum(nets) / n if n else None
 
     boot = {
         "n": bootstrap,
@@ -96,6 +97,7 @@ def compute_metrics(
     if bootstrap > 0 and n > 0:
         rng = random.Random(seed)
         avg_s: list[float] = []
+        avg_net_s: list[float] = []
         pfr_s: list[float] = []
         netr_s: list[float] = []
         pfm_s: list[float] = []
@@ -104,6 +106,7 @@ def compute_metrics(
             sample = [trades[rng.randrange(n)] for _ in range(n)]
             sample_nets = [t.net_pnl for t in sample]
             sample_r = [t.r_multiple for t in sample if t.r_multiple is not None]
+            avg_net_s.append(sum(sample_nets) / n)
             if sample_r:
                 avg_s.append(sum(sample_r) / len(sample_r))
                 netr_s.append(sum(sample_r))
@@ -115,6 +118,7 @@ def compute_metrics(
                 pfm_s.append(pfm)
             win_s.append(sum(1 for v in sample_nets if v > 0.0) / n)
         boot["avg_r_ci"] = _ci(avg_s, alpha)
+        boot["avg_net_ci"] = _ci(avg_net_s, alpha)
         boot["net_r_ci"] = _ci(netr_s, alpha)
         boot["profit_factor_r_ci"] = _ci(pfr_s, alpha)
         boot["profit_factor_money_ci"] = _ci(pfm_s, alpha)
@@ -140,6 +144,7 @@ def compute_metrics(
         "gross_loss_money": gross_loss,
         "profit_factor_money": _json_num(pf_money),
         "profit_factor_money_infinite": bool(pf_money is not None and math.isinf(pf_money)),
+        "avg_net_money": avg_net,
         "avg_r": avg_r,
         "net_r": net_r,
         "profit_factor_r": _json_num(pf_r),
@@ -159,6 +164,7 @@ def compute_metrics(
         },
         "bootstrap": {
             **{k: v for k, v in boot.items() if not k.endswith("_ci")},
+            "avg_net_ci95": pack_ci(boot.get("avg_net_ci")),
             "avg_r_ci95": pack_ci(boot.get("avg_r_ci")),
             "net_r_ci95": pack_ci(boot.get("net_r_ci")),
             "profit_factor_r_ci95": pack_ci(boot.get("profit_factor_r_ci")),
@@ -191,6 +197,7 @@ def format_metrics_ru(metrics: dict) -> str:
         f"Профит-фактор, деньги: {pf_m}",
         f"Профит-фактор, R: {pf_r}   95% ДИ {ci('profit_factor_r_ci95')}",
         f"Винрейт: {metrics['win_rate']}",
+        f"Средняя сделка, деньги: {metrics.get('avg_net_money')}   95% ДИ {ci('avg_net_ci95')}",
         f"Средний R: {metrics['avg_r']}   95% ДИ {ci('avg_r_ci95')}",
         f"Сумма R: {metrics['net_r']}   95% ДИ {ci('net_r_ci95')}",
         f"Просадка по балансу: {metrics['max_drawdown_balance_money']:.2f} "
@@ -202,3 +209,91 @@ def format_metrics_ru(metrics: dict) -> str:
         f"Бутстрэп: {b.get('n')} выборок, seed {b.get('seed')}, метод percentile",
     ]
     return "\n".join(lines) + "\n"
+
+
+def _window_drawdown(points: list[EquityPoint], start_msc: int, end_msc: int, deposit: float) -> Drawdown:
+    """Просадка внутри окна по записанной кривой, не по каждому тику.
+
+    Пик считается заново от баланса и средств на входе в окно.
+    """
+    prior = [point for point in points if 0 < point.time_msc < start_msc]
+    start_bal = prior[-1].balance if prior else deposit
+    start_eq = prior[-1].equity if prior else deposit
+    dd = Drawdown(
+        balance_peak=start_bal,
+        equity_peak=start_eq,
+        equity_at_trough=start_eq,
+        balance_at_equity_trough=start_bal,
+    )
+    seq = [EquityPoint(start_msc, start_bal, start_eq, "open")]
+    seq.extend(point for point in points if start_msc <= point.time_msc < end_msc)
+    for point in seq:
+        if point.balance > dd.balance_peak:
+            dd.balance_peak = point.balance
+        bal_dd = dd.balance_peak - point.balance
+        if bal_dd > dd.max_balance_dd_money:
+            dd.max_balance_dd_money = bal_dd
+            dd.balance_trough_msc = point.time_msc
+        if dd.balance_peak > 0.0:
+            bal_pct = bal_dd / dd.balance_peak * 100.0
+            if bal_pct > dd.max_balance_dd_pct:
+                dd.max_balance_dd_pct = bal_pct
+        if point.equity > dd.equity_peak:
+            dd.equity_peak = point.equity
+        eq_dd = dd.equity_peak - point.equity
+        if eq_dd > dd.max_equity_dd_money:
+            dd.max_equity_dd_money = eq_dd
+            dd.equity_trough_msc = point.time_msc
+            dd.equity_at_trough = point.equity
+            dd.balance_at_equity_trough = point.balance
+        if dd.equity_peak > 0.0:
+            eq_pct = eq_dd / dd.equity_peak * 100.0
+            if eq_pct > dd.max_equity_dd_pct:
+                dd.max_equity_dd_pct = eq_pct
+    return dd
+
+
+def _period_bounds(year: int, quarter: int | None) -> tuple[int, int, str]:
+    from datetime import datetime, timezone
+
+    if quarter is None:
+        start = datetime(year, 1, 1, tzinfo=timezone.utc)
+        end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+        label = str(year)
+    else:
+        month = (quarter - 1) * 3 + 1
+        start = datetime(year, month, 1, tzinfo=timezone.utc)
+        if quarter == 4:
+            end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+        else:
+            end = datetime(year, month + 3, 1, tzinfo=timezone.utc)
+        label = f"{year}-Q{quarter}"
+    return int(start.timestamp() * 1000), int(end.timestamp() * 1000), label
+
+
+def period_metrics(
+    trades: list[Trade],
+    points: list[EquityPoint],
+    *,
+    deposit: float,
+    years: list[int],
+    bootstrap: int = 2000,
+    seed: int = 1,
+) -> list[dict]:
+    """Год и квартал по времени выхода. Просадка окна — по записанной кривой."""
+    rows = []
+    for year in years:
+        slots: list[tuple[int, int, str]] = [_period_bounds(year, None)]
+        slots.extend(_period_bounds(year, quarter) for quarter in (1, 2, 3, 4))
+        for start, end, label in slots:
+            chosen = [trade for trade in trades if start <= trade.exit_time_msc < end]
+            dd = _window_drawdown(points, start, end, deposit)
+            metrics = compute_metrics(chosen, dd, deposit=deposit, bootstrap=bootstrap, seed=seed)
+            rs = [trade.r_multiple for trade in chosen if trade.r_multiple is not None]
+            metrics["label"] = label
+            metrics["start_msc"] = start
+            metrics["end_msc"] = end
+            metrics["drawdown_resolution"] = "sampled_curve"
+            metrics["median_r"] = _percentile(rs, 0.5)
+            rows.append(metrics)
+    return rows

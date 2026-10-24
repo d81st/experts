@@ -63,6 +63,13 @@ class BarBuilder:
         cur = self._cur.get(tf)
         return None if cur is None else int(cur["open"])
 
+    def forming_bar(self, tf: str) -> Bar | None:
+        """Текущий бар, включая тик, который уже применён. None — тиков ещё не было."""
+        cur = self._cur.get(tf)
+        if cur is None:
+            return None
+        return _freeze(cur)
+
     def add(self, tick: Tick) -> list[Bar]:
         closed_now: list[Bar] = []
         for tf in self.timeframes:

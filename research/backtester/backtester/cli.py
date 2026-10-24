@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .bars import BarBuilder, aggregate_bars
-from .compare import compare_trades, load_mt5, load_our_csv, tolerance_profile
+from .compare import compare_closes, compare_trades, load_closing_deals, load_mt5, load_our_csv, tolerance_profile
 from .dukascopy_bars import (
     cut_before_live,
     estimate_bid_offset,
@@ -23,11 +23,12 @@ from .dukascopy_bars import (
     shift_bars,
 )
 from .engine import Engine, EngineConfig
-from .metrics import compute_metrics, format_metrics_ru
+from .metrics import compute_metrics, format_metrics_ru, period_metrics
 from .session import ExnessGoldSession
 from .strategies.alchemist import AlchemistConfig, AlchemistStrategy, h1_x12_st
+from .strategies.asia_breakout import AsiaBreakoutStrategy, code_defaults, trend_filter
 from .symbol_spec import CapturedSymbol, load_xauusdm
-from .ticks import iter_ticks
+from .ticks import iter_ticks, load_hour_spread
 from .types import Bar, Trade
 
 HOLDOUT_START = datetime(2026, 10, 16, tzinfo=timezone.utc)
@@ -253,10 +254,18 @@ def _cmd_alchemist(args: argparse.Namespace) -> int:
     spec = captured.spec
     costs = _swap_from_args(args, captured)
     session = _session(args, captured)
-    cfg = h1_x12_st()
-    if args.risk_basis:
-        cfg = AlchemistConfig(**{**cfg.__dict__, "risk_basis": args.risk_basis})
-    strategy = AlchemistStrategy(cfg, digits=spec.digits, adjusted_point=spec.adjusted_point)
+    if args.cmd == "asia":
+        cfg = trend_filter() if args.preset == "trend" else code_defaults()
+        strategy = AsiaBreakoutStrategy(cfg, digits=spec.digits, adjusted_point=spec.adjusted_point)
+        sample_tf = cfg.timeframe
+        overshoot = cfg.max_risk_overshoot
+    else:
+        cfg = h1_x12_st()
+        if args.risk_basis:
+            cfg = AlchemistConfig(**{**cfg.__dict__, "risk_basis": args.risk_basis})
+        strategy = AlchemistStrategy(cfg, digits=spec.digits, adjusted_point=spec.adjusted_point)
+        sample_tf = cfg.timeframe
+        overshoot = cfg.max_risk_overshoot
     engine = Engine(
         EngineConfig(
             symbol=spec,
@@ -271,12 +280,12 @@ def _cmd_alchemist(args: argparse.Namespace) -> int:
             swap_clock=costs["swap_clock"],
             trading_from_msc=trade_from,
             close_at_end=not args.no_close_at_end,
-            sample_tf=cfg.timeframe,
+            sample_tf=sample_tf,
             bar_source=args.source,
         ),
         strategy,
         session=session,
-        max_risk_overshoot=cfg.max_risk_overshoot,
+        max_risk_overshoot=overshoot,
     )
     if args.warmup_m1 and args.warmup_dukascopy:
         raise SystemExit("Нужен один прогрев: --warmup-m1 или --warmup-dukascopy.")
@@ -306,6 +315,7 @@ def _cmd_alchemist(args: argparse.Namespace) -> int:
                 "пересечения. OHLC прогрева сдвинуты на эту величину. Торговля по прогреву не идёт."
             ),
         }
+    hour_spread = load_hour_spread(args.hour_spread) if args.hour_spread else None
     ticks = iter_ticks(
         args.ticks,
         args.source,
@@ -314,6 +324,8 @@ def _cmd_alchemist(args: argparse.Namespace) -> int:
         price_offset=args.price_offset,
         spread_multiplier=args.spread_multiplier,
         spread_addon=args.spread_addon,
+        hour_spread=hour_spread,
+        skip_reopen_minutes=args.skip_reopen_minutes,
     )
     seen = 0
 
@@ -385,6 +397,8 @@ def _cmd_alchemist(args: argparse.Namespace) -> int:
         "spread_addon": args.spread_addon,
         "spread_multiplier": args.spread_multiplier,
         "price_offset": args.price_offset,
+        "hour_spread": args.hour_spread,
+        "skip_reopen_minutes": args.skip_reopen_minutes,
         "swap_long_per_lot": costs["swap_long_per_lot"],
         "swap_short_per_lot": costs["swap_short_per_lot"],
         "swap_long_points": captured.swap_long_points,
@@ -412,6 +426,19 @@ def _cmd_alchemist(args: argparse.Namespace) -> int:
     _write_trades(out / "trades.csv", result.trades)
     _write_equity(out / "equity.csv", result.equity_curve)
     (out / "metrics.json").write_text(json.dumps(metrics, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    if result.trades:
+        years = sorted({datetime.fromtimestamp(trade.exit_time_msc / 1000.0, timezone.utc).year for trade in result.trades})
+    else:
+        years = []
+    periods = period_metrics(
+        result.trades,
+        result.equity_curve,
+        deposit=args.deposit,
+        years=years,
+        bootstrap=args.bootstrap,
+        seed=args.seed,
+    )
+    (out / "periods.json").write_text(json.dumps(periods, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     text = format_metrics_ru(metrics)
     (out / "summary.txt").write_text(text, encoding="utf-8")
     print(text, end="")
@@ -433,6 +460,14 @@ def _compare_kwargs(args: argparse.Namespace, profile: str | None) -> dict:
     }
 
 
+def _closes_csv(path: Path) -> bool:
+    if path.suffix.lower() != ".csv":
+        return False
+    with path.open(encoding="utf-8") as fh:
+        header = fh.readline()
+    return "direction" in header and "entry_time" not in header
+
+
 def _cmd_compare(args: argparse.Namespace) -> int:
     start = datetime.strptime(args.start, "%Y-%m-%d").replace(tzinfo=timezone.utc) if args.start else None
     end = None
@@ -441,6 +476,9 @@ def _cmd_compare(args: argparse.Namespace) -> int:
         if end > HOLDOUT_START and not args.allow_holdout:
             raise SystemExit("Отказ: окно сверки захватывает холдаут с 2026-10-16.")
     ours = load_our_csv(args.ours)
+    mt5_path = Path(args.mt5)
+    if _closes_csv(mt5_path):
+        return _cmd_compare_closes(args, ours, load_closing_deals(mt5_path), start, end)
     mt5 = load_mt5(args.mt5)
     names = ["strict", "aligned"] if args.profile == "both" else [args.profile]
     reports = {}
@@ -477,6 +515,60 @@ def _cmd_compare(args: argparse.Namespace) -> int:
                 f"причины={','.join(item['reasons'])} "
                 f"dPвх={item['entry_price_delta']:.3f} dPвых={item['exit_price_delta']:.3f} "
                 f"dTвх={item['entry_time_delta_sec']:.1f}s"
+            )
+            shown += 1
+            if shown >= 15:
+                break
+    return 0
+
+
+def _cmd_compare_closes(args: argparse.Namespace, ours, deals, start, end) -> int:
+    """Сверка с аудитом, где в CSV только закрывающие сделки."""
+    names = ["strict", "aligned"] if args.profile == "both" else [args.profile]
+    reports = {}
+    for name in names:
+        chosen = tolerance_profile(name) if name else _compare_kwargs(args, None)
+        report = compare_closes(
+            ours,
+            deals,
+            start=start,
+            end=end,
+            pair_sec=chosen["entry_pair_sec"],
+            exit_time_sec=chosen["exit_time_sec"],
+            price_tol=chosen["price_tol"],
+            pair_price_tol=chosen["pair_price_tol"],
+            volume_tol=chosen.get("volume_tol", 0.001),
+        )
+        report["profile"] = name
+        reports[name] = report
+    payload = reports if len(reports) > 1 else next(iter(reports.values()))
+    printable = payload if len(reports) == 1 else {
+        name: {k: v for k, v in row.items() if k not in ("pairs", "ours_only_trades", "mt5_only_trades")}
+        for name, row in reports.items()
+    }
+    if len(reports) == 1:
+        printable = {k: v for k, v in payload.items() if k not in ("pairs", "ours_only_trades", "mt5_only_trades")}
+    print(json.dumps(printable, ensure_ascii=False, indent=2))
+    if args.out:
+        Path(args.out).write_text(
+            json.dumps(payload if len(reports) == 1 else reports, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    for name, row in reports.items():
+        print(
+            f"[{name}] Пар: {row['paired']}, без расхождений: {row['exact']}, "
+            f"с причинами: {row['paired_with_mismatch']}. "
+            f"Только у нас: {row['ours_only']}. Только в MT5: {row['mt5_only']}. "
+            f"Сумма нетто (наши − MT5) по парам: {row['net_delta_sum']:.2f}."
+        )
+        shown = 0
+        for item in row["pairs"]:
+            if item["match"]:
+                continue
+            print(
+                f"  {item['mt5']['exit_time']} {item['mt5']['side']} "
+                f"причины={','.join(item['reasons'])} "
+                f"dPвых={item['exit_price_delta']:.3f} dTвых={item['exit_time_delta_sec']:.1f}s"
             )
             shown += 1
             if shown >= 15:
@@ -559,12 +651,40 @@ def main(argv: list[str] | None = None) -> None:
     run.add_argument("--warmup-m1", default=None, help="CSV M1 bid для прогрева баров до тиков")
     run.add_argument("--warmup-dukascopy", default=None, help="каталог YYYY/MM/DD.bi5, свечи BID M1")
     run.add_argument("--warmup-offset", type=float, default=None, help="сдвиг Dukascopy к уровню Exness, USD")
+    run.add_argument("--hour-spread", default=None, help="JSON из 24 медиан спреда по часу Нью-Йорка")
+    run.add_argument(
+        "--skip-reopen-minutes",
+        type=int,
+        default=0,
+        help="выбросить первые N минут после 18:00 ET (застывшие тики Dukascopy)",
+    )
     run.add_argument("--bootstrap", type=int, default=2000)
     run.add_argument("--seed", type=int, default=1)
     run.add_argument("--no-close-at-end", action="store_true")
     run.add_argument("--allow-holdout", action="store_true")
     run.add_argument("--out", required=True)
     run.set_defaults(func=_cmd_alchemist)
+
+    asia = sub.add_parser("asia", help="прогон порта asia-breakout v1.1")
+    asia.add_argument("--preset", choices=("defaults", "trend"), default="defaults")
+    for action in run._actions:
+        if action.dest in ("help", "preset"):
+            continue
+        kwargs = {"default": action.default, "help": action.help}
+        if action.option_strings:
+            if action.nargs is not None:
+                kwargs["nargs"] = action.nargs
+            if action.choices is not None:
+                kwargs["choices"] = action.choices
+            if action.type is not None:
+                kwargs["type"] = action.type
+            if action.required:
+                kwargs["required"] = True
+            if isinstance(action, argparse._StoreTrueAction):
+                asia.add_argument(*action.option_strings, action="store_true", help=action.help)
+            else:
+                asia.add_argument(*action.option_strings, **kwargs)
+    asia.set_defaults(func=_cmd_alchemist, risk_basis=None)
 
     cmp = sub.add_parser("compare", help="сверка trades.csv с HTML/JSON MT5")
     cmp.add_argument("--ours", required=True)

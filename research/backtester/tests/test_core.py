@@ -467,6 +467,9 @@ def test_losing_streak_and_bootstrap_contains_point():
     low = metrics["bootstrap"]["avg_r_ci95"]["low"]
     high = metrics["bootstrap"]["avg_r_ci95"]["high"]
     assert low <= metrics["avg_r"] <= high
+    net_low = metrics["bootstrap"]["avg_net_ci95"]["low"]
+    net_high = metrics["bootstrap"]["avg_net_ci95"]["high"]
+    assert net_low <= metrics["avg_net_money"] <= net_high
     assert "просадка по балансу" in metrics["drawdown_labels"]["max_drawdown_balance_money"]
     assert "просадка по средствам" in metrics["drawdown_labels"]["max_drawdown_equity_money"]
 
@@ -511,3 +514,53 @@ def test_unsorted_ticks_fail(tmp_path: Path):
 def test_crossed_quote_fails():
     with pytest.raises(Exception):
         Tick(1, 10.2, 10.0)
+
+
+def test_hour_spread_replaces_the_feed_and_reopen_ticks_drop(tmp_path: Path):
+    """2024-01-02 23:00 UTC — 18:00 EST, 23:01 ещё в первых двух минутах, 23:02 уже нет.
+
+    Июльский 22:00 UTC — то же окно по Нью-Йорку. Спред часа 10 EST (15:00 UTC) подменяется.
+    """
+    import json
+    import lzma
+    import struct
+
+    from backtester.dukascopy_ticks import decode_hour_ticks
+    from backtester.session import et_hour_minute, in_reopen_stale_window
+    from backtester.ticks import iter_ticks
+
+    winter = int(datetime(2024, 1, 2, 23, 0, tzinfo=timezone.utc).timestamp() * 1000)
+    assert et_hour_minute(winter) == (18, 0)
+    assert in_reopen_stale_window(winter + 60_000, 2)
+    assert not in_reopen_stale_window(winter + 120_000, 2)
+    summer = int(datetime(2024, 7, 2, 22, 1, tzinfo=timezone.utc).timestamp() * 1000)
+    assert et_hour_minute(summer) == (18, 1)
+
+    day = int(datetime(2024, 1, 2, 15, 0, tzinfo=timezone.utc).timestamp() * 1000)
+    assert et_hour_minute(day) == (10, 0)
+    csv_path = tmp_path / "ticks.csv.gz"
+    with gzip.open(csv_path, "wt", newline="") as fh:
+        fh.write("time_msc,bid,ask\n")
+        fh.write(f"{day},2076.965,2077.255\n")
+        fh.write(f"{winter},2000,2000.4\n")
+        fh.write(f"{winter + 60_000},2001,2001.4\n")
+        fh.write(f"{winter + 120_000},2002,2002.4\n")
+    table = tmp_path / "spread.json"
+    hours = [0.11] * 24
+    hours[10] = 0.20
+    hours[18] = 0.50
+    table.write_text(json.dumps({"hours": hours}), encoding="utf-8")
+    got = list(iter_ticks([csv_path], "exness", price_offset=0.284, hour_spread=json.loads(table.read_text())["hours"], skip_reopen_minutes=2))
+    assert [t.time_msc for t in got] == [day, winter + 120_000]
+    assert got[1].bid == pytest.approx(2002.284)
+    assert got[1].ask == pytest.approx(2002.284 + 0.50)
+    assert got[0].bid == pytest.approx(2076.965 + 0.284)
+    assert got[0].ask == pytest.approx(2076.965 + 0.284 + 0.20)
+
+    raw = struct.pack(">IIIff", 128, 2_077_255, 2_076_965, 0.01, 0.02)
+    blob = lzma.compress(raw)
+    start = int(datetime(2024, 1, 2, 10, tzinfo=timezone.utc).timestamp() * 1000)
+    decoded = decode_hour_ticks(blob, start)
+    assert decoded[0].time_msc == start + 128
+    assert decoded[0].bid == pytest.approx(2076.965)
+    assert decoded[0].ask == pytest.approx(2077.255)

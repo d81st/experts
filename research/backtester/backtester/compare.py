@@ -228,3 +228,157 @@ def load_our(path: str | Path) -> list[OurTrade]:
 
 def load_their(path: str | Path) -> list[Mt5Trade]:
     return load_mt5(path)
+
+
+@dataclass
+class CloseDeal:
+    """Закрывающая сделка из аудита: входа в файле нет.
+
+    sell out закрывает лонг, buy out закрывает шорт.
+    """
+
+    exit_time: datetime
+    side: int
+    volume: float
+    exit_price: float
+    commission: float
+    swap: float
+    profit: float
+    net: float
+
+
+def load_closing_deals(path: str | Path) -> list[CloseDeal]:
+    deals = []
+    with Path(path).open(newline="", encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            direction = (row.get("direction") or "").strip().lower()
+            if direction != "out":
+                continue
+            kind = (row.get("type") or "").strip().lower()
+            if kind == "sell":
+                side = 1
+            elif kind == "buy":
+                side = -1
+            else:
+                raise ValueError(f"неизвестный тип закрытия: {kind}")
+            deals.append(
+                CloseDeal(
+                    exit_time=_parse_time(row["time"]),
+                    side=side,
+                    volume=float(row["volume"]),
+                    exit_price=float(row["price"]),
+                    commission=float(row.get("commission") or 0),
+                    swap=float(row.get("swap") or 0),
+                    profit=float(row.get("profit") or 0),
+                    net=float(row.get("net") or row.get("profit") or 0),
+                )
+            )
+    return deals
+
+
+def _public_close(deal: CloseDeal) -> dict:
+    return {
+        "exit_time": deal.exit_time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "side": "long" if deal.side == 1 else "short",
+        "volume": deal.volume,
+        "exit_price": deal.exit_price,
+        "profit": deal.profit,
+        "swap": deal.swap,
+        "net": deal.net,
+    }
+
+
+def compare_closes(
+    ours: list[OurTrade],
+    deals: list[CloseDeal],
+    *,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    pair_sec: float = 180.0,
+    exit_time_sec: float = 5.0,
+    price_tol: float = 0.05,
+    pair_price_tol: float = 3.0,
+    volume_tol: float = 0.001,
+) -> dict:
+    """Пара по выходу: сторона, время и цена. Входа в списке сделок нет.
+
+    end исключительный, окно — по времени выхода. Назначение жадное:
+    сначала ближайшее время, при равенстве ближайшая цена. Так два
+    закрытия в одну секунду 20:00 не меняются местами.
+    Совпадение не смотрит на нетто: своп в отчёте и в спецификации
+    расходится отдельной строкой.
+    """
+    left = [trade for trade in ours if _in_window(trade.exit_time, start, end)]
+    right = [deal for deal in deals if _in_window(deal.exit_time, start, end)]
+    candidates = []
+    for j, deal in enumerate(right):
+        for i, our in enumerate(left):
+            if our.side != deal.side:
+                continue
+            delta = abs((our.exit_time - deal.exit_time).total_seconds())
+            if delta > pair_sec:
+                continue
+            price_delta = abs(our.exit_price - deal.exit_price)
+            if price_delta > pair_price_tol:
+                continue
+            candidates.append((delta, price_delta, i, j))
+    candidates.sort()
+    used_i: set[int] = set()
+    used_j: set[int] = set()
+    paired = []
+    for _delta, _price, i, j in candidates:
+        if i in used_i or j in used_j:
+            continue
+        used_i.add(i)
+        used_j.add(j)
+        our = left[i]
+        deal = right[j]
+        reasons = []
+        exit_dt = (our.exit_time - deal.exit_time).total_seconds()
+        exit_px = our.exit_price - deal.exit_price
+        if abs(exit_dt) > exit_time_sec:
+            reasons.append("exit_time")
+        if abs(exit_px) > price_tol:
+            reasons.append("exit_price")
+        if abs(our.volume - deal.volume) > volume_tol:
+            reasons.append("volume")
+        paired.append(
+            {
+                "match": not reasons,
+                "reasons": reasons,
+                "exit_time_delta_sec": exit_dt,
+                "exit_price_delta": exit_px,
+                "volume_delta": our.volume - deal.volume,
+                "net_delta": our.net_pnl - deal.net,
+                "ours": _public_our(our),
+                "mt5": _public_close(deal),
+            }
+        )
+    ours_only = [_public_our(trade) for i, trade in enumerate(left) if i not in used_i]
+    mt5_only = [_public_close(deal) for j, deal in enumerate(right) if j not in used_j]
+    reason_hist: dict[str, int] = {}
+    for row in paired:
+        for reason in row["reasons"]:
+            reason_hist[reason] = reason_hist.get(reason, 0) + 1
+    return {
+        "matched_on": "exit",
+        "ours": len(left),
+        "mt5": len(right),
+        "paired": len(paired),
+        "exact": sum(1 for row in paired if row["match"]),
+        "paired_with_mismatch": sum(1 for row in paired if not row["match"]),
+        "ours_only": len(ours_only),
+        "mt5_only": len(mt5_only),
+        "net_delta_sum": sum(row["net_delta"] for row in paired),
+        "reason_counts": reason_hist,
+        "tolerances": {
+            "pair_sec": pair_sec,
+            "exit_time_sec": exit_time_sec,
+            "price_tol": price_tol,
+            "pair_price_tol": pair_price_tol,
+            "volume_tol": volume_tol,
+        },
+        "pairs": paired,
+        "ours_only_trades": ours_only,
+        "mt5_only_trades": mt5_only,
+    }

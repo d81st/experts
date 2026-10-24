@@ -67,6 +67,44 @@ def _apply(tick: Tick, price_offset: float, spread_multiplier: float, spread_add
     )
 
 
+def apply_level_and_spread(tick: Tick, price_offset: float, spread: float) -> Tick:
+    """Сдвиг обеих сторон на price_offset, затем ask = новый bid + spread.
+
+    Спред источника выбрасывается. Так медиана Exness подставляется
+    вместо спреда Dukascopy, а уровень остаётся сдвинутым.
+    """
+    if spread < 0.0:
+        raise DataError("подменный спред < 0")
+    bid = tick.bid + price_offset
+    ask = bid + spread
+    if not (bid > 0.0 and ask > 0.0) or bid > ask:
+        raise DataError(f"котировка схлопнулась после подмены спреда: bid={bid} ask={ask}")
+    return Tick(
+        time_msc=tick.time_msc,
+        bid=bid,
+        ask=ask,
+        last=tick.last,
+        volume=tick.volume,
+        bid_vol=tick.bid_vol,
+        ask_vol=tick.ask_vol,
+        flags=tick.flags,
+    )
+
+
+def load_hour_spread(path: str | Path) -> list[float]:
+    """24 медианы спреда, индекс — час Нью-Йорка."""
+    import json
+
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    hours = payload["hours"] if isinstance(payload, dict) else payload
+    if len(hours) != 24:
+        raise DataError("таблица спреда: нужно 24 часа")
+    out = [float(value) for value in hours]
+    if any(value < 0.0 for value in out):
+        raise DataError("в таблице спреда есть отрицательный час")
+    return out
+
+
 def iter_exness_csv_gz(path: str | Path) -> Iterator[Tick]:
     """CSV gzip: time_msc,bid,ask,last,volume[,volume_real],flags.
 
@@ -139,6 +177,20 @@ def iter_dukascopy_parquet(path: str | Path) -> Iterator[Tick]:
             )
 
 
+def _iter_source(path: Path, source: str) -> Iterator[Tick]:
+    if source == "exness":
+        yield from iter_exness_csv_gz(path)
+        return
+    if source != "dukascopy":
+        raise DataError("source должен быть exness или dukascopy")
+    if path.is_dir():
+        from .dukascopy_ticks import iter_bi5_tree
+
+        yield from iter_bi5_tree(path)
+        return
+    yield from iter_dukascopy_parquet(path)
+
+
 def iter_ticks(
     paths: Sequence[str | Path],
     source: str,
@@ -148,23 +200,42 @@ def iter_ticks(
     price_offset: float = 0.0,
     spread_multiplier: float = 1.0,
     spread_addon: float = 0.0,
+    hour_spread: Sequence[float] | None = None,
+    skip_reopen_minutes: int = 0,
 ) -> Iterator[Tick]:
     """Склеить файлы. end_msc исключительный: тик с этим временем уже не отдаётся.
 
-    Так можно оборвать чтение на полуночи 2026-10-06 и не забирать холдаут.
+    Так можно оборвать чтение на полуночи 2026-10-16 и не забирать холдаут.
+    hour_spread — 24 числа, час Нью-Йорка: спред источника заменяется,
+    к bid прибавляется price_offset. skip_reopen_minutes выкидывает
+    первые минуты после 18:00 ET.
     """
     if source not in ("exness", "dukascopy"):
         raise DataError("source должен быть exness или dukascopy")
-    reader = iter_exness_csv_gz if source == "exness" else iter_dukascopy_parquet
+    if hour_spread is not None and (spread_multiplier != 1.0 or spread_addon != 0.0):
+        raise DataError("подмена спреда по часу не сочетается с множителем и добавкой")
+    if hour_spread is not None and len(hour_spread) != 24:
+        raise DataError("hour_spread: нужно 24 часа")
+    if skip_reopen_minutes < 0:
+        raise DataError("skip_reopen_minutes < 0")
+    from .session import et_hour_minute, in_reopen_stale_window
+
     prev: int | None = None
     for path in sorted(Path(p) for p in paths):
-        for tick in reader(path):
+        for tick in _iter_source(path, source):
             if start_msc is not None and tick.time_msc < start_msc:
                 prev = tick.time_msc
                 continue
             if end_msc is not None and tick.time_msc >= end_msc:
                 return
+            if skip_reopen_minutes and in_reopen_stale_window(tick.time_msc, skip_reopen_minutes):
+                prev = tick.time_msc
+                continue
             if prev is not None and tick.time_msc < prev:
                 raise DataError(f"файлы не по времени: {tick.time_msc} < {prev}")
             prev = tick.time_msc
-            yield _apply(tick, price_offset, spread_multiplier, spread_addon)
+            if hour_spread is not None:
+                hour, _minute = et_hour_minute(tick.time_msc)
+                yield apply_level_and_spread(tick, price_offset, float(hour_spread[hour]))
+            else:
+                yield _apply(tick, price_offset, spread_multiplier, spread_addon)

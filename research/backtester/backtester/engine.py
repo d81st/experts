@@ -146,6 +146,9 @@ class _Context:
     def forming_open_msc(self, tf: str) -> int | None:
         return self._engine.bars.forming_open(tf)
 
+    def forming_bar(self, tf: str) -> Bar | None:
+        return self._engine.bars.forming_bar(tf)
+
     @property
     def position(self) -> _View | None:
         """Открытая позиция, как PositionsTotal после возврата из OrderSend.
@@ -699,6 +702,7 @@ class Engine:
                         "tp": pos.tp,
                         "swap": pos.swap,
                         "floating": floating,
+                        "comment": pos.comment,
                     }
                 )
         return BacktestResult(
