@@ -1,0 +1,125 @@
+name: Publish tick release
+
+# Один пререлиз из уже снятых артефактов. Терминал не запускается и тики заново не качаются.
+# Пуш в grok запускает это только если изменился data/tick-release.json и в нём "run": true.
+# Обычный коммит этот путь не трогает. data/export-request.json здесь не читается,
+# поэтому тяжёлый съём не стартует.
+on:
+  push:
+    branches: [grok]
+    paths:
+      - 'data/tick-release.json'
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: publish-tick-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/grok'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Self-test the release assembler
+        run: python3 tools/assemble_tick_release.py --self-test
+
+      - name: Resolve release request
+        id: request
+        run: python3 tools/assemble_tick_release.py --check-request data/tick-release.json
+
+      - name: Download existing tick artifacts
+        if: success() && steps.request.outputs.run == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/assemble_tick_release.py --download "$RUNNER_TEMP/tick-sources"
+
+      - name: Assemble release assets
+        if: success() && steps.request.outputs.run == 'true'
+        run: python3 tools/assemble_tick_release.py --assemble "$RUNNER_TEMP/tick-sources" "$RUNNER_TEMP/tick-release"
+
+      - name: Create prerelease on this grok commit
+        if: success() && steps.request.outputs.run == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="data-ticks-XAUUSDm-2026-v1"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $tag already exists"
+            exit 1
+          fi
+          python3 tools/assemble_tick_release.py --notes "$RUNNER_TEMP/tick-release-notes.md"
+          mapfile -t files < <(find "$RUNNER_TEMP/tick-release" -type f -printf '%p\n' | sort)
+          if [ "${#files[@]}" -ne 16 ]; then
+            echo "Expected 16 assets, found ${#files[@]}"
+            exit 1
+          fi
+          # --target — SHA этого коммита на grok, не ветка main.
+          # --prerelease и --latest=false: релиз не становится Latest.
+          gh release create "$tag" "${files[@]}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            --latest=false \
+            --title "XAUUSDm ticks 2026 v1" \
+            --notes-file "$RUNNER_TEMP/tick-release-notes.md"
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json tagName,isPrerelease,isDraft,targetCommitish,url > "$RUNNER_TEMP/release-meta.json"
+          obj_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq .object.sha)
+          obj_type=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq .object.type)
+          if [ "$obj_type" = "tag" ]; then
+            commit=$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$obj_sha" --jq .object.sha)
+          else
+            commit=$obj_sha
+          fi
+          echo "tag commit $commit"
+          if [ "$commit" != "$GITHUB_SHA" ]; then
+            echo "Tag does not point at this grok commit"
+            exit 1
+          fi
+          python3 - "$RUNNER_TEMP/release-meta.json" << 'PY'
+          import json, sys
+          meta = json.loads(open(sys.argv[1], encoding="utf-8").read())
+          if meta.get("tagName") != "data-ticks-XAUUSDm-2026-v1":
+              raise SystemExit("unexpected tag")
+          if meta.get("isPrerelease") is not True or meta.get("isDraft") is not False:
+              raise SystemExit("release is not a published prerelease")
+          if meta.get("targetCommitish") == "main":
+              raise SystemExit("release target is main")
+          print(meta["url"])
+          PY
+
+      - name: Verify uploaded asset hashes
+        if: success() && steps.request.outputs.run == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # The previous step checks the target. Re-read it here so the hash
+          # check does not depend on that shell, then download every asset.
+          gh release view data-ticks-XAUUSDm-2026-v1 --repo "$GITHUB_REPOSITORY" --json isPrerelease,isDraft,targetCommitish,url --jq '{isPrerelease,isDraft,targetCommitish,url}'
+          rm -rf "$RUNNER_TEMP/tick-uploaded"
+          gh release download data-ticks-XAUUSDm-2026-v1 --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/tick-uploaded" --clobber
+          python3 tools/assemble_tick_release.py --verify "$RUNNER_TEMP/tick-uploaded"
+          python3 - << 'PY'
+          import hashlib, os
+          from pathlib import Path
+          root = Path(os.environ["RUNNER_TEMP"]) / "tick-uploaded"
+          lines = ["| Asset | Bytes | SHA-256 |", "|---|---:|---|"]
+          for path in sorted(root.iterdir()):
+              if not path.is_file():
+                  continue
+              digest = hashlib.sha256(path.read_bytes()).hexdigest()
+              lines.append(f"| `{path.name}` | {path.stat().st_size} | `{digest}` |")
+          text = "\n".join(lines) + "\n"
+          summary = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary:
+              with open(summary, "a", encoding="utf-8") as handle:
+                  handle.write(text)
+          print(text)
+          PY
