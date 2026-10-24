@@ -557,6 +557,14 @@ def test_hour_spread_replaces_the_feed_and_reopen_ticks_drop(tmp_path: Path):
     assert got[0].bid == pytest.approx(2076.965 + 0.284)
     assert got[0].ask == pytest.approx(2076.965 + 0.284 + 0.20)
 
+    shipped = Path(__file__).resolve().parents[1] / "data" / "exness-xauusd-spread-ny-2026.json"
+    loaded = json.loads(shipped.read_text(encoding="utf-8"))
+    assert len(loaded["hours"]) == 24
+    assert loaded["hours"][17] == 0.26
+    assert loaded["hours"][18] == 0.28
+    assert all(value > 0 for value in loaded["hours"])
+    assert loaded["counts"][17] == 0
+
     raw = struct.pack(">IIIff", 128, 2_077_255, 2_076_965, 0.01, 0.02)
     blob = lzma.compress(raw)
     start = int(datetime(2024, 1, 2, 10, tzinfo=timezone.utc).timestamp() * 1000)
