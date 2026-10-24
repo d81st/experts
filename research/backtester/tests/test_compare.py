@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -84,6 +86,17 @@ def test_json_deals(tmp_path: Path):
     assert trades[0].side == 1
     assert trades[0].sl == 99.0
     assert trades[0].profit == 10
+
+
+def test_cli_module_answers_help():
+    proc = subprocess.run(
+        [sys.executable, "-m", "backtester.cli", "--help"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0
+    assert "alchemist" in proc.stdout
 
 
 def test_cli_refuses_holdout():

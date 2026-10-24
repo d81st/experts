@@ -322,3 +322,7 @@ def main(argv: list[str] | None = None) -> None:
 
     args = parser.parse_args(argv)
     raise SystemExit(args.func(args))
+
+
+if __name__ == "__main__":
+    main()
