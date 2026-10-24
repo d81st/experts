@@ -176,7 +176,7 @@ def check(data, text, symbol):
         err = data.get("error", "")
         if err not in ERRORS:
             _fail("spec failed with an unknown error")
-        _fail("spec was not captured")
+        _fail("spec was not captured: " + err)
     extra = set(data) - TOP_KEYS
     missing = TOP_KEYS - set(data)
     if extra or missing:
@@ -356,6 +356,20 @@ def self_test():
     except ValueError as exc:
         if "login" in str(exc):
             raise AssertionError("rejection must not echo the field") from exc
+    missed = {"ok": False, "error": "write_failed", "symbol": "XAUUSDm"}
+    try:
+        check(missed, json.dumps(missed), "XAUUSDm")
+        raise AssertionError("failed capture must fail")
+    except ValueError as exc:
+        if str(exc) != "spec was not captured: write_failed":
+            raise AssertionError("allowlisted error must be visible") from exc
+    unknown = {"ok": False, "error": "unexpected detail", "symbol": "XAUUSDm"}
+    try:
+        check(unknown, json.dumps(unknown), "XAUUSDm")
+        raise AssertionError("unknown error must fail")
+    except ValueError as exc:
+        if str(exc) != "spec failed with an unknown error":
+            raise AssertionError("unknown error must not be echoed") from exc
     armed, symbol = check_request_text('{"run": true, "symbol": "XAUUSDm", "note": "xauusdm-spec"}')
     if not armed or symbol != "XAUUSDm":
         raise AssertionError("armed request")
@@ -414,10 +428,63 @@ def summary(data):
     return "\n".join(lines)
 
 
+def scan_file(spec_path, symbol):
+    """Секрет-скан. Код ошибки из белого списка печатается, сам JSON — нет.
+
+    Ненулевой код только если файл нельзя читать или в нём секрет.
+    ok:false при этом не роняет шаг, чтобы артефакт всё же загрузился.
+    """
+    raw = Path(spec_path).read_bytes()
+    if raw.startswith(b"\xff\xfe") or raw.startswith(b"\xfe\xff") or raw.startswith(b"\xef\xbb\xbf"):
+        _fail("spec is not plain text")
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        _fail("spec is not utf-8")
+    if IP_RE.search(text):
+        _fail("spec contains a network address")
+    login = os.environ.get("MT5_LOGIN", "")
+    server = os.environ.get("MT5_SERVER", "")
+    password = os.environ.get("MT5_PASSWORD", "")
+    if login and re.fullmatch(r"\d{5,}", login) and re.search(rf"(?<!\d){re.escape(login)}(?!\d)", text):
+        _fail("spec contains the account number")
+    if server and server in text:
+        _fail("spec contains the server secret")
+    if password and len(password) >= 8 and re.search(r"[A-Za-z]", password) and password in text:
+        _fail("spec contains the password")
+    if not SYMBOL_RE.fullmatch(symbol):
+        _fail("symbol is invalid")
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        _fail("spec is not JSON")
+    found = []
+    _walk(data, found)
+    if found:
+        _fail("spec contains a forbidden field")
+    if not isinstance(data, dict):
+        _fail("spec must be an object")
+    if data.get("symbol") != symbol:
+        _fail("spec symbol does not match the request")
+    if data.get("ok") is True:
+        print("captured=true")
+        return 0
+    err = data.get("error", "")
+    if err not in ERRORS:
+        _fail("spec failed with an unknown error")
+    print("captured=false")
+    print("error=" + err)
+    return 0
+
+
 def main(argv):
     if "--self-test" in argv:
         self_test()
         return 0
+    if "--scan" in argv:
+        slot = argv.index("--scan")
+        symbol = argv[argv.index("--symbol") + 1]
+        return scan_file(argv[slot + 1], symbol)
     if "--resolve-request" in argv:
         slot = argv.index("--resolve-request")
         armed, symbol = check_request(argv[slot + 1])
@@ -437,7 +504,9 @@ def main(argv):
         check(data, text, symbol)
         print(summary(data))
         return 0
-    raise SystemExit("usage: check_symbol_spec.py --self-test | --resolve-request FILE | --check FILE --symbol SYM")
+    raise SystemExit(
+        "usage: check_symbol_spec.py --self-test | --resolve-request FILE | --scan FILE --symbol SYM | --check FILE --symbol SYM"
+    )
 
 
 if __name__ == "__main__":

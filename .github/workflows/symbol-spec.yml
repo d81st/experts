@@ -141,8 +141,10 @@ jobs:
           $common = "$env:APPDATA\MetaQuotes\Terminal\Common\Files"
           New-Item -ItemType Directory -Force $common | Out-Null
           $job = Join-Path $common "symbol-spec-job.txt"
-          @("symbol=$env:SPEC_SYMBOL") | Out-File $job -Encoding ascii
+          $ascii = New-Object System.Text.ASCIIEncoding
+          [System.IO.File]::WriteAllText($job, "symbol=$env:SPEC_SYMBOL`r`n", $ascii)
           $out = Join-Path $common "symbol-spec\$env:SPEC_SYMBOL.json"
+          if (Test-Path $out) { Remove-Item $out -Force }
           $ini = "$env:RUNNER_TEMP\symbol-spec.ini"
           try {
             @("[Common]", "Login=$env:MT5_LOGIN", "Password=$env:MT5_PASSWORD", "Server=$env:MT5_SERVER",
@@ -154,19 +156,22 @@ jobs:
               "ShutdownTerminal=1") | Out-File $ini -Encoding Unicode
             $proc = Start-Process -FilePath "$env:MT5_ROOT\terminal64.exe" -ArgumentList "/portable", "/config:`"$ini`"" -PassThru
             $deadline = (Get-Date).AddMinutes(10)
+            $prev = -1
+            $stable = $false
             while ((Get-Date) -lt $deadline) {
               if (Test-Path $out) {
-                Start-Sleep -Seconds 2
-                break
+                $len = (Get-Item $out).Length
+                if ($len -gt 20 -and $len -eq $prev) { $stable = $true; break }
+                $prev = $len
               }
               if ($proc.HasExited) {
-                Start-Sleep -Seconds 5
-                if (Test-Path $out) { break }
+                Start-Sleep -Seconds 2
+                if ((Test-Path $out) -and (Get-Item $out).Length -gt 20) { $stable = $true; break }
                 throw "Terminal exited before the spec script wrote JSON"
               }
-              Start-Sleep -Seconds 5
+              Start-Sleep -Seconds 2
             }
-            if (-not (Test-Path $out)) { throw "Symbol spec did not finish within the wait limit" }
+            if (-not $stable) { throw "Symbol spec did not finish within the wait limit" }
           } finally {
             if (Test-Path $ini) { Remove-Item $ini -Force }
             Get-Process terminal64, metatester64 -ErrorAction SilentlyContinue | Stop-Process -Force
@@ -176,7 +181,32 @@ jobs:
           Copy-Item $out (Join-Path $dest "$env:SPEC_SYMBOL.json") -Force
           Write-Host "Wrote $env:SPEC_SYMBOL.json ($((Get-Item $out).Length) bytes)"
 
+      - name: Scan spec JSON
+        shell: pwsh
+        env:
+          MT5_LOGIN: ${{ secrets.MT5_LOGIN }}
+          MT5_PASSWORD: ${{ secrets.MT5_PASSWORD }}
+          MT5_SERVER: ${{ secrets.MT5_SERVER }}
+        run: |
+          foreach ($secret in @($env:MT5_LOGIN, $env:MT5_SERVER)) {
+            if ($secret -and $secret -match '^[A-Za-z0-9._@\-]+$') { Write-Host "::add-mask::$secret" }
+          }
+          $file = "$env:GITHUB_WORKSPACE\symbol-spec-artifact\$env:SPEC_SYMBOL.json"
+          python "$env:GITHUB_WORKSPACE\tools\check_symbol_spec.py" --scan $file --symbol $env:SPEC_SYMBOL
+          if ($LASTEXITCODE -ne 0) { throw "Symbol spec JSON failed the secret scan" }
+
+      - name: Upload symbol spec
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: symbol-spec-${{ env.SPEC_SYMBOL }}
+          path: symbol-spec-artifact/${{ env.SPEC_SYMBOL }}.json
+          retention-days: 90
+          if-no-files-found: error
+          include-hidden-files: false
+
       - name: Check spec JSON
+        if: success()
         shell: pwsh
         env:
           MT5_LOGIN: ${{ secrets.MT5_LOGIN }}
@@ -189,13 +219,3 @@ jobs:
           $file = "$env:GITHUB_WORKSPACE\symbol-spec-artifact\$env:SPEC_SYMBOL.json"
           python "$env:GITHUB_WORKSPACE\tools\check_symbol_spec.py" --check $file --symbol $env:SPEC_SYMBOL
           if ($LASTEXITCODE -ne 0) { throw "Symbol spec JSON failed the checker" }
-
-      - name: Upload symbol spec
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: symbol-spec-${{ env.SPEC_SYMBOL }}
-          path: symbol-spec-artifact/${{ env.SPEC_SYMBOL }}.json
-          retention-days: 90
-          if-no-files-found: error
-          include-hidden-files: false

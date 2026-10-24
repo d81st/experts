@@ -13,7 +13,7 @@ input bool   InpUseInputs = false;     // true — взять input, если н
 
 #define JOB_FILE "symbol-spec-job.txt"
 #define OUT_DIR  "symbol-spec"
-#define SCRIPT_VER "1"
+#define SCRIPT_VER "2"
 
 string g_symbol;
 
@@ -292,16 +292,17 @@ bool ReadJob()
      {
       string line = FileReadString(h);
       StringReplace(line, "\r", "");
-      StringTrimLeft(line);
-      StringTrimRight(line);
-      if(line == "" || StringGetCharacter(line, 0) == '#')
+      StringReplace(line, "\n", "");
+      // BOM UTF-8, если файл записан не чистым ASCII.
+      StringReplace(line, CharToString((uchar)0xEF) + CharToString((uchar)0xBB) + CharToString((uchar)0xBF), "");
+      StringReplace(line, ShortToString((ushort)0xFEFF), "");
+      const int at = StringFind(line, "symbol=");
+      if(at < 0)
          continue;
-      const int p = StringFind(line, "=");
-      if(p <= 0)
-         continue;
-      const string key = StringSubstr(line, 0, p);
-      const string val = StringSubstr(line, p + 1);
-      if(key == "symbol")
+      string val = StringSubstr(line, at + 7);
+      StringTrimLeft(val);
+      StringTrimRight(val);
+      if(SafeSymbol(val))
          g_symbol = val;
      }
    FileClose(h);
@@ -321,34 +322,60 @@ bool WaitConnected()
   }
 
 //+------------------------------------------------------------------+
-bool SelectSymbol()
+bool SymbolBasicsReady()
   {
-   for(int i = 0; i < 30; i++)
-     {
-      if(SymbolSelect(g_symbol, true) && SymbolInfoInteger(g_symbol, SYMBOL_SELECT))
-        {
-         const long digits = SymbolInfoInteger(g_symbol, SYMBOL_DIGITS);
-         const double point = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
-         const double contract = SymbolInfoDouble(g_symbol, SYMBOL_TRADE_CONTRACT_SIZE);
-         if(digits >= 0 && digits <= 8 && point > 0.0 && contract > 0.0)
-            return true;
-        }
-      Sleep(1000);
-     }
-   return false;
+   if(!SymbolSelect(g_symbol, true))
+      return false;
+   if(SymbolInfoInteger(g_symbol, SYMBOL_SELECT) == 0)
+      return false;
+   const long digits = SymbolInfoInteger(g_symbol, SYMBOL_DIGITS);
+   const double point = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
+   return (digits >= 0 && digits <= 8 && point > 0.0);
   }
 
 //+------------------------------------------------------------------+
+// Сначала цифры и пункт, как в съёме тиков. Размер контракта догружается
+// вместе со спецификацией: ждём его, но всё равно снимаем, что есть.
+bool SelectSymbol()
+  {
+   bool ready = false;
+   for(int i = 0; i < 90 && !ready; i++)
+     {
+      ready = SymbolBasicsReady();
+      if(!ready)
+         Sleep(1000);
+     }
+   if(!ready)
+      return false;
+   for(int i = 0; i < 60; i++)
+     {
+      MqlTick wake;
+      SymbolInfoTick(g_symbol, wake);
+      const double contract = SymbolInfoDouble(g_symbol, SYMBOL_TRADE_CONTRACT_SIZE);
+      const double vol = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_MIN);
+      if(contract > 0.0 && vol > 0.0)
+         return true;
+      Sleep(1000);
+     }
+   return true;
+  }
+
+//+------------------------------------------------------------------+
+// FILE_BIN: текстовый режим превращает \n в \r\n, и число байт
+// перестаёт совпадать с StringLen. Ненулевая запись — успех.
 bool WriteSpec(const string body)
   {
+   if(StringLen(body) < 2)
+      return false;
    FolderCreate(OUT_DIR, FILE_COMMON);
    const string path = OUT_DIR + "\\" + g_symbol + ".json";
-   const int h = FileOpen(path, FILE_WRITE | FILE_TXT | FILE_ANSI | FILE_COMMON);
+   const int h = FileOpen(path, FILE_WRITE | FILE_BIN | FILE_ANSI | FILE_COMMON);
    if(h == INVALID_HANDLE)
       return false;
    const uint n = FileWriteString(h, body);
+   FileFlush(h);
    FileClose(h);
-   return (n == StringLen(body));
+   return (n > 0);
   }
 
 //+------------------------------------------------------------------+
@@ -377,13 +404,26 @@ void OnStart()
    g_symbol = "";
    if(!ReadJob())
      {
-      if(!InpUseInputs)
+      // Файл задания общий (FILE_COMMON). Если его не прочитали,
+      // берём символ графика из ini, а не пустой дамп.
+      string chart = "";
+      for(int i = 0; i < 30; i++)
+        {
+         chart = Symbol();
+         if(SafeSymbol(chart))
+            break;
+         Sleep(1000);
+        }
+      if(SafeSymbol(chart))
+         g_symbol = chart;
+      else if(InpUseInputs && SafeSymbol(InpSymbol))
+         g_symbol = InpSymbol;
+      else
         {
          g_symbol = "XAUUSDm";
          Finish("job_file_missing");
          return;
         }
-      g_symbol = InpSymbol;
      }
    if(!SafeSymbol(g_symbol))
      {
