@@ -6,8 +6,8 @@
                       рынку на открытии следующего бара, стоп 3 × ATR14 рабочего ТФ;
       bos-H1/H4     — пробой структуры по тренду (structure.py, len 5, только BOS, не CHoCH),
                       вход и стоп как у Alchemist;
-      fvg-M15/M30/H1 — лимитки FVG-робота (fvg_sim.run: L50 N20 K3 near, возраст ≥ 10 баров,
-                      стоп за разрывом 2–5 USD);
+      fvg-M15/M30/H1 — лимитки FVG-робота с его настройками (fvg_sim.run: L50 N20 K3 near,
+                      возраст ≥ 10 баров, разрыв ≥ 0.2 ATR, стоп за разрывом + 0.3 USD, 0.3–1.0 ATR);
   * фильтры (на минуте входа, по закрытым барам):
       d1   — off / struct (структура D1 len 5 по направлению сделки) / ema (закрытие D1 vs EMA50);
       sess — all / 07–20 (Лондон + Нью-Йорк) / 12–20 (Нью-Йорк), час входа по серверу (UTC+0);
@@ -153,7 +153,8 @@ def build_entries(P, df, names):
         kind, tf = name.split("-")
         rule = f"{TFMIN[tf]}min"
         if kind == "fvg":
-            out[name] = FS.run(P, TFMIN[tf], 50, 20, 3, "near", "tp10", False, minage=10, raw=True)
+            out[name] = FS.run(P, TFMIN[tf], 50, 20, 3, "near", "tp10", False, minSL=0.3, maxSL=1.0,
+                               mingap=0.2, minage=10, atr_mode=True, raw=True)
             continue
         F = S.Frame(S.resample(m1, rule), tf)
         if kind == "alch":
