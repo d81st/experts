@@ -8,10 +8,14 @@
 - вход по рынку, когда сессия открыта; если бар открылся в паузе,
   заявка ждёт первый тик после открытия и не затирается пустым сигналом;
 - стоп = max(StopAtrMult × ATR последнего закрытого H1, MinSLPoints × adjustedPoint);
-  ATR читается в момент входа, а не в момент сигнала;
+  ATR — iATR, простое среднее последних AtrPeriod истинных диапазонов,
+  бар shift 1, читается в момент входа, а не в момент сигнала;
 - лот от баланса (ACCOUNT_BALANCE в MQL), не от средств;
 - выход через ExitBars: iBarShift >= ExitBars, то есть бар входа и ещё
-  ExitBars−1 баров уже закрыты;
+  ExitBars−1 баров уже закрыты. PositionClose и проверка открытой
+  позиции — в одном OnTick: отправленный выход не занимает счёт,
+  и новый вход на этом же баре не получает busy. Задержка тестера
+  сдвигает цену исполнения, а не эту проверку;
 - фильтр D1 = структура, окно и склейка воскресенья как в MarketStructure.mqh;
 - MaxSpreadToSL, MaxRiskOvershoot, одна позиция.
 
@@ -27,7 +31,7 @@ from dataclasses import dataclass
 import bisect
 
 from ..bars import TF_MS, align_open
-from ..indicators import cci_at, ema_series, hma_last_two, sma_at, wilder_atr_last
+from ..indicators import cci_at, ema_series, hma_last_two, sma_at, sma_atr_last
 from ..structure import d1_trend
 from ..types import ConfigError, round_price
 from ..strategy import Context
@@ -214,7 +218,7 @@ class AlchemistStrategy:
 
     def _enter(self, ctx: Context, direction: int) -> None:
         h1 = ctx.bars(self.cfg.timeframe)
-        atr = wilder_atr_last(
+        atr = sma_atr_last(
             [b.high for b in h1], [b.low for b in h1], [b.close for b in h1], self.cfg.atr_period,
         )
         if atr is None or atr <= 0.0:

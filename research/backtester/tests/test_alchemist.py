@@ -109,6 +109,75 @@ def test_signal_uses_closed_bar_and_exits_after_n_bars():
     assert result.open_positions == []
 
 
+def test_time_exit_reenters_on_the_same_tick_while_close_is_latent():
+    """ExitBars и новый сигнал в одном OnTick. Задержка сдвигает обе цены.
+
+    MQL: PositionClose, затем PositionGuardHasOpen. В тестере закрытие
+    возвращается до проверки, поэтому busy не съедает повторный вход.
+    Цена и время обеих сделок — первый тик не раньше submit+latency.
+    """
+    base = msc(2026, 6, 1)
+    prices = (100, 100, 110, 110, 120, 120, 130)
+    ticks = []
+    for hour, bid in enumerate(prices):
+        ticks.append(tick(base + hour * H1, bid))
+        ticks.append(tick(base + hour * H1 + 200, bid))
+
+    spec = xauusd_exness()
+    strategy = AlchemistStrategy(
+        _simple_config(ma_period=2, exit_bars=2, atr_period=1),
+        digits=spec.digits,
+        adjusted_point=spec.adjusted_point,
+    )
+    engine = Engine(
+        EngineConfig(symbol=spec, deposit=10_000, latency_ms=200, close_at_end=False),
+        strategy,
+    )
+    result = engine.run(ticks)
+
+    assert len(result.trades) == 1
+    closed = result.trades[0]
+    assert closed.side == 1
+    assert closed.exit_reason == "time"
+    assert closed.entry_time_msc == base + 3 * H1 + 200
+    assert closed.exit_time_msc == base + 5 * H1 + 200
+    assert closed.exit_price == 120
+    assert len(result.open_positions) == 1
+    opened = result.open_positions[0]
+    assert opened["side"] == 1
+    assert opened["entry_time_msc"] == base + 5 * H1 + 200
+    assert opened["entry_price"] == 120.2
+    assert strategy.counts.get("busy", 0) == 0
+    assert strategy.counts.get("trades") == 2
+    assert strategy.counts.get("exit_bars") == 1
+
+
+def test_stop_distance_is_three_times_sma_atr_of_the_last_closed_bars():
+    """Дистанция стопа — 3 × среднее последних TR, не Уайлдер.
+
+    TR перед входом: 10, 0, 10. Среднее 20/3, стоп 20.
+    Уайлдер на той же цепочке (посев 7, потом 0, потом 10) даёт 6.444 и стоп 19.333.
+    """
+    base = msc(2026, 6, 2)
+    ticks = [tick(base + hour * H1, bid) for hour, bid in enumerate((100, 101, 111, 121, 121, 131, 131))]
+    spec = xauusd_exness()
+    strategy = AlchemistStrategy(
+        _simple_config(ma_period=2, exit_bars=50, atr_period=3, stop_atr_mult=3.0, min_sl_points=0),
+        digits=spec.digits,
+        adjusted_point=spec.adjusted_point,
+    )
+    engine = Engine(
+        EngineConfig(symbol=spec, deposit=10_000, latency_ms=0, close_at_end=False),
+        strategy,
+    )
+    result = engine.run(ticks)
+    assert len(result.open_positions) == 1
+    pos = result.open_positions[0]
+    assert pos["side"] == 1
+    assert pos["entry_price"] == pytest.approx(131.2)
+    assert pos["sl"] == pytest.approx(111.2)
+
+
 def test_pending_signal_waits_for_session_and_is_not_cleared_by_flat_bar():
     """Пауза дампа закрывает 22:00. Сигнал, закрывшийся в этот тик, ждёт 23:00."""
     day = msc(2026, 1, 15)

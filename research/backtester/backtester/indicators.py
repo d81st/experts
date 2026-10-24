@@ -9,8 +9,10 @@ EMA для фильтра H4 — как iMA(MODE_EMA) / pandas ewm(adjust=False)
 первое значение равно первому закрытию, дальше k = 2/(n+1).
 Это не то же самое, что MsEmaTrend (тот считается в structure.py по окну D1).
 
-ATR — Уайлдер: первое значение — среднее n истинных диапазонов, дальше
-(prev*(n-1) + TR) / n. Пока посева нет, функция возвращает None.
+ATR в iATR, как его отдал отчёт h1-x12-st, — простое среднее
+последних n истинных диапазонов, не рекурсия Уайлдера. Уайлдер оставлен
+отдельной функцией: на тех же барах он даёт другую дистанцию стопа.
+Пока диапазонов меньше n, обе функции возвращают None.
 """
 
 from __future__ import annotations
@@ -77,16 +79,38 @@ def cci_at(highs: list[float], lows: list[float], closes: list[float], index: in
     return (typical[-1] - mean) / (0.015 * mean_dev)
 
 
-def wilder_atr_last(highs: list[float], lows: list[float], closes: list[float], period: int) -> float | None:
-    if period < 1 or len(closes) < period:
-        return None
+def _true_ranges(highs: list[float], lows: list[float], closes: list[float]) -> list[float]:
+    """TR со второго бара: max(H-L, |H-prevClose|, |L-prevClose|)."""
     trs: list[float] = []
     prev_close = closes[0]
-    # Первый бар без предыдущего закрытия не даёт TR. Посев — следующие period TR.
     for i in range(1, len(closes)):
         tr = max(highs[i] - lows[i], abs(highs[i] - prev_close), abs(lows[i] - prev_close))
         prev_close = closes[i]
         trs.append(tr)
+    return trs
+
+
+def sma_atr_last(highs: list[float], lows: list[float], closes: list[float], period: int) -> float | None:
+    """iATR: среднее последних period истинных диапазонов.
+
+    Глубина истории до этого окна на значение не влияет. Дыра сессии
+    не достраивается пустым баром: предыдущее закрытие — последний
+    существующий бар, как у H1 без тиков в 21:00.
+    """
+    if period < 1 or len(closes) < period + 1:
+        return None
+    trs = _true_ranges(highs, lows, closes)
+    if len(trs) < period:
+        return None
+    window = trs[-period:]
+    return sum(window) / period
+
+
+def wilder_atr_last(highs: list[float], lows: list[float], closes: list[float], period: int) -> float | None:
+    if period < 1 or len(closes) < period:
+        return None
+    # Первый бар без предыдущего закрытия не даёт TR. Посев — следующие period TR.
+    trs = _true_ranges(highs, lows, closes)
     if len(trs) < period:
         return None
     atr = sum(trs[:period]) / period

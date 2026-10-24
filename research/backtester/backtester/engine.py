@@ -140,10 +140,20 @@ class _Context:
 
     @property
     def position(self) -> _View | None:
-        if not self._engine.positions:
-            return None
-        pos = self._engine.positions[0]
-        return _View(pos.id, pos.side, pos.volume, pos.entry_time_msc, pos.entry_price, pos.sl, pos.tp, pos.comment)
+        """Открытая позиция, как PositionsTotal после возврата из OrderSend.
+
+        Закрытие уже отправленное в этом тике сюда не попадает: в тестере
+        PositionClose возвращает управление, когда позиции уже нет, а цена
+        исполнения берётся с тика после задержки. Пока заявка на выход
+        ждёт этой цены, стратегия видит счёт без этой позиции и может
+        открыть следующую в том же OnTick.
+        """
+        closing = self._engine._closing_ids()
+        for pos in self._engine.positions:
+            if pos.id in closing:
+                continue
+            return _View(pos.id, pos.side, pos.volume, pos.entry_time_msc, pos.entry_price, pos.sl, pos.tp, pos.comment)
+        return None
 
     @property
     def balance(self) -> float:
@@ -340,6 +350,9 @@ class Engine:
         self.orders.append(order)
         if self.cfg.latency_ms == 0:
             self._fill_due(self.tick)
+
+    def _closing_ids(self) -> set[int]:
+        return {order.close_pos_id for order in self.orders if order.close_pos_id is not None}
 
     def _find(self, pos_id: int) -> _Position | None:
         for pos in self.positions:

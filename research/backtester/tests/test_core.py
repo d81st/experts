@@ -12,7 +12,7 @@ import pytest
 from backtester.bars import BarBuilder
 from backtester.costs import swap_charges
 from backtester.engine import Engine, EngineConfig
-from backtester.indicators import cci_at, hma_last_two, wilder_atr_last
+from backtester.indicators import cci_at, hma_last_two, sma_atr_last, wilder_atr_last
 from backtester.metrics import compute_metrics, longest_losing_streak
 from backtester.protective import limit_hit, resolve_protective
 from backtester.session import DAY_MS, ExnessGoldSession, weekday_mon0
@@ -440,6 +440,9 @@ def test_indicators_hand_values():
     atr = wilder_atr_last(highs, lows, closes, 3)
     # TR со второго бара: 3, 1, 4, потом 1. Посев (3+1+4)/3, дальше (8/3*2+1)/3
     assert atr == pytest.approx((8 / 3 * 2 + 1) / 3)
+    # iATR отчёта — среднее последних period TR, не эта рекурсия.
+    assert sma_atr_last(highs, lows, closes, 3) == pytest.approx((1 + 4 + 1) / 3)
+    assert sma_atr_last(highs, lows, closes, 3) != pytest.approx(atr)
 
 
 def test_losing_streak_and_bootstrap_contains_point():
