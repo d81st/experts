@@ -1,0 +1,359 @@
+name: Export ticks
+
+# Ручной съём реальных тиков Exness (CopyTicksRange, COPY_TICKS_ALL).
+# Логин — как в backtest.yml: тот же установщик, /portable и секреты MT5_*.
+# В артефакт попадают только gzip CSV, manifest, validation и export_info.
+# Журналы терминала, номер счёта, сервер и IP туда не кладутся и не печатаются.
+on:
+  workflow_dispatch:
+    inputs:
+      symbol:
+        description: 'Символ Exness MT5'
+        required: false
+        default: 'XAUUSDm'
+        type: string
+      from:
+        description: 'Первый день включительно, YYYY-MM-DD'
+        required: false
+        default: '2024-01-01'
+        type: string
+      to:
+        description: 'Последний день включительно, YYYY-MM-DD, или latest'
+        required: false
+        default: 'latest'
+        type: string
+      gap_minutes:
+        description: 'Порог гэпа в минутах (сверх суточной паузы и уикенда)'
+        required: false
+        default: '5'
+        type: string
+      publish_release:
+        description: 'Дополнительно прикрепить архив к GitHub Release (без логов)'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  export-ticks:
+    runs-on: windows-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Self-test the tick validator
+        shell: pwsh
+        run: python tools/validate_ticks.py --self-test
+
+      - name: Check inputs
+        shell: pwsh
+        env:
+          REQ_SYMBOL: ${{ github.event.inputs.symbol }}
+          REQ_FROM: ${{ github.event.inputs.from }}
+          REQ_TO: ${{ github.event.inputs.to }}
+          REQ_GAP: ${{ github.event.inputs.gap_minutes }}
+        run: |
+          if ($env:REQ_SYMBOL -notmatch '^[A-Za-z][A-Za-z0-9._]{0,31}$') { throw "Symbol must be 1-32 letters, digits, dot or underscore" }
+          if ($env:REQ_FROM -notmatch '^\d{4}-\d{2}-\d{2}$') { throw "from must be YYYY-MM-DD" }
+          $culture = [Globalization.CultureInfo]::InvariantCulture
+          $from = [datetime]::ParseExact($env:REQ_FROM, 'yyyy-MM-dd', $culture)
+          if ($env:REQ_TO -eq 'latest') {
+            $to = [datetime]::UtcNow.Date
+          } else {
+            if ($env:REQ_TO -notmatch '^\d{4}-\d{2}-\d{2}$') { throw "to must be YYYY-MM-DD or latest" }
+            $to = [datetime]::ParseExact($env:REQ_TO, 'yyyy-MM-dd', $culture)
+          }
+          if ($from -gt $to) { throw "from is after to" }
+          if ($from -lt [datetime]'2000-01-01' -or $to -gt [datetime]'2099-12-31') { throw "date is outside 2000-2099" }
+          if ($env:REQ_GAP -notmatch '^\d+$') { throw "gap_minutes must be an integer" }
+          $gap = [int]$env:REQ_GAP
+          if ($gap -lt 1 -or $gap -gt 240) { throw "gap_minutes must be from 1 to 240" }
+          $months = ($to.Year - $from.Year) * 12 + ($to.Month - $from.Month) + 1
+          if ($months -gt 3) {
+            Write-Host "::warning::Requested $months months. A full XAU tick month is tens to hundreds of MB gzipped. GitHub Free includes 500 MB of artifact storage, public artifacts expire within 90 days, and this job is killed at 6 hours. Dispatch a few months at a time, or set publish_release for a versioned Release."
+          }
+          $excl = $to.AddDays(1)
+          @(
+            "TICK_SYMBOL=$($env:REQ_SYMBOL)",
+            "TICK_FROM=$($from.ToString('yyyy-MM-dd'))",
+            "TICK_TO=$($to.ToString('yyyy-MM-dd'))",
+            "TICK_FROM_DOT=$($from.ToString('yyyy.MM.dd'))",
+            "TICK_TO_EXCL_DOT=$($excl.ToString('yyyy.MM.dd'))",
+            "TICK_GAP=$gap"
+          ) | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Export $($env:REQ_SYMBOL) $($from.ToString('yyyy-MM-dd')) .. $($to.ToString('yyyy-MM-dd')) ($months month(s)), gap ${gap} min"
+
+      - name: Install MetaTrader 5 (Exness build)
+        shell: pwsh
+        run: |
+          $url = "https://download.mql5.com/cdn/web/exness.technologies.ltd/mt5/exness5setup.exe"
+          $setup = "$env:RUNNER_TEMP\exness5setup.exe"
+          Invoke-WebRequest -Uri $url -OutFile $setup -ErrorAction Stop
+          $sig = Get-AuthenticodeSignature $setup
+          Write-Host "Installer signature: $($sig.Status) | $($sig.SignerCertificate.Subject)"
+          if ($sig.Status -ne 'Valid') { throw "Installer signature is not valid, refusing to run it" }
+          $used = $url
+          Write-Host "Installer: $used"
+          $p = Start-Process -FilePath $setup -ArgumentList "/auto" -PassThru
+          if (-not $p.WaitForExit(15 * 60 * 1000)) { Write-Host "Installer still running after 15 min, killing it" }
+          Get-Process terminal64, *setup* -ErrorAction SilentlyContinue | Stop-Process -Force
+          $term = Get-ChildItem "C:\Program Files" -Recurse -Depth 2 -Filter terminal64.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $term) { throw "terminal64.exe not found" }
+          Write-Host "Terminal folder: $($term.DirectoryName)"
+          "MT5_ROOT=$($term.DirectoryName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Compile tick export script
+        shell: pwsh
+        run: |
+          $scripts = "$env:MT5_ROOT\MQL5\Scripts"
+          New-Item -ItemType Directory -Force $scripts | Out-Null
+          Copy-Item "$env:GITHUB_WORKSPACE\tools\tick-export.mq5" "$scripts\tick-export.mq5" -Force
+          $log = "$env:RUNNER_TEMP\tick-export.compile.log"
+          Start-Process -FilePath "$env:MT5_ROOT\metaeditor64.exe" -ArgumentList "/compile:`"$scripts\tick-export.mq5`"", "/log:`"$log`"" -Wait
+          if (-not (Test-Path $log)) { throw "Compiler produced no log" }
+          $bytes = [System.IO.File]::ReadAllBytes($log)
+          if ($bytes.Length -ge 2 -and $bytes[0] -eq 255 -and $bytes[1] -eq 254) {
+            $text = [System.Text.Encoding]::Unicode.GetString($bytes)
+          } else {
+            $text = [System.Text.Encoding]::UTF8.GetString($bytes)
+          }
+          $result = ($text -split "`n" | Where-Object { $_ -match 'Result:' } | Select-Object -Last 1)
+          Write-Host "Compile: $($result.Trim())"
+          if ($text -notmatch '0 errors' -or -not (Test-Path "$scripts\tick-export.ex5")) {
+            Write-Host $text
+            throw "tick-export.mq5 failed to compile"
+          }
+
+      - name: First login (terminal update and symbol sync)
+        shell: pwsh
+        env:
+          MT5_LOGIN: ${{ secrets.MT5_LOGIN }}
+          MT5_PASSWORD: ${{ secrets.MT5_PASSWORD }}
+          MT5_SERVER: ${{ secrets.MT5_SERVER }}
+        run: |
+          foreach ($secret in @($env:MT5_LOGIN, $env:MT5_SERVER)) {
+            if ($secret -and $secret -match '^[A-Za-z0-9._@\-]+$') { Write-Host "::add-mask::$secret" }
+          }
+          if (-not $env:MT5_LOGIN -or -not $env:MT5_PASSWORD -or -not $env:MT5_SERVER) { throw "MT5_LOGIN / MT5_PASSWORD / MT5_SERVER secrets are not set" }
+          $ini = "$env:RUNNER_TEMP\login.ini"
+          try {
+            @("[Common]", "Login=$env:MT5_LOGIN", "Password=$env:MT5_PASSWORD", "Server=$env:MT5_SERVER",
+              "ProxyEnable=0", "NewsEnable=0") | Out-File $ini -Encoding Unicode
+            $t = Start-Process -FilePath "$env:MT5_ROOT\terminal64.exe" -ArgumentList "/portable", "/config:`"$ini`"" -PassThru
+            # Тот же первый запуск, что в backtest.yml: терминал обновляется и подтягивает символы.
+            # Журнал читается только ради факта логина и не печатается: в нём счёт и IP.
+            if (-not $t.WaitForExit(150 * 1000)) { }
+            $ok = $false
+            $logs = Get-ChildItem "$env:MT5_ROOT\logs" -Filter *.log -ErrorAction SilentlyContinue
+            foreach ($f in $logs) {
+              $bytes = [System.IO.File]::ReadAllBytes($f.FullName)
+              if ($bytes.Length -lt 2) { continue }
+              if ($bytes[0] -eq 255 -and $bytes[1] -eq 254) { $journal = [System.Text.Encoding]::Unicode.GetString($bytes) }
+              else { $journal = [System.Text.Encoding]::UTF8.GetString($bytes) }
+              if ($journal -match 'authorized on') { $ok = $true }
+            }
+            if (-not $ok) { throw "Could not log in to the trade server" }
+            Write-Host "Trade server accepted the login"
+          } finally {
+            Get-Process terminal64 -ErrorAction SilentlyContinue | Stop-Process -Force
+            if (Test-Path $ini) { Remove-Item $ini -Force }
+            Start-Sleep -Seconds 5
+          }
+
+      - name: Export ticks
+        shell: pwsh
+        env:
+          MT5_LOGIN: ${{ secrets.MT5_LOGIN }}
+          MT5_PASSWORD: ${{ secrets.MT5_PASSWORD }}
+          MT5_SERVER: ${{ secrets.MT5_SERVER }}
+        run: |
+          foreach ($secret in @($env:MT5_LOGIN, $env:MT5_SERVER)) {
+            if ($secret -and $secret -match '^[A-Za-z0-9._@\-]+$') { Write-Host "::add-mask::$secret" }
+          }
+          $common = "$env:APPDATA\MetaQuotes\Terminal\Common\Files"
+          New-Item -ItemType Directory -Force $common | Out-Null
+          $job = Join-Path $common "tick-export-job.txt"
+          @(
+            "symbol=$env:TICK_SYMBOL",
+            "from=$env:TICK_FROM_DOT",
+            "to_exclusive=$env:TICK_TO_EXCL_DOT"
+          ) | Out-File $job -Encoding ascii
+          $ini = "$env:RUNNER_TEMP\export.ini"
+          $info = Join-Path $common "tick-export\export_info.txt"
+          $progress = Join-Path $common "tick-export\progress.txt"
+          try {
+            @("[Common]", "Login=$env:MT5_LOGIN", "Password=$env:MT5_PASSWORD", "Server=$env:MT5_SERVER",
+              "ProxyEnable=0", "NewsEnable=0",
+              "[StartUp]",
+              "Script=tick-export",
+              "Symbol=$env:TICK_SYMBOL",
+              "Period=M1",
+              "ShutdownTerminal=1") | Out-File $ini -Encoding Unicode
+            $proc = Start-Process -FilePath "$env:MT5_ROOT\terminal64.exe" -ArgumentList "/portable", "/config:`"$ini`"" -PassThru
+            $deadline = (Get-Date).AddMinutes(270)
+            while ((Get-Date) -lt $deadline) {
+              if (Test-Path $info) {
+                Start-Sleep -Seconds 2
+                try {
+                  $head = (Get-Content $info -TotalCount 3 -ErrorAction Stop) -join "`n"
+                  if ($head -match 'complete=[01]') { break }
+                } catch { }
+              }
+              if ($proc.HasExited) {
+                Start-Sleep -Seconds 5
+                if ((Test-Path $info) -and ((Get-Content $info -TotalCount 3 -ErrorAction SilentlyContinue) -join "`n") -match 'complete=[01]') { break }
+                throw "Terminal exited before the export script wrote export_info.txt"
+              }
+              try {
+                if (Test-Path $progress) {
+                  $line = "$((Get-Content $progress -TotalCount 1 -ErrorAction Stop))".Trim()
+                  if ($line -match '^month=[A-Za-z0-9._-]+ rows=[0-9]+ cursor=[0-9]+$') { Write-Host $line }
+                }
+              } catch { }
+              Start-Sleep -Seconds 20
+            }
+            if (-not (Test-Path $info)) { throw "Tick export did not finish within the wait limit" }
+            Write-Host "Export script finished"
+          } finally {
+            if (Test-Path $ini) { Remove-Item $ini -Force }
+            Get-Process terminal64, metatester64 -ErrorAction SilentlyContinue | Stop-Process -Force
+          }
+          $raw = "$env:RUNNER_TEMP\tick-raw"
+          New-Item -ItemType Directory -Force $raw | Out-Null
+          Copy-Item "$common\tick-export\*.csv" $raw -ErrorAction SilentlyContinue
+          Copy-Item $info $raw -ErrorAction SilentlyContinue
+          Get-ChildItem $raw -File | Select-Object Name, Length | Format-Table | Out-String | Write-Host
+
+      - name: Validate, compress, write manifest
+        id: package
+        shell: pwsh
+        env:
+          MT5_LOGIN: ${{ secrets.MT5_LOGIN }}
+          MT5_PASSWORD: ${{ secrets.MT5_PASSWORD }}
+          MT5_SERVER: ${{ secrets.MT5_SERVER }}
+        run: |
+          foreach ($secret in @($env:MT5_LOGIN, $env:MT5_SERVER)) {
+            if ($secret -and $secret -match '^[A-Za-z0-9._@\-]+$') { Write-Host "::add-mask::$secret" }
+          }
+          $raw = "$env:RUNNER_TEMP\tick-raw"
+          $out = "$env:GITHUB_WORKSPACE\tick-artifact"
+          if (Test-Path $out) { Remove-Item $out -Recurse -Force }
+          python "$env:GITHUB_WORKSPACE\tools\validate_ticks.py" --raw $raw --out $out --symbol $env:TICK_SYMBOL --date-from $env:TICK_FROM --date-to $env:TICK_TO --gap-minutes $env:TICK_GAP
+          if ($LASTEXITCODE -ne 0) { throw "Tick packager failed" }
+          $allowed = @('.gz', '.json', '.txt')
+          $bad = @(Get-ChildItem $out -Recurse -File | Where-Object { $allowed -notcontains $_.Extension -or $_.Name -match '\.log$' })
+          if ($bad.Count -gt 0) { throw "Artifact directory has a file that is not a tick archive" }
+          $textFiles = Get-ChildItem $out -Recurse -File | Where-Object { $_.Extension -in '.json', '.txt' }
+          foreach ($file in $textFiles) {
+            $text = [System.IO.File]::ReadAllText($file.FullName)
+            if ($text -match '\b(?:\d{1,3}\.){3}\d{1,3}\b') { throw "Refusing to upload: text output contains a network address" }
+            if ($env:MT5_SERVER -and $text.Contains($env:MT5_SERVER)) { throw "Refusing to upload: text output contains the server secret" }
+            if ($env:MT5_LOGIN -match '^\d{5,}$' -and $text -match "(?<!\d)$([regex]::Escape($env:MT5_LOGIN))(?!\d)") {
+              throw "Refusing to upload: text output contains the account number"
+            }
+            if ($env:MT5_PASSWORD -and $env:MT5_PASSWORD.Length -ge 8 -and $env:MT5_PASSWORD -match '[A-Za-z]' -and $text.Contains($env:MT5_PASSWORD)) {
+              throw "Refusing to upload: text output contains the password"
+            }
+          }
+          $validation = Get-Content "$out\validation.json" -Raw | ConvertFrom-Json
+          $ok = 'false'
+          if ($validation.ok) { $ok = 'true' }
+          [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "ok=$ok`n")
+
+      - name: Upload tick archive
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ticks-${{ env.TICK_SYMBOL }}-${{ env.TICK_FROM }}-${{ env.TICK_TO }}
+          path: tick-artifact
+          retention-days: 90
+          compression-level: 1
+          if-no-files-found: error
+          include-hidden-files: false
+
+      - name: Job summary
+        if: always()
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:GITHUB_WORKSPACE "tick-artifact"
+          $lines = New-Object System.Collections.Generic.List[string]
+          $lines.Add("# Tick export $($env:TICK_SYMBOL)")
+          $lines.Add("")
+          $lines.Add("Range ``$($env:TICK_FROM)`` .. ``$($env:TICK_TO)``, gap threshold $($env:TICK_GAP) min.")
+          $lines.Add("")
+          if (-not $out -or -not (Test-Path "$out\validation.json")) {
+            $lines.Add("Validation report was not produced.")
+          } else {
+            $v = Get-Content "$out\validation.json" -Raw | ConvertFrom-Json
+            if ($v.ok) { $lines.Add("**Validation passed.**") } else { $lines.Add("**Validation failed.**") }
+            $lines.Add("")
+            if ($v.history_starts) { $lines.Add("First month with ticks: ``$($v.history_starts)``.") }
+            if ($v.terminal_build) { $lines.Add("Terminal build: $($v.terminal_build). Broker: $($v.broker_company).") }
+            $lines.Add("")
+            $lines.Add("| Month | Rows | First | Last | bid>ask | zero | identical | gaps |")
+            $lines.Add("|---|---:|---|---|---:|---:|---:|---:|")
+            foreach ($m in @($v.months)) {
+              $lines.Add("| $($m.month) | $($m.row_count) | $($m.first_timestamp) | $($m.last_timestamp) | $($m.bid_gt_ask) | $($m.nonpositive_price) | $($m.identical_rows) | $($m.gap_anomalies) |")
+            }
+            $lines.Add("")
+            $lines.Add("SHA-256 is of the gzip bytes:")
+            foreach ($m in @($v.months)) {
+              if ($m.sha256) { $lines.Add("- ``$($m.file)`` ``$($m.sha256)`` ($($m.bytes) bytes)") }
+            }
+            if (@($v.hard_failures).Count -gt 0) {
+              $lines.Add("")
+              $lines.Add("Hard failures:")
+              $shown = 0
+              foreach ($item in @($v.hard_failures)) {
+                $lines.Add("- $item")
+                $shown++
+                if ($shown -ge 30) { break }
+              }
+            }
+            if (@($v.warnings).Count -gt 0) {
+              $lines.Add("")
+              $lines.Add("Warnings:")
+              foreach ($item in @($v.warnings)) { $lines.Add("- $item") }
+            }
+            $gapShown = 0
+            foreach ($m in @($v.months)) {
+              foreach ($g in @($m.gap_examples)) {
+                if ($gapShown -eq 0) { $lines.Add(""); $lines.Add("Gap examples (server clock):") }
+                $lines.Add("- $($m.month) $($g.from) -> $($g.to) ($($g.minutes) min)")
+                $gapShown++
+                if ($gapShown -ge 15) { break }
+              }
+              if ($gapShown -ge 15) { break }
+            }
+          }
+          $lines.Add("")
+          $lines.Add("Storage: this run uploads a GitHub Actions artifact kept at most 90 days. GitHub Free includes 500 MB of artifact storage. A multi-year XAU tick archive does not fit there. ``publish_release`` attaches the same files (no terminal logs) to a Release tag ``tick-archive/<symbol>/<from>_<to>/r<run>``.")
+          [System.IO.File]::AppendAllText($env:GITHUB_STEP_SUMMARY, (($lines -join "`n") + "`n"))
+
+      - name: Publish GitHub Release
+        if: success() && steps.package.outputs.ok == 'true' && (inputs.publish_release == true || inputs.publish_release == 'true')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "tick-archive/{0}/{1}_{2}/r{3}" -f $env:TICK_SYMBOL, $env:TICK_FROM, $env:TICK_TO, $env:GITHUB_RUN_ID
+          $notes = "$env:RUNNER_TEMP\tick-release-notes.md"
+          @(
+            "Real ticks $env:TICK_SYMBOL $env:TICK_FROM .. $env:TICK_TO.",
+            "",
+            "Broker history is revised in place, so this tag is one export, not a permanent copy of that month.",
+            "Files are the gzip CSV, manifest.json and validation.json. Terminal logs are not included.",
+            "",
+            "Run: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+          ) | Out-File $notes -Encoding utf8
+          $files = @(Get-ChildItem (Join-Path $env:GITHUB_WORKSPACE "tick-artifact") -File | ForEach-Object { $_.FullName })
+          gh release create $tag --title "Ticks $env:TICK_SYMBOL $env:TICK_FROM .. $env:TICK_TO" --notes-file $notes @files
+
+      - name: Require a valid export
+        if: success()
+        shell: pwsh
+        run: |
+          if ('${{ steps.package.outputs.ok }}' -ne 'true') { throw "Tick validation failed. See the job summary. The artifact was still uploaded." }
