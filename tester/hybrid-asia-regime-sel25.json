@@ -14,7 +14,10 @@
   "leverage": 2000,
   "inputs": {
     "RiskPercent": 1.0,
-    "TradingTimeframe": 15
+    "TradingTimeframe": 15,
+    "RiskReward": 1.5,
+    "CloseHour": 20,
+    "MaxHoldHours": 0
   },
   "variants": [
     {
