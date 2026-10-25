@@ -17,7 +17,9 @@
     "EntryMode": 1,
     "StopMode": 0,
     "RiskReward": 1.5,
-    "TradingTimeframe": 15
+    "TradingTimeframe": 15,
+    "CloseHour": 20,
+    "MaxHoldHours": 0
   },
   "variants": [
     {
