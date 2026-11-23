@@ -8,6 +8,7 @@
 //|  + отступ; размер разрыва и границы стопа — в долях ATR. Тейк —  |
 //|  TakeProfitRR × стоп. Лимитка снимается через OrderExpiryBars    |
 //|  баров или когда разрыв выпал из выбора / закрыт насквозь.       |
+//|  Исполненная лимитка снимает разрыв сразу: повторно его не ставим.|
 //|  Переключатели (выключены): частичное закрытие, трейлинг,        |
 //|  фильтр новостей.                                                |
 //|  Модули: Levels/FvgGaps, Exits/PartialClose, Exits/Trailing,     |
@@ -88,7 +89,61 @@ PartialCloseState  g_part;
 datetime           g_news[];
 datetime           g_lastBar = 0;
 int                g_atr     = INVALID_HANDLE;
-int g_cntGaps = 0, g_cntPlaced = 0, g_cntTouched = 0, g_cntRisk = 0, g_cntNews = 0, g_cntOrphans = 0, g_cntAcct = 0;
+int g_cntGaps = 0, g_cntPlaced = 0, g_cntTouched = 0, g_cntFilled = 0, g_cntRisk = 0, g_cntNews = 0, g_cntOrphans = 0, g_cntAcct = 0;
+
+enum ENUM_LIMIT_FATE
+  {
+   LIMIT_WORKING = 0, // ещё стоит
+   LIMIT_FILLED  = 1, // исполнена — разрыв отработан
+   LIMIT_DEAD    = 2, // снята, отклонена, истекла — можно ставить снова
+   LIMIT_UNKNOWN = 3  // в пуле нет и в истории пока нет: не затираем тикет
+  };
+
+// Состояние лимитки. Частичное исполнение и запрос в пути — ещё рабочая заявка.
+ENUM_LIMIT_FATE LimitFate(const ulong ticket)
+  {
+   if(ticket == 0)
+      return LIMIT_DEAD;
+   if(OrderSelect(ticket))
+     {
+      switch((ENUM_ORDER_STATE)OrderGetInteger(ORDER_STATE))
+        {
+         case ORDER_STATE_FILLED:
+            return LIMIT_FILLED;
+         case ORDER_STATE_CANCELED:
+         case ORDER_STATE_REJECTED:
+         case ORDER_STATE_EXPIRED:
+            return LIMIT_DEAD;
+         default:
+            return LIMIT_WORKING;
+        }
+     }
+   if(!HistorySelect(0, TimeCurrent()) || !HistoryOrderSelect(ticket))
+      return LIMIT_UNKNOWN;
+   return ((ENUM_ORDER_STATE)HistoryOrderGetInteger(ORDER_STATE) == ORDER_STATE_FILLED)
+          ? LIMIT_FILLED : LIMIT_DEAD;
+  }
+
+// Исполненный разрыв убираем целиком. Иначе при более широком спреде на следующем баре
+// проверка касания его не узнаёт, тикет обнуляется, и тот же разрыв получает вторую лимитку.
+void ConsumeFilledGaps()
+  {
+   for(int i = ArraySize(g_gaps) - 1; i >= 0; i--)
+     {
+      if(g_gaps[i].ticket == 0)
+         continue;
+      const ENUM_LIMIT_FATE fate = LimitFate(g_gaps[i].ticket);
+      if(fate == LIMIT_FILLED)
+        {
+         g_cntFilled++;
+         PrintFormat("✅ Разрыв %s исполнен — повторной лимитки не будет",
+                     TimeToString(g_gaps[i].t, TIME_DATE | TIME_MINUTES));
+         FvgRemoveAt(g_gaps, i);
+        }
+      else if(fate == LIMIT_DEAD)
+         g_gaps[i].ticket = 0;
+     }
+  }
 
 // Снять лимитку; не удалось — её подберёт SweepOrphans (у разрыва тикет уже обнулён).
 void DeleteOrder(const ulong ticket)
@@ -109,6 +164,9 @@ void SweepOrphans()
       const ulong t = OrderGetTicket(i);
       if(t == 0 || OrderGetString(ORDER_SYMBOL) != _Symbol || OrderGetInteger(ORDER_MAGIC) != MagicNumber)
          continue;
+      const ENUM_ORDER_STATE st = (ENUM_ORDER_STATE)OrderGetInteger(ORDER_STATE);
+      if(st != ORDER_STATE_PLACED && st != ORDER_STATE_PARTIAL)
+         continue;   // исполненный ордер в пуле не снимаем и не считаем сиротой
       bool tracked = false;
       for(int k = 0; k < ArraySize(g_gaps) && !tracked; k++)
          tracked = (g_gaps[k].ticket == t);
@@ -127,11 +185,12 @@ void SweepOrphans()
 void ClearOrders()
   {
    for(int i = 0; i < ArraySize(g_gaps); i++)
-      if(g_gaps[i].ticket != 0)
-        {
-         DeleteOrder(g_gaps[i].ticket);
-         g_gaps[i].ticket = 0;
-        }
+     {
+      if(g_gaps[i].ticket == 0 || LimitFate(g_gaps[i].ticket) != LIMIT_WORKING)
+         continue;   // исполненную не затираем: её снимет ConsumeFilledGaps
+      DeleteOrder(g_gaps[i].ticket);
+      g_gaps[i].ticket = 0;
+     }
   }
 
 // Лимитка разрыва i. Возврат: 1 — лимитка стоит (или временный отказ — повторим), 0 — разрыв
@@ -232,9 +291,10 @@ int OnInit()
 
 void OnDeinit(const int reason)
   {
-   PrintFormat("📊 Разрывов найдено: %d | лимиток выставлено: %d | отработано касанием: %d | пропуск (риск мин. лота): %d | "
-               "без лимиток из-за новостей: %d баров | снято лимиток-сирот: %d | ожиданий из-за общего риска: %d",
-               g_cntGaps, g_cntPlaced, g_cntTouched, g_cntRisk, g_cntNews, g_cntOrphans, g_cntAcct);
+   PrintFormat("📊 Разрывов найдено: %d | лимиток выставлено: %d | отработано касанием: %d | исполнено (без повтора): %d | "
+               "пропуск (риск мин. лота): %d | без лимиток из-за новостей: %d баров | снято лимиток-сирот: %d | "
+               "ожиданий из-за общего риска: %d",
+               g_cntGaps, g_cntPlaced, g_cntTouched, g_cntFilled, g_cntRisk, g_cntNews, g_cntOrphans, g_cntAcct);
    if(!MQLInfoInteger(MQL_TESTER))
       ClearOrders();
    if(g_atr != INVALID_HANDLE)
@@ -251,6 +311,7 @@ void OnTick()
    TrailingManage(g_trade_adapter, g_broker, MagicNumber, g_trail_cfg);
    PartialCloseManage(trade, MagicNumber, g_part_cfg, g_part);
 
+   ConsumeFilledGaps();
    ENUM_POSITION_TYPE type;
    const bool hasPos = PositionGuardHasOpen(MagicNumber, type);
    if(OnePosition && hasPos)
@@ -289,14 +350,14 @@ void OnTick()
      {
       if(!g_gaps[i].selected || !canPlace)
         {
-         if(g_gaps[i].ticket != 0)
+         if(g_gaps[i].ticket != 0 && LimitFate(g_gaps[i].ticket) == LIMIT_WORKING)
            {
             DeleteOrder(g_gaps[i].ticket);
             g_gaps[i].ticket = 0;
            }
          continue;
         }
-      if(g_gaps[i].ticket != 0 && PositionGuardPendingExists(g_gaps[i].ticket))
+      if(g_gaps[i].ticket != 0 && LimitFate(g_gaps[i].ticket) != LIMIT_DEAD)
         {
          // стоящая лимитка: другой бот мог войти — общий риск проверяем на каждом баре
          double openPct, newPct;
