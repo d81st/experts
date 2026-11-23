@@ -165,6 +165,81 @@ jobs:
           Write-Host "compile failures: $($bad.Count)"
           cmd /c exit 0
 
+      - name: Download XAUUSDm ticks through 2026-10-15
+        shell: pwsh
+        env:
+          MT5_LOGIN: ${{ secrets.MT5_LOGIN }}
+          MT5_PASSWORD: ${{ secrets.MT5_PASSWORD }}
+          MT5_SERVER: ${{ secrets.MT5_SERVER }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          foreach ($secret in @($env:MT5_LOGIN, $env:MT5_SERVER)) {
+            if ($secret -and $secret -match '^[A-Za-z0-9._@\-]+$') { Write-Host "::add-mask::$secret" }
+          }
+          $scripts = "$env:MT5_ROOT\MQL5\Scripts"
+          New-Item -ItemType Directory -Force $scripts | Out-Null
+          Copy-Item "$env:GITHUB_WORKSPACE\tools\tick-warm.mq5" "$scripts\tick-warm.mq5" -Force
+          $log = "$env:RUNNER_TEMP\tick-warm.compile.log"
+          Start-Process -FilePath "$env:MT5_ROOT\metaeditor64.exe" -ArgumentList "/compile:`"$scripts\tick-warm.mq5`"", "/log:`"$log`"" -Wait
+          if (-not (Test-Path $log)) { throw "tick warm compiler produced no log" }
+          $bytes = [System.IO.File]::ReadAllBytes($log)
+          if ($bytes.Length -ge 2 -and $bytes[0] -eq 255 -and $bytes[1] -eq 254) {
+            $compileText = [System.Text.Encoding]::Unicode.GetString($bytes)
+          } else {
+            $compileText = [System.Text.Encoding]::UTF8.GetString($bytes)
+          }
+          $result = ($compileText -split "`n" | Where-Object { $_ -match 'Result:|Результат:' } | Select-Object -Last 1)
+          Write-Host "tick-warm: $("$result".Trim())"
+          if ("$result" -notmatch '(?<!\d)0 errors' -or -not (Test-Path "$scripts\tick-warm.ex5")) {
+            throw "tick warm script failed to compile"
+          }
+          $common = "$env:APPDATA\MetaQuotes\Terminal\Common\Files"
+          $info = Join-Path $common "tick-warm\warm_info.txt"
+          $progress = Join-Path $common "tick-warm\progress.txt"
+          if (Test-Path $info) { Remove-Item $info -Force }
+          $ini = "$env:RUNNER_TEMP\warm.ini"
+          try {
+            @("[Common]", "Login=$env:MT5_LOGIN", "Password=$env:MT5_PASSWORD", "Server=$env:MT5_SERVER",
+              "ProxyEnable=0", "NewsEnable=0",
+              "[StartUp]",
+              "Script=tick-warm",
+              "Symbol=XAUUSDm",
+              "Period=M1",
+              "ShutdownTerminal=1") | Out-File $ini -Encoding Unicode
+            $proc = Start-Process -FilePath "$env:MT5_ROOT\terminal64.exe" -ArgumentList "/portable", "/config:`"$ini`"" -PassThru
+            $deadline = (Get-Date).AddMinutes(120)
+            while ((Get-Date) -lt $deadline) {
+              if (Test-Path $info) {
+                Start-Sleep -Seconds 2
+                try {
+                  $head = (Get-Content $info -TotalCount 4 -ErrorAction Stop) -join "`n"
+                  if ($head -match 'complete=[01]') { break }
+                } catch { }
+              }
+              if ($proc.HasExited) {
+                Start-Sleep -Seconds 5
+                if ((Test-Path $info) -and ((Get-Content $info -TotalCount 4 -ErrorAction SilentlyContinue) -join "`n") -match 'complete=[01]') { break }
+                throw "Terminal exited before tick warm wrote warm_info.txt"
+              }
+              try {
+                if (Test-Path $progress) {
+                  $line = "$((Get-Content $progress -TotalCount 1 -ErrorAction Stop))".Trim()
+                  if ($line -match '^day=[0-9.]+ ticks=[0-9]+$') { Write-Host $line }
+                }
+              } catch { }
+              Start-Sleep -Seconds 20
+            }
+            if (-not (Test-Path $info)) { throw "Tick warm did not finish within the wait limit" }
+            $head = (Get-Content $info -TotalCount 4) -join "`n"
+            if ($head -notmatch 'complete=1') { throw "Tick warm did not complete" }
+            if ($head -notmatch 'ticks=([0-9]+)') { throw "Tick warm wrote no count" }
+            if ([int64]$Matches[1] -lt 1000000) { throw "Tick warm downloaded fewer than 1000000 ticks" }
+            Write-Host "Tick cache ready"
+          } finally {
+            if (Test-Path $ini) { Remove-Item $ini -Force }
+            Get-Process terminal64, metatester64 -ErrorAction SilentlyContinue | Stop-Process -Force
+          }
+
       - name: Run confirmation tests
         shell: pwsh
         env:
@@ -281,13 +356,11 @@ jobs:
             if ($parts[1] -notin @("compile", "no_report", "timeout", "holdout", "sanitize", "no_history")) { throw "failure reason is invalid" }
             $items += [ordered]@{ id = $parts[0]; reason = $parts[1] }
           }
-          if ($items.Count -eq 0) {
-            $json = "[]"
-          } else {
-            $json = ConvertTo-Json -InputObject @($items) -Depth 3
-            if ($items.Count -eq 1) { $json = "[$json]" }
-          }
-          [System.IO.File]::WriteAllText($failPath, $json.Trim() + "`n")
+          $lines = @()
+          foreach ($item in $items) { $lines += "$($item.id)|$($item.reason)" }
+          $payload = ($lines -join "`n")
+          $payload | python -c "import json,sys; rows=[{'id':a,'reason':b} for a,b in (line.split('|',1) for line in sys.stdin.read().splitlines() if line)]; json.dump(rows, open(r'$failPath','w',encoding='utf-8')); open(r'$failPath','a',encoding='utf-8').write('\n')"
+          if ($LASTEXITCODE -ne 0) { throw "could not write failures.json" }
           Write-Host "preset failures: $($failed.Count)"
           $global:LASTEXITCODE = 0
           cmd /c exit 0
