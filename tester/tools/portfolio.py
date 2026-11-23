@@ -93,7 +93,7 @@ def bot_trades(P, df, ctx):
             keep &= tab[:, 1] == side
         f = tab[:, 0].astype(int)
         keep &= (P.period[f] >= 0) & (P.t[f] < CUTOFF)
-        sel = C.one_position(f, tab[:, 4].astype(int), keep)
+        sel = C.one_position(f, tab[:, 4].astype(int), keep, tab[:, 5])
         t = tab[sel]
         out[name] = pd.DataFrame({"entry": P.t[t[:, 0].astype(int)], "exit": P.t[t[:, 4].astype(int)],
                                   "dir": t[:, 1].astype(int), "R": t[:, 3],
