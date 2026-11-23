@@ -1,4 +1,5 @@
 ; hybrid-alchemist v1.0, candidate long / ExitBars 24. Every input is listed.
+; expert: hybrid/hybrid-alchemist_v1.0
 ; UseRiskGuard stays false. RiskPercent stays 1.0. MaxAccountRiskPercent stays 0.
 TradingTimeframe=16385||16385||0||16385||N
 MaPeriod=200||200||1||200||N

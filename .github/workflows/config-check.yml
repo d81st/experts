@@ -1,0 +1,33 @@
+name: Config check
+
+# Параметры в конфигах тестера и пресетах должны существовать у советника и подходить по
+# типу: MT5 молча игнорирует неизвестный параметр, и прогон идёт с настройкой по умолчанию.
+# Быстрая проверка на Ubuntu, без терминала (tools/check_inputs.py).
+on:
+  push:
+    paths:
+      - 'tester/*.json'
+      - '**.mq5'
+      - '**.mqh'
+      - '**.set'
+      - 'tools/robot_audit_plan.json'
+      - 'tools/check_inputs.py'
+      - '.github/workflows/config-check.yml'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Self-test the checker
+        run: python3 tools/check_inputs.py --self-test
+
+      - name: Check inputs of configs and presets
+        run: python3 tools/check_inputs.py
