@@ -10,9 +10,10 @@
 //|  v1.1: подключаемый режим рынка (Context/MarketRegime, выключен  |
 //|  по умолчанию): только в тренде или во флэте — против пробоя     |
 //|  (стоп за экстремумом пробоя, тейк RR).                          |
-//|  По умолчанию (с 2026-10-25): тейк 5R, без закрытия в CloseHour, |
-//|  удержание до 120 ч (tester/results/constructor.md). Частичное   |
-//|  закрытие на N R со стопом остатка в безубыток — выключено.      |
+//|  По умолчанию: тейк 5R, без закрытия в CloseHour, удержание до   |
+//|  120 ч (tester/results/constructor.md), риск 1% с 2026-11-23.    |
+//|  Частичное закрытие на N R со стопом остатка в безубыток —       |
+//|  выключено.                                                      |
 //|  Модули: Levels/DayLevels, Context/MarketRegime, Core/*,         |
 //|  Exits/Trailing, Exits/PartialClose, Exits/TimeExit.             |
 //+------------------------------------------------------------------+
@@ -85,7 +86,7 @@ input double           RegimeThreshold = 0.30;  // ER ≥ порога — тр�
 
 input group "── Управление капиталом ──"
 input int    MagicNumber      = 71007;
-input double RiskPercent      = 3.0;
+input double RiskPercent      = 1.0;   // Риск на сделку, % баланса
 input double MaxRiskOvershoot = 1.5;
 input double MaxSpreadToSL    = 0.10;
 input double MaxSlippageToSL  = 0.10;
