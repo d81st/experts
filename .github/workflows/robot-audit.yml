@@ -1,13 +1,14 @@
 name: Robot audit
 
 # Честный прогон текущих пресетов на реальных тиках.
-# Пуш в grok запускает это только если изменился data/robot-audit-request.json
-# и в нём "run": true. Окно зашито: 2026.01.01–2026.10.15. Холдаут с 2026.10.16
-# не тестируется. Оптимизация выключена. Журнал терминала, счёт, логин, сервер
-# и IP не печатаются и не кладутся в артефакт.
+# Пуш в main или grok запускает это только если изменился data/robot-audit-request.json
+# и в нём "run": true. Поле ids, если оно есть, оставляет только названные пресеты.
+# Окно зашито: 2026.01.01–2026.10.15. Холдаут с 2026.10.16 не тестируется.
+# Оптимизация выключена. Журнал терминала, счёт, логин, сервер и IP не печатаются
+# и не кладутся в артефакт.
 on:
   push:
-    branches: [grok]
+    branches: [main, grok]
     paths:
       - 'data/robot-audit-request.json'
 
@@ -20,7 +21,7 @@ concurrency:
 
 jobs:
   gate:
-    if: github.ref == 'refs/heads/grok'
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/grok'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -128,7 +129,7 @@ jobs:
           if (-not $trade) { throw "Trade.mqh not found after login" }
           $mql5 = $trade.Directory.Parent.Parent.FullName
           Write-Host "MQL5 include root found"
-          $raw = python "$env:GITHUB_WORKSPACE\tools\robot_audit.py" --emit-batch "${{ matrix.batch }}"
+          $raw = python "$env:GITHUB_WORKSPACE\tools\robot_audit.py" --emit-batch "${{ matrix.batch }}" --request "$env:GITHUB_WORKSPACE\data\robot-audit-request.json"
           if ($LASTEXITCODE -ne 0) { throw "batch plan rejected" }
           $presets = @($raw | ConvertFrom-Json)
           $dst = "$env:MT5_ROOT\MQL5\Experts\experts"
@@ -184,7 +185,7 @@ jobs:
             if ($val -is [int] -or $val -is [long]) { return "$val" }
             throw "input value type is not allowed"
           }
-          $raw = python "$env:GITHUB_WORKSPACE\tools\robot_audit.py" --emit-batch "${{ matrix.batch }}"
+          $raw = python "$env:GITHUB_WORKSPACE\tools\robot_audit.py" --emit-batch "${{ matrix.batch }}" --request "$env:GITHUB_WORKSPACE\data\robot-audit-request.json"
           if ($LASTEXITCODE -ne 0) { throw "batch plan rejected" }
           $presets = @($raw | ConvertFrom-Json)
           $compileFailed = @()

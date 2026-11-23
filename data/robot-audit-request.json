@@ -1,5 +1,6 @@
 {
   "run": true,
-  "note": "confirm-2026-all-2",
-  "batches": ["a", "b", "c", "d", "e", "f"]
+  "note": "asia-tp5-hold120",
+  "batches": ["d"],
+  "ids": ["asia-tp5-hold120"]
 }

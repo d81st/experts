@@ -425,7 +425,8 @@ def load_plan(path):
 
 def check_request(path, plan):
     data = json.loads(Path(path).read_text(encoding="utf-8"))
-    if set(data) != {"run", "note", "batches"}:
+    keys = set(data)
+    if keys != {"run", "note", "batches"} and keys != {"run", "note", "batches", "ids"}:
         _fail("request has an unexpected field")
     if not isinstance(data["note"], str) or not NOTE_RE.fullmatch(data["note"]):
         _fail("request note is invalid")
@@ -442,13 +443,24 @@ def check_request(path, plan):
             _fail("batch is invalid")
     if len(set(batches)) != len(batches):
         _fail("batch is repeated")
+    if "ids" in data:
+        ids = data["ids"]
+        if not isinstance(ids, list) or not ids or len(set(ids)) != len(ids):
+            _fail("preset ids are invalid")
+        known = {preset["id"]: preset["batch"] for preset in plan["presets"]}
+        chosen = set(batches)
+        for item in ids:
+            if not isinstance(item, str) or item not in known or known[item] not in chosen:
+                _fail("preset id is outside the batches")
     return True, batches
 
 
-def emit_batch(plan, batch):
+def emit_batch(plan, batch, only_ids=None):
     rows = []
     for preset in plan["presets"]:
         if preset["batch"] != batch:
+            continue
+        if only_ids is not None and preset["id"] not in only_ids:
             continue
         rows.append({
             "id": preset["id"],
@@ -524,6 +536,15 @@ def self_test():
     )
     if not armed or batches != ["a", "b", "c", "d", "e", "f"]:
         raise AssertionError("request")
+    one, one_batches = check_request_text(
+        '{"run": true, "note": "asia-tp5", "batches": ["d"], "ids": ["asia-tp5-hold120"]}',
+        plan,
+    )
+    if not one or one_batches != ["d"]:
+        raise AssertionError("id filter")
+    emitted = emit_batch(plan, "d", {"asia-tp5-hold120"})
+    if [row["id"] for row in emitted] != ["asia-tp5-hold120"]:
+        raise AssertionError("emit filter")
     parked, _batches = check_request_text(
         '{"run": false, "note": "off", "batches": ["a"]}',
         plan,
@@ -608,7 +629,12 @@ def main(argv):
     if "--emit-batch" in argv:
         slot = argv.index("--emit-batch")
         plan = load_plan(plan_path)
-        print(json.dumps(emit_batch(plan, argv[slot + 1]), ensure_ascii=False))
+        only_ids = None
+        if "--request" in argv:
+            request = json.loads(Path(argv[argv.index("--request") + 1]).read_text(encoding="utf-8"))
+            if "ids" in request:
+                only_ids = set(request["ids"])
+        print(json.dumps(emit_batch(plan, argv[slot + 1], only_ids), ensure_ascii=False))
         return 0
     if "--sanitize" in argv:
         slot = argv.index("--sanitize")

@@ -157,6 +157,23 @@
       "note": "В hybrids.md это вариант, прошедший 2025, январь–май 2026 и июнь–октябрь 2026: стоп за серединой, RR 2, только тренд. От заводских входов отличается."
     },
     {
+      "id": "asia-tp5-hold120",
+      "batch": "d",
+      "expert": "hybrid/hybrid-asia-breakout_v1.1",
+      "preset": "tp5-hold120-risk1",
+      "role": "current",
+      "period": "M15",
+      "inputs": {
+        "RiskPercent": 1.0,
+        "RiskReward": 5.0,
+        "CloseHour": 0,
+        "MaxHoldHours": 120
+      },
+      "contaminated": true,
+      "optimized_on": "2024.01.01-2026.10.05",
+      "note": "Тейк 5R, удержание до 120 часов, риск 1%. Окно выбора уже включало 2026 до 2026.10.05."
+    },
+    {
       "id": "fvg-limit",
       "batch": "e",
       "expert": "hybrid/hybrid-fvg-limit_v1.0",
