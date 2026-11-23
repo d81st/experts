@@ -1,9 +1,11 @@
 name: Demo forward probe
 
 # Пуш в grok запускает это только если изменился data/demo-forward-probe-request.json
-# и в нём "run": true. Скрипт не торгует и не вешает советник. В лог и артефакт
-# попадают только режим счёта, валюта, флаг «около 10k» и кнопка автоторговли.
+# и в нём "run": true. С main тот же пробник запускается вручную (workflow_dispatch).
+# Скрипт не торгует и не вешает советник. В лог и артефакт попадают только режим
+# счёта, валюта, флаг «около 10k» и кнопка автоторговли.
 on:
+  workflow_dispatch:
   push:
     branches: [grok]
     paths:
@@ -18,7 +20,7 @@ concurrency:
 
 jobs:
   gate:
-    if: github.ref == 'refs/heads/grok'
+    if: github.ref == 'refs/heads/grok' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
