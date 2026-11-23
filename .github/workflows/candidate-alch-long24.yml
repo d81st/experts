@@ -1,0 +1,282 @@
+name: Candidate alchemist long24
+
+# Пуш в grok запускает это только если изменился data/candidate-alch-long24-request.json
+# и в нём "run": true. Один кандидат: hybrid-alchemist, TradeSide=1 (только покупки),
+# ExitBars=24. Остальные входы — из кода. Окно (a) 2026.01.01–2026.10.15, только
+# реальные тики. Окно (b) 2024.01.01–2025.12.31: реальные тики, а если отчёт их
+# не показывает — повтор на OHLC M1. Дата «по» не позже 2026.10.15.
+on:
+  push:
+    branches: [grok]
+    paths:
+      - 'data/candidate-alch-long24-request.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: candidate-alch-long24-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    if: github.ref == 'refs/heads/grok'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      run: ${{ steps.resolve.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Self-test the candidate tool
+        run: python3 tools/candidate_alch.py --self-test
+
+      - name: Resolve candidate request
+        id: resolve
+        run: python3 tools/candidate_alch.py --resolve-request data/candidate-alch-long24-request.json
+
+  test:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install MetaTrader 5 (Exness build)
+        shell: pwsh
+        run: |
+          $url = "https://download.mql5.com/cdn/web/exness.technologies.ltd/mt5/exness5setup.exe"
+          $setup = "$env:RUNNER_TEMP\exness5setup.exe"
+          Invoke-WebRequest -Uri $url -OutFile $setup -ErrorAction Stop
+          $sig = Get-AuthenticodeSignature $setup
+          Write-Host "Installer signature: $($sig.Status) | $($sig.SignerCertificate.Subject)"
+          if ($sig.Status -ne 'Valid') { throw "Installer signature is not valid, refusing to run it" }
+          $p = Start-Process -FilePath $setup -ArgumentList "/auto" -PassThru
+          if (-not $p.WaitForExit(15 * 60 * 1000)) { Write-Host "Installer still running after 15 min, killing it" }
+          Get-Process terminal64, *setup* -ErrorAction SilentlyContinue | Stop-Process -Force
+          $term = Get-ChildItem "C:\Program Files" -Recurse -Depth 2 -Filter terminal64.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $term) { throw "terminal64.exe not found" }
+          "MT5_ROOT=$($term.DirectoryName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: First login (terminal update and symbol sync)
+        shell: pwsh
+        env:
+          MT5_LOGIN: ${{ secrets.MT5_LOGIN }}
+          MT5_PASSWORD: ${{ secrets.MT5_PASSWORD }}
+          MT5_SERVER: ${{ secrets.MT5_SERVER }}
+        run: |
+          foreach ($secret in @($env:MT5_LOGIN, $env:MT5_SERVER)) {
+            if ($secret -and $secret -match '^[A-Za-z0-9._@\-]+$') { Write-Host "::add-mask::$secret" }
+          }
+          if (-not $env:MT5_LOGIN -or -not $env:MT5_PASSWORD -or -not $env:MT5_SERVER) { throw "MT5_LOGIN / MT5_PASSWORD / MT5_SERVER secrets are not set" }
+          $ini = "$env:RUNNER_TEMP\login.ini"
+          try {
+            @("[Common]", "Login=$env:MT5_LOGIN", "Password=$env:MT5_PASSWORD", "Server=$env:MT5_SERVER",
+              "ProxyEnable=0", "NewsEnable=0") | Out-File $ini -Encoding Unicode
+            $t = Start-Process -FilePath "$env:MT5_ROOT\terminal64.exe" -ArgumentList "/portable", "/config:`"$ini`"" -PassThru
+            if (-not $t.WaitForExit(150000)) { }
+          } finally {
+            Get-Process terminal64 -ErrorAction SilentlyContinue | Stop-Process -Force
+            if (Test-Path $ini) { Remove-Item $ini -Force }
+            Start-Sleep -Seconds 5
+          }
+          $ok = $false
+          $logs = Get-ChildItem "$env:MT5_ROOT\logs" -Filter *.log -ErrorAction SilentlyContinue
+          foreach ($f in $logs) {
+            $bytes = $null
+            for ($i = 0; $i -lt 5; $i++) {
+              try {
+                $bytes = [System.IO.File]::ReadAllBytes($f.FullName)
+                break
+              } catch {
+                Start-Sleep -Seconds 2
+              }
+            }
+            if (-not $bytes -or $bytes.Length -lt 2) { continue }
+            if ($bytes[0] -eq 255 -and $bytes[1] -eq 254) { $journal = [System.Text.Encoding]::Unicode.GetString($bytes) }
+            else { $journal = [System.Text.Encoding]::UTF8.GetString($bytes) }
+            if ($journal -match 'authorized on') { $ok = $true }
+            $journal = $null
+          }
+          if (-not $ok) { throw "Could not log in to the trade server" }
+          Write-Host "Trade server accepted the login"
+
+      - name: Compile the candidate
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          function Find-Trade {
+            Get-ChildItem $env:MT5_ROOT, "$env:APPDATA\MetaQuotes" -Recurse -Filter Trade.mqh -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match '\\Include\\Trade\\Trade\.mqh$' } |
+              Select-Object -First 1
+          }
+          $trade = Find-Trade
+          if (-not $trade) {
+            Write-Host "Standard library missing, opening the terminal once more"
+            $again = Start-Process -FilePath "$env:MT5_ROOT\terminal64.exe" -ArgumentList "/portable" -PassThru
+            if (-not $again.WaitForExit(90000)) { }
+            Get-Process terminal64 -ErrorAction SilentlyContinue | Stop-Process -Force
+            Start-Sleep -Seconds 3
+            $trade = Find-Trade
+          }
+          if (-not $trade) { throw "Trade.mqh not found after login" }
+          $mql5 = $trade.Directory.Parent.Parent.FullName
+          Write-Host "MQL5 include root found"
+          $dst = "$env:MT5_ROOT\MQL5\Experts\experts"
+          New-Item -ItemType Directory -Force $dst | Out-Null
+          Copy-Item "$env:GITHUB_WORKSPACE\Include" $dst -Recurse -Force
+          Copy-Item "$env:GITHUB_WORKSPACE\hybrid" $dst -Recurse -Force
+          $mq5 = Join-Path $dst "hybrid\hybrid-alchemist_v1.0.mq5"
+          $log = "$env:RUNNER_TEMP\alchemist.compile.log"
+          Start-Process -FilePath "$env:MT5_ROOT\metaeditor64.exe" -ArgumentList "/compile:`"$mq5`"", "/log:`"$log`"", "/inc:`"$mql5`"" -Wait
+          if (-not (Test-Path $log)) { throw "compiler produced no log" }
+          $bytes = [System.IO.File]::ReadAllBytes($log)
+          if ($bytes.Length -ge 2 -and $bytes[0] -eq 255 -and $bytes[1] -eq 254) {
+            $text = [System.Text.Encoding]::Unicode.GetString($bytes)
+          } else {
+            $text = [System.Text.Encoding]::UTF8.GetString($bytes)
+          }
+          $result = ($text -split "`n" | Where-Object { $_ -match 'Result:|Результат:' } | Select-Object -Last 1)
+          $resultLine = "$result".Trim()
+          Write-Host "alchemist: $resultLine"
+          $ex5 = Join-Path $dst "hybrid\hybrid-alchemist_v1.0.ex5"
+          if ($resultLine -notmatch '(?<!\d)0 errors' -or -not (Test-Path $ex5)) {
+            $errors = ($text -split "`n" | Where-Object { $_ -match 'error' } | Select-Object -First 20)
+            Write-Host ($errors -join "`n")
+            throw "candidate failed to compile"
+          }
+          cmd /c exit 0
+
+      - name: Run the two windows
+        shell: pwsh
+        env:
+          MT5_LOGIN: ${{ secrets.MT5_LOGIN }}
+          MT5_PASSWORD: ${{ secrets.MT5_PASSWORD }}
+          MT5_SERVER: ${{ secrets.MT5_SERVER }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          foreach ($secret in @($env:MT5_LOGIN, $env:MT5_SERVER)) {
+            if ($secret -and $secret -match '^[A-Za-z0-9._@\-]+$') { Write-Host "::add-mask::$secret" }
+          }
+          $raw = python "$env:GITHUB_WORKSPACE\tools\candidate_alch.py" --emit
+          if ($LASTEXITCODE -ne 0) { throw "candidate spec rejected" }
+          $spec = $raw | ConvertFrom-Json
+          if ("$($spec.expert)" -ne "hybrid/hybrid-alchemist_v1.0") { throw "expert guard" }
+          if ("$($spec.symbol)" -ne "XAUUSDm" -or "$($spec.period)" -ne "H1") { throw "symbol guard" }
+          if ([int]$spec.delay -ne 200 -or [int]$spec.deposit -ne 10000 -or "$($spec.currency)" -ne "USD" -or [int]$spec.leverage -ne 2000) { throw "money guard" }
+          $names = @($spec.inputs.PSObject.Properties.Name)
+          if ($names.Count -ne 2 -or ($names -notcontains "TradeSide") -or ($names -notcontains "ExitBars")) { throw "input guard" }
+          if ([int]$spec.inputs.TradeSide -ne 1 -or [int]$spec.inputs.ExitBars -ne 24) { throw "input value guard" }
+          $byId = @{}
+          foreach ($item in @($spec.windows)) { $byId["$($item.id)"] = $item }
+          if ("$($byId['window-a'].'from')" -ne "2026.01.01" -or "$($byId['window-a'].to)" -ne "2026.10.15") { throw "window a guard" }
+          if ("$($byId['window-b'].'from')" -ne "2024.01.01" -or "$($byId['window-b'].to)" -ne "2025.12.31") { throw "window b guard" }
+          $reports = "$env:MT5_ROOT\reports"
+          New-Item -ItemType Directory -Force $reports | Out-Null
+          $dest = "$env:GITHUB_WORKSPACE\candidate-alch-artifact"
+          New-Item -ItemType Directory -Force $dest | Out-Null
+          function Invoke-Window([string]$id, [string]$window, [string]$dateFrom, [string]$dateTo, [int]$model) {
+            if ($dateFrom -ge "2026.10.16" -or $dateTo -ge "2026.10.16") { throw "date reaches the holdout" }
+            if ($id -notmatch '^window-[ab]$') { throw "id guard" }
+            if ($model -ne 4 -and -not ($id -eq "window-b" -and $model -eq 1)) { throw "model guard" }
+            $result = "no_report"
+            foreach ($setRoot in @("$env:MT5_ROOT\MQL5\Profiles\Tester", "$env:MT5_ROOT\Tester")) {
+              if (Test-Path $setRoot) {
+                Get-ChildItem $setRoot -Filter *.set -Recurse -ErrorAction SilentlyContinue |
+                  ForEach-Object { Remove-Item $_.FullName -Force }
+              }
+            }
+            Remove-Item "$reports\$id.htm", "$reports\$id.xml" -ErrorAction SilentlyContinue
+            $ini = "$env:RUNNER_TEMP\tester-$id.ini"
+            try {
+              @(
+                "[Common]", "Login=$env:MT5_LOGIN", "Password=$env:MT5_PASSWORD", "Server=$env:MT5_SERVER",
+                "ProxyEnable=0", "NewsEnable=0",
+                "[Tester]",
+                "Expert=experts\hybrid\hybrid-alchemist_v1.0.ex5",
+                "Symbol=XAUUSDm",
+                "Period=H1",
+                "Model=$model",
+                "ExecutionMode=200",
+                "Optimization=0",
+                "FromDate=$dateFrom",
+                "ToDate=$dateTo",
+                "ForwardMode=0",
+                "Deposit=10000",
+                "Currency=USD",
+                "Leverage=1:2000",
+                "Visual=0",
+                "Report=reports\$id",
+                "ReplaceReport=1",
+                "ShutdownTerminal=1",
+                "[TesterInputs]",
+                "TradeSide=1||1||0||1||N",
+                "ExitBars=24||24||0||24||N"
+              ) | Out-File $ini -Encoding Unicode
+              Write-Host "=== $id hybrid-alchemist H1 $dateFrom $dateTo model $model delay 200 deposit 10000 TradeSide=1 ExitBars=24 ==="
+              $proc = Start-Process -FilePath "$env:MT5_ROOT\terminal64.exe" -ArgumentList "/portable", "/config:`"$ini`"" -PassThru
+              $finished = $proc.WaitForExit(80 * 60 * 1000)
+              if (-not $finished) {
+                $result = "timeout"
+              } else {
+                Start-Sleep -Seconds 3
+                $htm = Join-Path $reports "$id.htm"
+                if (-not (Test-Path $htm)) {
+                  $result = "no_report"
+                } else {
+                  $sanitizeArgs = @(
+                    "$env:GITHUB_WORKSPACE\tools\candidate_alch.py",
+                    "--sanitize", $htm, "--window", $window, "--model", "$model", "--out", $dest
+                  )
+                  $xml = Join-Path $reports "$id.xml"
+                  if (Test-Path $xml) { $sanitizeArgs += @("--xml", $xml) }
+                  python @sanitizeArgs | Out-Host
+                  $result = "$LASTEXITCODE"
+                }
+              }
+            } finally {
+              if (Test-Path $ini) { Remove-Item $ini -Force }
+              Get-Process terminal64, metatester64 -ErrorAction SilentlyContinue | Stop-Process -Force
+              Start-Sleep -Seconds 5
+            }
+            return $result
+          }
+          $codeA = Invoke-Window "window-a" "a" "2026.01.01" "2026.10.15" 4
+          if ($codeA -ne "0") { throw "window a failed: $codeA" }
+          $codeB = Invoke-Window "window-b" "b" "2024.01.01" "2025.12.31" 4
+          if ($codeB -eq "4" -or $codeB -eq "no_report") {
+            Write-Host "window b has no real-tick history, repeating on 1-minute OHLC"
+            Remove-Item "$dest\window-b.htm", "$dest\window-b.deals.csv", "$dest\window-b.summary.json", "$dest\window-b.xml" -ErrorAction SilentlyContinue
+            $codeB = Invoke-Window "window-b" "b" "2024.01.01" "2025.12.31" 1
+          }
+          if ($codeB -ne "0") { throw "window b failed: $codeB" }
+          $global:LASTEXITCODE = 0
+          cmd /c exit 0
+
+      - name: Scan candidate artifacts
+        shell: pwsh
+        env:
+          MT5_LOGIN: ${{ secrets.MT5_LOGIN }}
+          MT5_PASSWORD: ${{ secrets.MT5_PASSWORD }}
+          MT5_SERVER: ${{ secrets.MT5_SERVER }}
+        run: |
+          foreach ($secret in @($env:MT5_LOGIN, $env:MT5_SERVER)) {
+            if ($secret -and $secret -match '^[A-Za-z0-9._@\-]+$') { Write-Host "::add-mask::$secret" }
+          }
+          $dest = "$env:GITHUB_WORKSPACE\candidate-alch-artifact"
+          python "$env:GITHUB_WORKSPACE\tools\candidate_alch.py" --scan-dir $dest
+          if ($LASTEXITCODE -ne 0) {
+            Remove-Item $dest -Recurse -Force -ErrorAction SilentlyContinue
+            throw "candidate artifacts failed the secret scan"
+          }
+
+      - name: Upload candidate reports
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-alch-long24
+          path: candidate-alch-artifact/
+          retention-days: 90
+          if-no-files-found: error
+          include-hidden-files: false

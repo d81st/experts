@@ -5,12 +5,16 @@
 //|  DayLevels); в окне входа первая сделка дня по пробою коробки —  |
 //|  по касанию или по закрытию бара за ней; стоп — за противопо-    |
 //|  ложной границей или серединой коробки; тейк — RR от стопа;      |
-//|  незакрытая позиция закрывается в CloseHour.                     |
+//|  незакрытая позиция закрывается в CloseHour или через            |
+//|  MaxHoldHours часов.                                             |
 //|  v1.1: подключаемый режим рынка (Context/MarketRegime, выключен  |
 //|  по умолчанию): только в тренде или во флэте — против пробоя     |
 //|  (стоп за экстремумом пробоя, тейк RR).                          |
+//|  По умолчанию (с 2026-10-25): тейк 5R, без закрытия в CloseHour, |
+//|  удержание до 120 ч (tester/results/constructor.md). Частичное   |
+//|  закрытие на N R со стопом остатка в безубыток — выключено.      |
 //|  Модули: Levels/DayLevels, Context/MarketRegime, Core/*,         |
-//|  Exits/Trailing.                                                 |
+//|  Exits/Trailing, Exits/PartialClose, Exits/TimeExit.             |
 //+------------------------------------------------------------------+
 #property strict
 #property description "Hybrid Asia Breakout v1.1 | пробой диапазона Азии на открытии Лондона + режим рынка"
@@ -26,6 +30,8 @@
 #include "../Include/Core/TesterMetric.mqh"
 #include "../Include/Levels/DayLevels.mqh"
 #include "../Include/Context/MarketRegime.mqh"
+#include "../Include/Exits/PartialClose.mqh"
+#include "../Include/Exits/TimeExit.mqh"
 CTrade trade;
 ITradeAdapter *g_trade_adapter = NULL;
 TrailingConfig g_trail_cfg;
@@ -61,8 +67,15 @@ input group "── Стоп / тейк / выход ──"
 input ENUM_BREAKOUT_SL StopMode = BREAKOUT_SL_OPPOSITE;
 input double SLBufferPoints = 200;     // Стоп за границей/серединой коробки + отступ
 input double MinSLPoints    = 1000;    // Мин. стоп: более близкий расширяется до этого значения
-input double RiskReward     = 1.5;     // Тейк = RiskReward × стоп (0 = без тейка)
-input int    CloseHour      = 20;      // Закрыть позицию в этот час (0 = не закрывать)
+input double RiskReward     = 5;       // Тейк = RiskReward × стоп (0 = без тейка)
+input int    CloseHour      = 0;       // Закрыть позицию в этот час (0 = не закрывать)
+input int    MaxHoldHours   = 120;     // Закрыть позицию через N часов (0 = без предела)
+
+input group "── Частичное закрытие (по умолчанию выключено) ──"
+input bool   UsePartialClose  = false;
+input double PartialAtRR      = 2;    // При прибыли N × стоп
+input double PartialFraction  = 0.5;  // закрыть такую долю объёма
+input bool   PartialMoveToBE  = true; // и перенести стоп остатка в безубыток
 
 input group "── Режим рынка (по умолчанию выключен) ──"
 input ENUM_REGIME_MODE RegimeMode      = REGIME_OFF;  // Флэт: фильтр — день пропускаем, переключатель — против пробоя
@@ -88,6 +101,8 @@ input double                SyncTrailStepPoints   = 0.0;
 
 BrokerContext g_broker;
 MarketRegimeConfig g_regime;
+PartialCloseConfig g_part_cfg;
+PartialCloseState  g_part;
 int           g_cntRegimeSkip = 0, g_cntFade = 0;
 datetime      g_lastBar  = 0;
 datetime      g_boxDay   = 0;      // день, для которого построена коробка
@@ -229,11 +244,19 @@ int OnInit()
    g_regime.tf        = RegimeTimeframe;
    g_regime.period    = RegimePeriod;
    g_regime.threshold = RegimeThreshold;
+   g_part_cfg.enabled  = UsePartialClose;
+   g_part_cfg.atR      = PartialAtRR;
+   g_part_cfg.fraction = PartialFraction;
+   g_part_cfg.moveToBE = PartialMoveToBE;
 
    PrintFormat("✅ Hybrid Asia Breakout v1.1 | Magic:%d | Азия %d–%d | вход до %d:00 %s | стоп:%s | RR %.2f | закрытие %d:00",
                MagicNumber, AsiaStartHour, AsiaEndHour, EntryEndHour,
                EntryMode == BREAKOUT_TOUCH ? "по касанию" : "по закрытию " + EnumToString(TradingTimeframe),
                StopMode == BREAKOUT_SL_MID ? "середина" : "противоположная граница", RiskReward, CloseHour);
+   PrintFormat("   частичное закрытие: %s | предел удержания: %s",
+               UsePartialClose ? StringFormat("%.0f%% на %.1fR%s", PartialFraction * 100, PartialAtRR,
+                                              PartialMoveToBE ? " + безубыток" : "") : "выкл.",
+               MaxHoldHours > 0 ? StringFormat("%d ч", MaxHoldHours) : "нет");
    return INIT_SUCCEEDED;
   }
 
@@ -253,6 +276,8 @@ void OnDeinit(const int reason)
 void OnTick()
   {
    TrailingManage(g_trade_adapter, g_broker, MagicNumber, g_trail_cfg);
+   PartialCloseManage(trade, MagicNumber, g_part_cfg, g_part);
+   TimeExitManage(trade, MagicNumber, PERIOD_H1, MaxHoldHours);
 
    const datetime bar    = iTime(_Symbol, TradingTimeframe, 0);
    const bool     newBar = (bar != g_lastBar);
