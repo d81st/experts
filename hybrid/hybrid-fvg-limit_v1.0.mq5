@@ -120,7 +120,7 @@ ENUM_LIMIT_FATE LimitFate(const ulong ticket)
      }
    if(!HistorySelect(0, TimeCurrent()) || !HistoryOrderSelect(ticket))
       return LIMIT_UNKNOWN;
-   return ((ENUM_ORDER_STATE)HistoryOrderGetInteger(ORDER_STATE) == ORDER_STATE_FILLED)
+   return ((ENUM_ORDER_STATE)HistoryOrderGetInteger(ticket, ORDER_STATE) == ORDER_STATE_FILLED)
           ? LIMIT_FILLED : LIMIT_DEAD;
   }
 
