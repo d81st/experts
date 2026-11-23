@@ -165,20 +165,27 @@ def exit_trade(P, f, d, entry, sd, ex, cap=CAP_MIN, own=None):
 # ── входы ─────────────────────────────────────────────────────────────
 
 def market_entries(P, F, sig, mult=3.0):
-    """Сигналы (бар входа i, направление[, стоп USD]) → (минута, направление, цена, стоп USD).
-    Без стопа в сигнале — mult × ATR14 сигнального бара."""
+    """Сигналы (бар входа i, направление[, стоп USD[, группа[, цена стопа]]]) →
+    (минута, направление, цена, стоп USD, группа). Без стопа — mult × ATR14 сигнального бара.
+    Группа — номер дня для правила «одна сделка в день» (−1 — нет); цена стопа — уровень, от
+    которого стоп считается по фактической цене входа (как у бота), не ближе 1 USD."""
     atr = F.atr(14)
     out = []
     for x in sig:
         i, d = x[0], x[1]
-        sd = x[2] if len(x) > 2 else mult * atr[i - 1]
-        if i >= F.n or not np.isfinite(sd):
+        if i >= F.n:
             continue
         f = int(np.searchsorted(P.t, F.t[i].to_datetime64()))
         if f >= P.n:
             continue
         entry = P.o[f] + (SPREAD if d == 1 else 0.0)
-        out.append((f, d, entry, sd))
+        if len(x) > 4 and x[4] is not None:
+            sd = max(d * (entry - x[4]), 1.0)
+        else:
+            sd = x[2] if len(x) > 2 and x[2] is not None else mult * atr[i - 1]
+        if not np.isfinite(sd):
+            continue
+        out.append((f, d, entry, sd, x[3] if len(x) > 3 else -1))
     return out
 
 
@@ -247,23 +254,29 @@ def liq_range(F, D1, mode, mult=1.5):
 
 
 def asia_breakout(F, min_box=3.0, buf=0.2, sl_buf=0.2, end_hour=11):
-    """hybrid-asia-breakout v1.1 (BREAKOUT_CLOSE, BREAKOUT_SL_OPPOSITE): первая сделка дня."""
+    """hybrid-asia-breakout v1.1 (BREAKOUT_CLOSE, BREAKOUT_SL_OPPOSITE). Кандидаты — все бары окна,
+    закрывшиеся за коробкой, с группой = день: бот, пока его позиция открыта, сигналы не
+    проверяет и день не тратит, поэтому сделкой дня станет первый такой бар, когда позиция
+    закрыта (`one_position` с группами). Стоп — за противоположной границей + sl_buf от
+    фактической цены входа."""
     day = F.t.normalize()
     m = F.t.hour < 7
     a = F.df[m].groupby(day[m]).agg({"high": "max", "low": "min"}).reindex(day)
     hi, lo = a["high"].to_numpy(), a["low"].to_numpy()
-    hr = F.t.hour.to_numpy()
-    # бот проверяет бар на открытии следующего, пока час < end_hour: последний — 10:30–10:45
-    hr_close = (F.t + pd.Timedelta(minutes=15)).hour.to_numpy()
-    done, sig = None, []
+    # бот проверяет бар на открытии следующего, пока час < end_hour: окно — бары, начавшиеся
+    # с 07:00 до 10:30 включительно (минута суток 420 … end_hour·60 − 30)
+    tod = (F.t.hour * 60 + F.t.minute).to_numpy()
+    dnum = (day.to_numpy().astype("datetime64[D]").astype(np.int64))
+    sig = []
     for j in range(F.n - 1):
-        if not (hr[j] >= 7 and hr_close[j] < end_hour) or done == day[j] or not np.isfinite(hi[j]) \
-                or hi[j] - lo[j] < min_box:
+        if not (420 <= tod[j] <= end_hour * 60 - 30) or not np.isfinite(hi[j]) or hi[j] - lo[j] < min_box:
             continue
+        if F.t[j + 1] - F.t[j] != pd.Timedelta(minutes=15):
+            continue        # дыра в данных после сигнального бара: бот вошёл бы раньше, чем есть бар
         if F.c[j] > hi[j] + buf:
-            done = day[j]; sig.append((j + 1, 1, max(F.c[j] - lo[j] + sl_buf, 1.0)))
+            sig.append((j + 1, 1, None, int(dnum[j]), lo[j] - sl_buf))
         elif F.c[j] < lo[j] - buf:
-            done = day[j]; sig.append((j + 1, -1, max(hi[j] - F.c[j] + sl_buf, 1.0)))
+            sig.append((j + 1, -1, None, int(dnum[j]), hi[j] + sl_buf))
     return sig
 
 
@@ -399,11 +412,16 @@ def filter_mask(P, ctx, cand, d1f, sess, reg, news):
     return m
 
 
-def one_position(f, ie, keep):
-    out, busy = [], -1
+def one_position(f, ie, keep, group=None):
+    """Одна позиция за раз; с group — и не больше одной сделки на группу (день), причём
+    сигнал, пришедший при открытой позиции, группу не тратит."""
+    out, busy, used = [], -1, set()
     for i in np.flatnonzero(keep):
-        if f[i] > busy:
+        g = -1 if group is None else int(group[i])
+        if f[i] > busy and (g < 0 or g not in used):
             out.append(i); busy = ie[i]
+            if g >= 0:
+                used.add(g)
     return np.array(out, int)
 
 
@@ -456,10 +474,11 @@ def prepare(args):
 
 
 def outcomes_for(P, cands, ex, name):
-    """Все кандидаты одного входа с одним выходом: массивы f, d, sd, R, индекс выхода."""
+    """Все кандидаты одного входа с одним выходом: массивы f, d, sd, R, индекс выхода, группа."""
     cap, own = cap_of(name), OWN_FN.get(name)
-    rows = [(f, d, sd) + exit_trade(P, f, d, entry, sd, ex, cap, own) for f, d, entry, sd in cands]
-    return np.array(rows, float).reshape(-1, 5)
+    rows = [(c[0], c[1], c[3]) + exit_trade(P, c[0], c[1], c[2], c[3], ex, cap, own)
+            + (c[4] if len(c) > 4 else -1,) for c in cands]
+    return np.array(rows, float).reshape(-1, 6)
 
 
 def evaluate(P, ctx, mk, tab, name, holdout=False):
@@ -467,7 +486,7 @@ def evaluate(P, ctx, mk, tab, name, holdout=False):
     keep = filter_mask(P, ctx, tab, d1f, sess, reg, news)
     per = P.period[tab[:, 0].astype(int)]
     keep &= (per >= 0) & ((per <= NP) if holdout else (per < NP))
-    sel = one_position(tab[:, 0].astype(int), tab[:, 4].astype(int), keep)
+    sel = one_position(tab[:, 0].astype(int), tab[:, 4].astype(int), keep, tab[:, 5])
     t = tab[sel]; per = per[sel]
     ins = per < NP
     r = t[ins, 3]
