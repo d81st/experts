@@ -253,9 +253,12 @@ def asia_breakout(F, min_box=3.0, buf=0.2, sl_buf=0.2, end_hour=11):
     a = F.df[m].groupby(day[m]).agg({"high": "max", "low": "min"}).reindex(day)
     hi, lo = a["high"].to_numpy(), a["low"].to_numpy()
     hr = F.t.hour.to_numpy()
+    # бот проверяет бар на открытии следующего, пока час < end_hour: последний — 10:30–10:45
+    hr_close = (F.t + pd.Timedelta(minutes=15)).hour.to_numpy()
     done, sig = None, []
     for j in range(F.n - 1):
-        if not (7 <= hr[j] < end_hour) or done == day[j] or not np.isfinite(hi[j]) or hi[j] - lo[j] < min_box:
+        if not (hr[j] >= 7 and hr_close[j] < end_hour) or done == day[j] or not np.isfinite(hi[j]) \
+                or hi[j] - lo[j] < min_box:
             continue
         if F.c[j] > hi[j] + buf:
             done = day[j]; sig.append((j + 1, 1, max(F.c[j] - lo[j] + sl_buf, 1.0)))

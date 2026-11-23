@@ -84,13 +84,13 @@ def pullback_signals(frame, k=K_PIVOT):
 
 
 def evening_minutes(path):
-    """Минуты входа: 18:00 Нью-Йорка, пн–чт. Летом — 22:15 UTC, зимой — 23:00 UTC."""
-    index = pd.DatetimeIndex(path.t)
+    """Минуты входа: 18:00 Нью-Йорка, пн–чт. Летом — 22:15 UTC, зимой — 23:00 UTC.
+    День недели — по календарю Нью-Йорка: вечер понедельника — это понедельник 18:00 NY."""
     out = []
     for day in pd.date_range("2024-01-01", "2026-10-15", freq="D"):
         if day.day_of_week > 3:
             continue
-        slot = pd.Timestamp(day).tz_localize(UTC).tz_convert(NY).replace(hour=18, minute=0)
+        slot = pd.Timestamp(day.year, day.month, day.day, 18, 0, tz=NY)
         utc = slot.tz_convert(UTC).tz_localize(None)
         if utc.hour == 22:
             utc = utc.normalize() + pd.Timedelta(hours=22, minutes=15)
