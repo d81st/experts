@@ -1,0 +1,7 @@
+{
+  "run": true,
+  "tag": "data-ticks-XAUUSDm-2026-v1",
+  "target_branch": "grok",
+  "prerelease": true,
+  "note": "assemble-v1"
+}

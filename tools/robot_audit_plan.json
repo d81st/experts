@@ -1,0 +1,222 @@
+{
+  "symbol": "XAUUSDm",
+  "from": "2026.01.01",
+  "to": "2026.10.15",
+  "model": 4,
+  "delay": 200,
+  "deposit": 10000,
+  "currency": "USD",
+  "leverage": 2000,
+  "presets": [
+    {
+      "id": "liq-grab",
+      "batch": "a",
+      "expert": "archive/liq-grab_v2.1",
+      "preset": "code-defaults",
+      "role": "current",
+      "period": "M3",
+      "inputs": {},
+      "contaminated": true,
+      "optimized_on": "2026.07.06-2026.10.05",
+      "note": "D1 (сигнал по закрытой свече) включён после эталона 2026.07.06–2026.10.05. Варианты D2–D7 на этом окне в код не брали."
+    },
+    {
+      "id": "crt-bot",
+      "batch": "a",
+      "expert": "archive/crt-bot_v4.2",
+      "preset": "code-defaults",
+      "role": "current",
+      "period": "M1",
+      "inputs": {},
+      "contaminated": false,
+      "optimized_on": "",
+      "note": "Перебор 2026.01.05–2026.05.29 и проверка 2026.06.01–2026.10.05 в код не приняты. Эталон сравнения версий — 2026.07.06–2026.10.05, это не чистая вневыборка."
+    },
+    {
+      "id": "engulfing",
+      "batch": "a",
+      "expert": "archive/engulfing-bot_v2.1",
+      "preset": "code-defaults",
+      "role": "current",
+      "period": "M1",
+      "inputs": {},
+      "contaminated": false,
+      "optimized_on": "",
+      "note": "Как у crt-bot: подбор на 2026 в код не принят, заводские входы оставлены. Окно 2026.07.06–2026.10.05 уже было эталоном."
+    },
+    {
+      "id": "fibo-zones",
+      "batch": "b",
+      "expert": "archive/fibo-zones_v1.2",
+      "preset": "code-defaults",
+      "role": "current",
+      "period": "M5",
+      "inputs": {},
+      "contaminated": true,
+      "optimized_on": "2026.01.05-2026.05.29",
+      "note": "Зона 2.212 выключена в коде, потому что убыточна на подборе 2026.01.05–2026.05.29. Дальше были проверки до октября 2026."
+    },
+    {
+      "id": "fibo-day",
+      "batch": "b",
+      "expert": "hybrid/hybrid-fibo-day_v1.0",
+      "preset": "code-defaults",
+      "role": "current",
+      "period": "M5",
+      "inputs": {},
+      "contaminated": true,
+      "optimized_on": "2026.01.05-2026.05.29",
+      "note": "Зона 2.212 выключена по тому же подбору, что у fibo-zones. Текущий режим — лимитка от диапазона прошлого дня, не отдельный «победитель»."
+    },
+    {
+      "id": "fibo-pattern",
+      "batch": "b",
+      "expert": "hybrid/hybrid-fibo-pattern_v1.0",
+      "preset": "code-defaults",
+      "role": "current",
+      "period": "M15",
+      "inputs": {},
+      "contaminated": true,
+      "optimized_on": "2026.01.01-2026.10.05",
+      "note": "Сетка на январь–май и июнь–октябрь 2026 не дала варианта с устойчивым PF. В коде старт: M15 и поглощение; зона 2.212 выключена."
+    },
+    {
+      "id": "fibo-sweep",
+      "batch": "c",
+      "expert": "hybrid/hybrid-fibo-sweep_v1.0",
+      "preset": "code-defaults",
+      "role": "current",
+      "period": "M15",
+      "inputs": {},
+      "contaminated": false,
+      "optimized_on": "",
+      "note": "Сетка 2025 и 2026.01–05 не прошла и в код не переносилась. В коде старт: M15, зигзаг 3 ATR, возврат за дальний край."
+    },
+    {
+      "id": "imbalance-fibo",
+      "batch": "c",
+      "expert": "hybrid/hybrid-imbalance-fibo_v1.0",
+      "preset": "code-defaults",
+      "role": "current",
+      "period": "M15",
+      "inputs": {},
+      "contaminated": false,
+      "optimized_on": "",
+      "note": "Сетка 2025 и 2026.01–05, включая строгую свечу, в код не принята. В коде старт: M15, длина ≥ 1 ATR, гэп включён."
+    },
+    {
+      "id": "random-entry",
+      "batch": "c",
+      "expert": "archive/random-entry-bench",
+      "preset": "code-defaults",
+      "role": "benchmark",
+      "period": "M15",
+      "inputs": {},
+      "contaminated": false,
+      "optimized_on": "",
+      "note": "Эталон случайных входов (зерно 1, M15, выход через 8 баров). Под прибыль не подбирался."
+    },
+    {
+      "id": "alchemist",
+      "batch": "d",
+      "expert": "hybrid/hybrid-alchemist_v1.0",
+      "preset": "code-defaults",
+      "role": "current",
+      "period": "H1",
+      "inputs": {},
+      "contaminated": true,
+      "optimized_on": "2026.01.01-2026.10.05",
+      "note": "Текущие входы — H1, выход 12, стоп 3 ATR, фильтр структуры D1 (вариант h1-x12-st). Фильтр дня включён после сравнений, где уже был 2026 год до 2026.10.05. Кандидат H4×3 в код не переносили."
+    },
+    {
+      "id": "asia-breakout",
+      "batch": "d",
+      "expert": "hybrid/hybrid-asia-breakout_v1.1",
+      "preset": "code-defaults",
+      "role": "current",
+      "period": "M15",
+      "inputs": {},
+      "contaminated": true,
+      "optimized_on": "2026.01.01-2026.10.05",
+      "note": "Коробку и вход смотрели на 2026, ограничение по умолчанию снимали после этих прогонов. Режим рынка в этом пресете выключен."
+    },
+    {
+      "id": "asia-breakout-trend",
+      "batch": "d",
+      "expert": "hybrid/hybrid-asia-breakout_v1.1",
+      "preset": "m15-mid-rr2-trend",
+      "role": "recommended",
+      "period": "M15",
+      "inputs": {
+        "StopMode": 1,
+        "RiskReward": 2.0,
+        "RegimeMode": 1
+      },
+      "contaminated": true,
+      "optimized_on": "2025.01.01-2026.10.05",
+      "note": "В hybrids.md это вариант, прошедший 2025, январь–май 2026 и июнь–октябрь 2026: стоп за серединой, RR 2, только тренд. От заводских входов отличается."
+    },
+    {
+      "id": "fvg-limit",
+      "batch": "e",
+      "expert": "hybrid/hybrid-fvg-limit_v1.0",
+      "preset": "code-defaults",
+      "role": "current",
+      "period": "H1",
+      "inputs": {},
+      "contaminated": true,
+      "optimized_on": "2024.01.01-2026.05.31",
+      "note": "Текущие входы (H1, возраст ≥ 10, тейк 10R, стоп в долях ATR, одна позиция) выросли из сетки 2024–май 2026. Проверка июнь–октябрь 2026 идею не подтвердила, код оставлен этим вариантом."
+    },
+    {
+      "id": "nfp-straddle",
+      "batch": "e",
+      "expert": "hybrid/hybrid-nfp-straddle_v1.0",
+      "preset": "code-defaults",
+      "role": "current",
+      "period": "M1",
+      "inputs": {},
+      "contaminated": false,
+      "optimized_on": "",
+      "note": "Сетка ±1 и ±3 USD на 2025 и 2026 не прошла и победителем в код не бралась. В коде расстояние 1500 пунктов и стоп 3000."
+    },
+    {
+      "id": "trend-channel",
+      "batch": "f",
+      "expert": "hybrid/hybrid-trend-channel_v1.0",
+      "preset": "code-defaults",
+      "role": "current",
+      "period": "H4",
+      "inputs": {},
+      "contaminated": false,
+      "optimized_on": "",
+      "note": "В сетке был и стоп 2 ATR (это код), и 3 ATR. По умолчанию оставлен 2 ATR, не победитель. Окно 2026 при выборе 3 ATR уже смотрели."
+    },
+    {
+      "id": "trend-channel-atr3",
+      "batch": "f",
+      "expert": "hybrid/hybrid-trend-channel_v1.0",
+      "preset": "h4-20-10-atr3",
+      "role": "recommended",
+      "period": "H4",
+      "inputs": {
+        "StopAtrMult": 3.0
+      },
+      "contaminated": true,
+      "optimized_on": "2025.01.01-2026.10.05",
+      "note": "В hybrids.md это вариант, прошедший 2025, январь–май 2026 и июнь–октябрь 2026. Стоп 3 ATR выбран по этому окну. От завода отличается только множитель стопа."
+    },
+    {
+      "id": "crt-push",
+      "batch": "e",
+      "expert": "archive/crt-push_v8.1",
+      "preset": "code-defaults",
+      "role": "notifier",
+      "period": "H1",
+      "inputs": {},
+      "contaminated": false,
+      "optimized_on": "",
+      "note": "Нотификатор, заявок не ставит. Подбора в документации нет. Прогон нужен, чтобы инвентарь был полным."
+    }
+  ]
+}
