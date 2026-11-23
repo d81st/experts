@@ -13,8 +13,12 @@ MT5 молча игнорирует параметр, которого нет у
 дробное, строка, перечисление (значение должно быть одним из элементов enum, для
 ENUM_TIMEFRAMES — один из периодов MT5).
 
-Конфиг с ключом "retired" (строка с причиной) пропускается: это история прогонов советника,
-которого больше нет.
+Конфиг с ключом "retired" (строка с причиной) пропускается: это история прогонов, которые
+больше не запускаются.
+
+Холдаут (`docs/oos-protocol.md`): дата "to" конфига тестера не позже 2026.10.16 — тестер
+останавливается в 00:00 этой даты, то есть последний день прогона — 2026-10-15. Прогон по
+холдауту — только по предрегистрации, с ключом "holdout_prereg" (путь к файлу в docs/prereg/).
 
     python3 tools/check_inputs.py            # проверить всё, код возврата 1 при ошибках
     python3 tools/check_inputs.py --self-test
@@ -26,6 +30,7 @@ import os
 import re
 import sys
 
+HOLDOUT_TO = "2026.10.16"   # "to" позже — уже холдаут
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 INT_TYPES = {"int", "uint", "long", "ulong", "short", "ushort", "char", "uchar", "datetime", "color"}
@@ -190,13 +195,19 @@ def run_all():
         cfg = json.load(open(path, encoding="utf-8"))
         if cfg.get("retired"):
             continue
+        if str(cfg.get("to", "")) > HOLDOUT_TO and not cfg.get("holdout_prereg"):
+            errors.append(f"{rel}: дата \"to\" {cfg['to']} заходит в холдаут (позже {HOLDOUT_TO}) "
+                          "без \"holdout_prereg\"")
         items = [("", cfg.get("inputs"))]
         items += [(f" [{v.get('name', i)}]", v.get("inputs")) for i, v in enumerate(cfg.get("variants") or [])]
         errors += check_inputs(rel, cfg["expert"], items, cache)
         checked += 1
     plan = os.path.join(ROOT, "tools", "robot_audit_plan.json")
     if os.path.exists(plan):
-        for p in json.load(open(plan, encoding="utf-8")).get("presets", []):
+        pl = json.load(open(plan, encoding="utf-8"))
+        if str(pl.get("to", "")) > HOLDOUT_TO:
+            errors.append(f"tools/robot_audit_plan.json: дата \"to\" {pl['to']} заходит в холдаут")
+        for p in pl.get("presets", []):
             errors += check_inputs(f"tools/robot_audit_plan.json [{p['id']}]", p["expert"],
                                    [("", p.get("inputs"))], cache)
             checked += 1
