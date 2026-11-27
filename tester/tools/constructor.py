@@ -65,6 +65,7 @@ import screen as S  # noqa: E402
 from structure import structure  # noqa: E402
 
 SPREAD = 0.25
+MIN_STOP = 1.0                   # минимальный стоп от уровня, USD (золото); для других символов масштабируется
 CAP_MIN = 5 * 24 * 60            # предел удержания, минут
 RUNS = FS.RUNS
 NP = len(FS.PERIODS)             # периоды подбора; индекс NP — контроль
@@ -180,7 +181,7 @@ def market_entries(P, F, sig, mult=3.0):
             continue
         entry = P.o[f] + (SPREAD if d == 1 else 0.0)
         if len(x) > 4 and x[4] is not None:
-            sd = max(d * (entry - x[4]), 1.0)
+            sd = max(d * (entry - x[4]), MIN_STOP)
         else:
             sd = x[2] if len(x) > 2 and x[2] is not None else mult * atr[i - 1]
         if not np.isfinite(sd):
