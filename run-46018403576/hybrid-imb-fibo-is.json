@@ -1,0 +1,69 @@
+{
+  "expert": "hybrid/hybrid-imbalance-fibo_v1.0",
+  "symbols": [
+    "XAUUSDm",
+    "XAUUSD"
+  ],
+  "period": "M1",
+  "from": "2026.01.05",
+  "to": "2026.05.29",
+  "model": 4,
+  "delay": 200,
+  "deposit": 10000,
+  "currency": "USD",
+  "leverage": 2000,
+  "inputs": {
+    "RiskPercent": 1.0,
+    "ExtSide": 2
+  },
+  "variants": [
+    {
+      "name": "m3-life0",
+      "inputs": {
+        "TradingTimeframe": 3,
+        "MinSLPoints": 1000,
+        "ZoneLifeBars": 0
+      }
+    },
+    {
+      "name": "m3-life12",
+      "inputs": {
+        "TradingTimeframe": 3,
+        "MinSLPoints": 1000,
+        "ZoneLifeBars": 12
+      }
+    },
+    {
+      "name": "m5-life0",
+      "inputs": {
+        "TradingTimeframe": 5,
+        "MinSLPoints": 1500,
+        "ZoneLifeBars": 0
+      }
+    },
+    {
+      "name": "m5-life12",
+      "inputs": {
+        "TradingTimeframe": 5,
+        "MinSLPoints": 1500,
+        "ZoneLifeBars": 12
+      }
+    },
+    {
+      "name": "m15-life0",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "MinSLPoints": 2000,
+        "ZoneLifeBars": 0
+      }
+    },
+    {
+      "name": "m15-life12",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "MinSLPoints": 2000,
+        "ZoneLifeBars": 12
+      }
+    }
+  ]
+}

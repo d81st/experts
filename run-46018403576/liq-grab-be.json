@@ -1,0 +1,41 @@
+{
+  "expert": "archive/liq-grab_v2.1",
+  "symbols": [
+    "XAUUSDm",
+    "XAUUSD"
+  ],
+  "period": "M3",
+  "from": "2026.07.06",
+  "to": "2026.10.05",
+  "model": 4,
+  "delay": 200,
+  "deposit": 200,
+  "currency": "USD",
+  "leverage": 2000,
+  "inputs": {
+    "TrailingMode": 1,
+    "TrailingStartFactor": 0.5
+  },
+  "variants": [
+    {
+      "name": "be-off",
+      "inputs": {
+        "TrailingMode": 0
+      }
+    },
+    {
+      "name": "be-1.0",
+      "inputs": {
+        "TrailingMode": 1,
+        "TrailingStartFactor": 1.0
+      }
+    },
+    {
+      "name": "be-0.5",
+      "inputs": {
+        "TrailingMode": 1,
+        "TrailingStartFactor": 0.5
+      }
+    }
+  ]
+}

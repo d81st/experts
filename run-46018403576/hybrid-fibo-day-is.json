@@ -1,0 +1,69 @@
+{
+  "expert": "hybrid/hybrid-fibo-day_v1.0",
+  "symbols": [
+    "XAUUSDm",
+    "XAUUSD"
+  ],
+  "period": "M1",
+  "from": "2026.01.05",
+  "to": "2026.05.29",
+  "model": 4,
+  "delay": 200,
+  "deposit": 1000,
+  "currency": "USD",
+  "leverage": 2000,
+  "inputs": {
+    "RiskPercent": 3.0,
+    "RangeSource": 0,
+    "EntryMode": 0,
+    "TradingTimeframe": 5
+  },
+  "variants": [
+    {
+      "name": "prevday-limit",
+      "inputs": {
+        "RangeSource": 0,
+        "EntryMode": 0
+      }
+    },
+    {
+      "name": "prevday-confirm-m5",
+      "inputs": {
+        "RangeSource": 0,
+        "EntryMode": 1,
+        "TradingTimeframe": 5
+      }
+    },
+    {
+      "name": "prevday-confirm-m15",
+      "inputs": {
+        "RangeSource": 0,
+        "EntryMode": 1,
+        "TradingTimeframe": 15
+      }
+    },
+    {
+      "name": "asia-limit",
+      "inputs": {
+        "RangeSource": 1,
+        "EntryMode": 0
+      }
+    },
+    {
+      "name": "asia-confirm-m5",
+      "inputs": {
+        "RangeSource": 1,
+        "EntryMode": 1,
+        "TradingTimeframe": 5
+      }
+    },
+    {
+      "name": "asia-confirm-m15",
+      "inputs": {
+        "RangeSource": 1,
+        "EntryMode": 1,
+        "TradingTimeframe": 15
+      }
+    }
+  ]
+}

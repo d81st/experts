@@ -1,0 +1,214 @@
+{
+  "expert": "archive/crt-bot_v4.2",
+  "symbols": [
+    "XAUUSDm",
+    "XAUUSD"
+  ],
+  "period": "M1",
+  "from": "2026.01.05",
+  "to": "2026.05.29",
+  "model": 4,
+  "delay": 200,
+  "deposit": 10000,
+  "currency": "USD",
+  "leverage": 2000,
+  "inputs": {
+    "RiskPercent": 1.0,
+    "TrailingMode": 0,
+    "UseSessionFilter": false,
+    "CloseOnSessionExit": false,
+    "UseAsianSession": false,
+    "UseSelectedSessions": false,
+    "UseLondonSession": false,
+    "UseNewYorkSession": false,
+    "TradingTimeframe": 15,
+    "TrendTimeframe": 16385,
+    "EntryMode": 0,
+    "MinSLPoints": 2000,
+    "MaxSLPoints": 20000,
+    "UseTakeProfit": true,
+    "TimeExitBars": 0
+  },
+  "variants": [
+    {
+      "name": "sweep-t6",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "TrendTimeframe": 16385,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000,
+        "UseTakeProfit": false,
+        "TimeExitBars": 6,
+        "EntryMode": 0
+      }
+    },
+    {
+      "name": "sweep-t12",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "TrendTimeframe": 16385,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000,
+        "UseTakeProfit": false,
+        "TimeExitBars": 12,
+        "EntryMode": 0
+      }
+    },
+    {
+      "name": "sweep-t16",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "TrendTimeframe": 16385,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000,
+        "UseTakeProfit": false,
+        "TimeExitBars": 16,
+        "EntryMode": 0
+      }
+    },
+    {
+      "name": "market-t6",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "TrendTimeframe": 16385,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000,
+        "UseTakeProfit": false,
+        "TimeExitBars": 6,
+        "EntryMode": 1
+      }
+    },
+    {
+      "name": "market-t12",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "TrendTimeframe": 16385,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000,
+        "UseTakeProfit": false,
+        "TimeExitBars": 12,
+        "EntryMode": 1
+      }
+    },
+    {
+      "name": "market-t16",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "TrendTimeframe": 16385,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000,
+        "UseTakeProfit": false,
+        "TimeExitBars": 16,
+        "EntryMode": 1
+      }
+    },
+    {
+      "name": "sweep-t8-lon",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "TrendTimeframe": 16385,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000,
+        "UseTakeProfit": false,
+        "TimeExitBars": 8,
+        "EntryMode": 0,
+        "UseSelectedSessions": true,
+        "UseLondonSession": true,
+        "UseNewYorkSession": false
+      }
+    },
+    {
+      "name": "sweep-t8-ny",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "TrendTimeframe": 16385,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000,
+        "UseTakeProfit": false,
+        "TimeExitBars": 8,
+        "EntryMode": 0,
+        "UseSelectedSessions": true,
+        "UseLondonSession": false,
+        "UseNewYorkSession": true
+      }
+    },
+    {
+      "name": "sweep-t8-lonny",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "TrendTimeframe": 16385,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000,
+        "UseTakeProfit": false,
+        "TimeExitBars": 8,
+        "EntryMode": 0,
+        "UseSelectedSessions": true,
+        "UseLondonSession": true,
+        "UseNewYorkSession": true
+      }
+    },
+    {
+      "name": "sweep-t8-sl1500",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "TrendTimeframe": 16385,
+        "MinSLPoints": 1500,
+        "MaxSLPoints": 20000,
+        "UseTakeProfit": false,
+        "TimeExitBars": 8,
+        "EntryMode": 0
+      }
+    },
+    {
+      "name": "sweep-t8-sl3000",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "TrendTimeframe": 16385,
+        "MinSLPoints": 3000,
+        "MaxSLPoints": 20000,
+        "UseTakeProfit": false,
+        "TimeExitBars": 8,
+        "EntryMode": 0
+      }
+    },
+    {
+      "name": "sweep-t8-notrend",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "TrendTimeframe": 16385,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000,
+        "UseTakeProfit": false,
+        "TimeExitBars": 8,
+        "EntryMode": 0,
+        "UseTrendFilter": false
+      }
+    },
+    {
+      "name": "sweep-t8-wait1",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "TrendTimeframe": 16385,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000,
+        "UseTakeProfit": false,
+        "TimeExitBars": 8,
+        "EntryMode": 0,
+        "MaxBarsToWait": 1
+      }
+    },
+    {
+      "name": "sweep-t8-wait3",
+      "inputs": {
+        "TradingTimeframe": 15,
+        "TrendTimeframe": 16385,
+        "MinSLPoints": 2000,
+        "MaxSLPoints": 20000,
+        "UseTakeProfit": false,
+        "TimeExitBars": 8,
+        "EntryMode": 0,
+        "MaxBarsToWait": 3
+      }
+    }
+  ]
+}

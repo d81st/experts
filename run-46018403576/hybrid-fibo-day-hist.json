@@ -1,0 +1,53 @@
+{
+  "expert": "hybrid/hybrid-fibo-day_v1.0",
+  "symbols": [
+    "XAUUSDm",
+    "XAUUSD"
+  ],
+  "period": "M1",
+  "from": "2023.01.02",
+  "to": "2025.12.31",
+  "model": 1,
+  "delay": 200,
+  "deposit": 1000,
+  "currency": "USD",
+  "leverage": 2000,
+  "inputs": {
+    "RiskPercent": 3.0,
+    "RangeSource": 1,
+    "EntryMode": 0,
+    "UseZoneExt1": false,
+    "UseZoneExt2": false,
+    "UseZoneExt3": false
+  },
+  "variants": [
+    {
+      "name": "asia-retrace-limit",
+      "inputs": {
+        "EntryMode": 0
+      }
+    },
+    {
+      "name": "asia-retrace-confirm-m5",
+      "inputs": {
+        "EntryMode": 1,
+        "TradingTimeframe": 5
+      }
+    },
+    {
+      "name": "asia-retrace-confirm-m15",
+      "inputs": {
+        "EntryMode": 1,
+        "TradingTimeframe": 15
+      }
+    },
+    {
+      "name": "asia-all-limit",
+      "inputs": {
+        "EntryMode": 0,
+        "UseZoneExt1": true,
+        "UseZoneExt2": true
+      }
+    }
+  ]
+}
