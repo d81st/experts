@@ -1,0 +1,35 @@
+; hybrid-asia-breakout v1.1, candidate 5R / hold 120 h (pre-registration 2026-11-28, B). Every input is listed.
+; expert: hybrid/hybrid-asia-breakout_v1.1
+; RiskPercent stays 1.0. Chart: XAUUSDm M15.
+AsiaStartHour=0||0||0||0||N
+AsiaEndHour=7||7||0||7||N
+MinBoxPoints=3000||3000||0||3000||N
+MaxBoxPoints=0||0||0||0||N
+EntryMode=1||1||0||1||N
+TradingTimeframe=15||15||0||15||N
+EntryEndHour=11||11||0||11||N
+BreakBufferPoints=200||200||0||200||N
+StopMode=0||0||0||0||N
+SLBufferPoints=200||200||0||200||N
+MinSLPoints=1000||1000||0||1000||N
+RiskReward=5||5||0||5||N
+CloseHour=0||0||0||0||N
+MaxHoldHours=120||120||0||120||N
+UsePartialClose=false||false||0||false||N
+PartialAtRR=2||2||0||2||N
+PartialFraction=0.5||0.5||0||0.5||N
+PartialMoveToBE=true||true||0||true||N
+RegimeMode=0||0||0||0||N
+RegimeTimeframe=16385||16385||0||16385||N
+RegimePeriod=24||24||0||24||N
+RegimeThreshold=0.30||0.30||0||0.30||N
+MagicNumber=71007||71007||0||71007||N
+RiskPercent=1.0||1.0||0||1.0||N
+MaxRiskOvershoot=1.5||1.5||0||1.5||N
+MaxSpreadToSL=0.10||0.10||0||0.10||N
+MaxSlippageToSL=0.10||0.10||0||0.10||N
+CloseOnSlippage=false||false||0||false||N
+TrailingMode=0||0||0||0||N
+TrailingStartFactor=0.5||0.5||0||0.5||N
+BreakevenOffsetPoints=175||175||0||175||N
+SyncTrailStepPoints=0.0||0.0||0||0.0||N
