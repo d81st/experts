@@ -26,7 +26,7 @@ from .engine import Engine, EngineConfig
 from .metrics import compute_metrics, format_metrics_ru, period_metrics
 from .session import ExnessGoldSession
 from .strategies.alchemist import AlchemistConfig, AlchemistStrategy, h1_x12_st, long_x24
-from .strategies.asia_breakout import AsiaBreakoutStrategy, code_defaults, trend_filter
+from .strategies.asia_breakout import AsiaBreakoutStrategy, code_defaults, tp5_hold120, trend_filter
 from .symbol_spec import CapturedSymbol, load_xauusdm
 from .ticks import iter_ticks, load_hour_spread
 from .types import Bar, Trade
@@ -255,7 +255,7 @@ def _cmd_alchemist(args: argparse.Namespace) -> int:
     costs = _swap_from_args(args, captured)
     session = _session(args, captured)
     if args.cmd == "asia":
-        cfg = trend_filter() if args.preset == "trend" else code_defaults()
+        cfg = {"trend": trend_filter, "tp5": tp5_hold120}.get(args.preset, code_defaults)()
         strategy = AsiaBreakoutStrategy(cfg, digits=spec.digits, adjusted_point=spec.adjusted_point)
         sample_tf = cfg.timeframe
         overshoot = cfg.max_risk_overshoot
@@ -703,7 +703,7 @@ def main(argv: list[str] | None = None) -> None:
     run.set_defaults(func=_cmd_alchemist)
 
     asia = sub.add_parser("asia", help="прогон порта asia-breakout v1.1")
-    asia.add_argument("--preset", choices=("defaults", "trend"), default="defaults")
+    asia.add_argument("--preset", choices=("defaults", "trend", "tp5"), default="defaults")
     for action in run._actions:
         if action.dest in ("help", "preset"):
             continue

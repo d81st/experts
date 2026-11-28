@@ -12,6 +12,7 @@ from backtester.strategies.asia_breakout import (
     AsiaBreakoutStrategy,
     code_defaults,
     efficiency_ratio,
+    tp5_hold120,
     trend_filter,
 )
 from backtester.types import Tick, xauusd_exness
@@ -261,3 +262,27 @@ def test_switch_fade_stops_beyond_the_break_extreme():
     assert pos["entry_price"] == pytest.approx(80)
     assert pos["sl"] == pytest.approx(125.2)
     assert pos["comment"] == "ASIA_BO up fade"
+
+
+def test_tp5_preset_holds_up_to_120_hours_without_close_hour():
+    """Кандидат B предрегистрации: тейк 5R, CloseHour 0, позиция закрывается через 120 часов."""
+    cfg = tp5_hold120()
+    assert (cfg.risk_reward, cfg.close_hour, cfg.max_hold_hours, cfg.risk_percent) == (5.0, 0, 120, 1.0)
+    day = (2026, 6, 2)
+    ticks = [
+        tick(msc(*day, 0, 0), 100),
+        tick(msc(*day, 5, 0), 110),
+        tick(msc(*day, 6, 59, 59), 100),
+        tick(msc(*day, 7, 14), 115),
+        tick(msc(*day, 7, 15), 115),
+        tick(msc(*day, 20, 30), 116),            # 20:00 позицию не закрывает
+        tick(msc(2026, 6, 7, 7, 14), 116),       # 119:59 после входа — ещё держим
+        tick(msc(2026, 6, 7, 7, 15), 116),       # 120 часов — закрытие
+        tick(msc(2026, 6, 7, 7, 16), 116),
+    ]
+    result, strategy = _run(ticks, cfg)
+    assert strategy.counts.get("trades") == 1
+    assert strategy.counts.get("max_hold") == 1
+    assert len(result.trades) == 1
+    assert result.trades[0].exit_reason == "max_hold"
+    assert result.trades[0].exit_time_msc == msc(2026, 6, 7, 7, 15)

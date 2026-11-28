@@ -52,6 +52,7 @@ class AsiaBreakoutConfig:
     min_sl_points: float = 1000.0
     risk_reward: float = 1.5
     close_hour: int = 20
+    max_hold_hours: int = 0  # MaxHoldHours: закрыть позицию через N часов (0 — без предела)
     regime: str = "off"  # off | filter | switch
     regime_tf: str = "H1"
     regime_period: int = 24
@@ -81,13 +82,22 @@ class AsiaBreakoutConfig:
             raise ConfigError("EntryEndHour")
         if self.regime_period < 1:
             raise ConfigError("RegimePeriod")
+        if self.max_hold_hours < 0:
+            raise ConfigError("MaxHoldHours")
         if self.trailing != "off" or self.close_on_slippage:
             raise ConfigError("трейлинг и close-on-slippage в порте Азии не реализованы")
 
 
 def code_defaults() -> AsiaBreakoutConfig:
-    """Заводские input'ы v1.1: закрытие M15, стоп за противоположной границей, RR 1.5."""
+    """Input'ы v1.1 на момент аудита 2026-10-24: закрытие M15, стоп за противоположной границей,
+    RR 1.5, закрытие в 20:00, риск 3 %. С 2026-10-25 в коде бота другие значения — см. tp5_hold120."""
     return AsiaBreakoutConfig()
+
+
+def tp5_hold120() -> AsiaBreakoutConfig:
+    """Нынешние input'ы бота (с 2026-10-25, риск 1 % с 2026-11-23) и кандидат B предрегистрации
+    2026-11-28: тейк 5R, без закрытия в заданный час, удержание до 120 часов, риск 1 %."""
+    return AsiaBreakoutConfig(risk_reward=5.0, close_hour=0, max_hold_hours=120, risk_percent=1.0)
 
 
 def trend_filter() -> AsiaBreakoutConfig:
@@ -158,6 +168,15 @@ class AsiaBreakoutStrategy:
             return
         now = ctx.now_msc()
         hour = _hour(now)
+        # TimeExitManage(PERIOD_H1, MaxHoldHours): позиция старше N часов закрывается; в боте вызов
+        # идёт до проверки сессии, но закрытие при закрытом рынке не проходит и повторяется —
+        # здесь это первый тик открытой сессии. После закрытия OnTick идёт дальше.
+        pos = ctx.position
+        if pos is not None and self.cfg.max_hold_hours > 0 and getattr(self, "_hold_closed", None) != pos.id and \
+                now - pos.entry_time_msc >= self.cfg.max_hold_hours * 3_600_000:
+            ctx.close_position("max_hold")
+            self._hold_closed = pos.id          # заявка на закрытие одна, даже если исполнится с задержкой
+            self._bump("max_hold")
         if ctx.position is not None and self.cfg.close_hour > 0 and hour >= self.cfg.close_hour:
             ctx.close_position("time")
             self._bump("time_close")
